@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Terminal,
   Square,
@@ -10,49 +10,141 @@ import {
   Send,
 } from 'lucide-react';
 
-const mockPorts = [
-  { path: '/dev/ttyUSB0', name: 'Arduino Uno', baud: 9600 },
-  { path: '/dev/ttyACM0', name: 'STM32 Virtual COM', baud: 115200 },
-  { path: '/dev/ttyUSB1', name: 'ESP32-DevKit', baud: 115200 },
-];
+let readController: AbortController | null = null;
 
 export default function SerialPage() {
   const [connected, setConnected] = useState(false);
-  const [selectedPort, setSelectedPort] = useState('');
+  const [portName, setPortName] = useState('未连接');
   const [baudRate, setBaudRate] = useState('115200');
+  const [dataBits, setDataBits] = useState('8');
+  const [stopBits, setStopBits] = useState('1');
+  const [parity, setParity] = useState<'none' | 'even' | 'odd'>('none');
+  const [flowControl, setFlowControl] = useState<'none' | 'hardware'>('none');
   const [output, setOutput] = useState<string[]>([]);
   const [input, setInput] = useState('');
   const [showSettings, setShowSettings] = useState(false);
+  const [hexMode, setHexMode] = useState(false);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [lineEnding, setLineEnding] = useState('\n');
+  const [serialSupported, setSerialSupported] = useState(true);
   const outputRef = useRef<HTMLDivElement>(null);
+  const portRef = useRef<any>(null);
 
   useEffect(() => {
-    if (outputRef.current) {
+    if (typeof navigator === 'undefined' || !('serial' in navigator)) {
+      setSerialSupported(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (autoScroll && outputRef.current) {
       outputRef.current.scrollTop = outputRef.current.scrollHeight;
     }
-  }, [output]);
+  }, [output, autoScroll]);
 
-  const handleConnect = () => {
-    if (connected) {
-      setConnected(false);
-      setOutput((prev) => [...prev, `\n[ disconnected from ${selectedPort} ]`]);
-    } else {
-      setConnected(true);
-      setOutput((prev) => [
-        ...prev,
-        `[ connected to ${selectedPort} at ${baudRate} baud ]`,
-      ]);
+  const appendOutput = useCallback((text: string) => {
+    setOutput((prev) => [...prev, text]);
+  }, []);
+
+  const readLoop = useCallback(async (port: any) => {
+    if (!port.readable) return;
+    readController = new AbortController();
+    const reader = port.readable.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (hexMode) {
+          const hex = Array.from(value)
+            .map((b) => (b as number).toString(16).padStart(2, '0').toUpperCase())
+            .join(' ');
+          appendOutput(hex);
+        } else {
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split(/\r?\n/);
+          buffer = lines.pop() || '';
+          lines.forEach((line) => {
+            if (line.length > 0) appendOutput(line);
+          });
+        }
+      }
+    } catch (e: any) {
+      if (e.name !== 'AbortError') {
+        appendOutput(`[error] ${e.message}`);
+      }
+    } finally {
+      reader.releaseLock();
     }
-  };
+  }, [hexMode, appendOutput]);
 
-  const handleSend = () => {
-    if (!input.trim() || !connected) return;
-    setOutput((prev) => [...prev, `> ${input}`]);
+  const handleDisconnect = useCallback(async () => {
+    if (readController) {
+      readController.abort();
+      readController = null;
+    }
+    if (portRef.current) {
+      try {
+        await portRef.current.close();
+      } catch {}
+      portRef.current = null;
+    }
+    setConnected(false);
+    setPortName('未连接');
+  }, []);
+
+  const handleConnect = useCallback(async () => {
+    if (connected) {
+      await handleDisconnect();
+      return;
+    }
+    try {
+      const port = await (navigator as any).serial.requestPort();
+      await port.open({
+        baudRate: parseInt(baudRate),
+        dataBits: parseInt(dataBits),
+        stopBits: parseInt(stopBits),
+        parity,
+        flowControl,
+      });
+      portRef.current = port;
+      setConnected(true);
+      setPortName(port.getInfo().productName || 'Serial Port');
+      appendOutput(`\n[ connected at ${baudRate} baud | ${dataBits}${parity.toUpperCase()[0]}${stopBits} | flow:${flowControl} ]`);
+      readLoop(port);
+    } catch (e: any) {
+      appendOutput(`[error] ${e.message}`);
+    }
+  }, [connected, baudRate, dataBits, stopBits, parity, flowControl, handleDisconnect, appendOutput, readLoop]);
+
+  const handleSend = useCallback(() => {
+    if (!input.trim() || !connected || !portRef.current?.writable) return;
+    const encoder = new TextEncoder();
+    let data: Uint8Array;
+    if (hexMode) {
+      const hexStr = input.replace(/\s+/g, '');
+      const bytes = hexStr.match(/.{1,2}/g);
+      if (bytes) {
+        data = new Uint8Array(bytes.map((b) => parseInt(b, 16)));
+      } else {
+        return;
+      }
+    } else {
+      data = encoder.encode(input + lineEnding);
+    }
+    const writer = portRef.current.writable.getWriter();
+    writer.write(data).then(() => writer.releaseLock());
+    appendOutput(`> ${input}`);
     setInput('');
-    // Simulate response
-    setTimeout(() => {
-      setOutput((prev) => [...prev, `[echo] ${input}`]);
-    }, 200);
-  };
+  }, [input, connected, hexMode, lineEnding, appendOutput]);
+
+  useEffect(() => {
+    return () => {
+      if (readController) readController.abort();
+      if (portRef.current) portRef.current.close().catch(() => {});
+    };
+  }, []);
 
   const handleClear = () => setOutput([]);
   const handleSave = () => {
@@ -65,6 +157,30 @@ export default function SerialPage() {
     URL.revokeObjectURL(url);
   };
 
+  if (!serialSupported) {
+    return (
+      <div className="h-full overflow-y-auto scrollbar-thin p-6">
+        <div className="max-w-5xl mx-auto">
+          <div className="mb-6">
+            <h1 className="text-3xl font-bold mb-2 flex items-center gap-3">
+              <Terminal size={28} className="text-blue-400" />
+              串口调试器
+            </h1>
+            <p className="text-gray-400">实时串口通信与数据监控</p>
+          </div>
+          <div className="bg-[#161b22] border border-yellow-500/30 rounded-xl p-8 text-center">
+            <WifiOff size={48} className="mx-auto mb-4 text-yellow-400 opacity-60" />
+            <h2 className="text-xl font-semibold mb-2 text-yellow-300">浏览器不支持 Web Serial API</h2>
+            <p className="text-gray-400 mb-4">
+              Web Serial API 目前仅在 Chrome、Edge 等基于 Chromium 的浏览器中支持。
+              请切换浏览器或使用 Chrome/Edge 访问。
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="h-full overflow-y-auto scrollbar-thin p-6">
       <div className="max-w-5xl mx-auto">
@@ -73,26 +189,17 @@ export default function SerialPage() {
             <Terminal size={28} className="text-blue-400" />
             串口调试器
           </h1>
-          <p className="text-gray-400">实时串口通信与数据监控</p>
+          <p className="text-gray-400">实时串口通信与数据监控 (Web Serial API)</p>
         </div>
 
         {/* Connection Settings */}
         <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-5 mb-4">
           <div className="flex flex-wrap items-end gap-4">
             <div>
-              <label className="text-xs text-gray-500 mb-1 block">端口</label>
-              <select
-                value={selectedPort}
-                onChange={(e) => setSelectedPort(e.target.value)}
-                disabled={connected}
-                className="bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white
-                  focus:outline-none focus:border-blue-500 disabled:opacity-50 cursor-pointer"
-              >
-                <option value="">选择端口</option>
-                {mockPorts.map((p) => (
-                  <option key={p.path} value={p.path}>{p.name} ({p.path})</option>
-                ))}
-              </select>
+              <label className="text-xs text-gray-500 mb-1 block">端口状态</label>
+              <div className="bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-gray-300 min-w-[120px]">
+                {portName}
+              </div>
             </div>
             <div>
               <label className="text-xs text-gray-500 mb-1 block">波特率</label>
@@ -103,7 +210,7 @@ export default function SerialPage() {
                 className="bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white
                   focus:outline-none focus:border-blue-500 disabled:opacity-50 cursor-pointer"
               >
-                {[9600, 19200, 38400, 57600, 115200].map((b) => (
+                {[1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600].map((b) => (
                   <option key={b} value={b}>{b}</option>
                 ))}
               </select>
@@ -116,7 +223,7 @@ export default function SerialPage() {
                   : 'bg-green-500/10 text-green-400 hover:bg-green-500/20 border border-green-500/30'
                 }`}
             >
-              {connected ? <><Square size={14} fill="currentColor" /> 断开</> : <><Wifi size={14} /> 连接</>}
+              {connected ? <><Square size={14} fill="currentColor" /> 断开</> : <><Wifi size={14} /> 选择端口并连接</>}
             </button>
             <button
               onClick={() => setShowSettings(!showSettings)}
@@ -127,34 +234,67 @@ export default function SerialPage() {
           </div>
 
           {showSettings && (
-            <div className="mt-4 pt-4 border-t border-[#30363d] grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="mt-4 pt-4 border-t border-[#30363d] grid grid-cols-2 sm:grid-cols-5 gap-3">
               <div>
                 <label className="text-xs text-gray-500 mb-1 block">数据位</label>
-                <select className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-1.5 text-sm text-white cursor-pointer">
-                  <option>8</option>
-                  <option>7</option>
+                <select
+                  value={dataBits}
+                  onChange={(e) => setDataBits(e.target.value)}
+                  disabled={connected}
+                  className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-1.5 text-sm text-white cursor-pointer disabled:opacity-50"
+                >
+                  <option value="7">7</option>
+                  <option value="8">8</option>
                 </select>
               </div>
               <div>
                 <label className="text-xs text-gray-500 mb-1 block">停止位</label>
-                <select className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-1.5 text-sm text-white cursor-pointer">
-                  <option>1</option>
-                  <option>2</option>
+                <select
+                  value={stopBits}
+                  onChange={(e) => setStopBits(e.target.value)}
+                  disabled={connected}
+                  className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-1.5 text-sm text-white cursor-pointer disabled:opacity-50"
+                >
+                  <option value="1">1</option>
+                  <option value="2">2</option>
                 </select>
               </div>
               <div>
                 <label className="text-xs text-gray-500 mb-1 block">校验位</label>
-                <select className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-1.5 text-sm text-white cursor-pointer">
-                  <option>None</option>
-                  <option>Even</option>
-                  <option>Odd</option>
+                <select
+                  value={parity}
+                  onChange={(e) => setParity(e.target.value as any)}
+                  disabled={connected}
+                  className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-1.5 text-sm text-white cursor-pointer disabled:opacity-50"
+                >
+                  <option value="none">None</option>
+                  <option value="even">Even</option>
+                  <option value="odd">Odd</option>
                 </select>
               </div>
               <div>
                 <label className="text-xs text-gray-500 mb-1 block">流控制</label>
-                <select className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-1.5 text-sm text-white cursor-pointer">
-                  <option>None</option>
-                  <option>RTS/CTS</option>
+                <select
+                  value={flowControl}
+                  onChange={(e) => setFlowControl(e.target.value as any)}
+                  disabled={connected}
+                  className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-1.5 text-sm text-white cursor-pointer disabled:opacity-50"
+                >
+                  <option value="none">None</option>
+                  <option value="hardware">RTS/CTS</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">行尾符</label>
+                <select
+                  value={lineEnding}
+                  onChange={(e) => setLineEnding(e.target.value)}
+                  className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-1.5 text-sm text-white cursor-pointer"
+                >
+                  <option value="\n">NL (\n)</option>
+                  <option value="\r\n">CRLF (\r\n)</option>
+                  <option value="\r">CR (\r)</option>
+                  <option value="">None</option>
                 </select>
               </div>
             </div>
@@ -175,6 +315,24 @@ export default function SerialPage() {
               )}
             </div>
             <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={hexMode}
+                  onChange={(e) => setHexMode(e.target.checked)}
+                  className="accent-blue-500"
+                />
+                HEX
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={autoScroll}
+                  onChange={(e) => setAutoScroll(e.target.checked)}
+                  className="accent-blue-500"
+                />
+                自动滚动
+              </label>
               <button
                 onClick={handleClear}
                 className="p-1.5 text-gray-400 hover:text-white rounded hover:bg-[#1c2128]"
@@ -199,7 +357,7 @@ export default function SerialPage() {
               <div className="h-full flex items-center justify-center text-gray-600">
                 <div className="text-center">
                   <WifiOff size={32} className="mx-auto mb-2 opacity-50" />
-                  <p>选择端口并点击连接开始</p>
+                  <p>点击"选择端口并连接"开始串口通信</p>
                 </div>
               </div>
             ) : (
@@ -209,8 +367,6 @@ export default function SerialPage() {
                     <span className="text-blue-400">{line}</span>
                   ) : line.startsWith('[') && line.includes(']') ? (
                     <span className="text-gray-500">{line}</span>
-                  ) : line.startsWith('[echo]') ? (
-                    <span className="text-green-400">{line}</span>
                   ) : (
                     <span>{line}</span>
                   )}
@@ -227,7 +383,7 @@ export default function SerialPage() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                placeholder="输入数据并回车发送..."
+                placeholder={hexMode ? '输入HEX数据 (e.g. DE AD BE EF)...' : '输入数据并回车发送...'}
                 disabled={!connected}
                 className="flex-1 bg-[#161b22] border border-[#30363d] rounded-lg px-4 py-2 text-sm
                   text-white placeholder-gray-500 focus:outline-none focus:border-blue-500

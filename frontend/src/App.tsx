@@ -16,6 +16,10 @@ import EditorPage from './pages/EditorPage';
 import ChipLibPage from './pages/ChipLibPage';
 import TutorialPage from './pages/TutorialPage';
 import SerialPage from './pages/SerialPage';
+import AiPage from './pages/AiPage';
+import CollabPage from './pages/CollabPage';
+import PluginsPage from './pages/PluginsPage';
+import DownloadPage from './pages/DownloadPage';
 
 const navItems = [
   { icon: Code2, label: '代码编辑器', path: '/editor' },
@@ -115,6 +119,10 @@ function App() {
               <Route path="/chips" element={<ChipLibPage />} />
               <Route path="/tutorials" element={<TutorialPage />} />
               <Route path="/serial" element={<SerialPage />} />
+              <Route path="/ai" element={<AiPage />} />
+              <Route path="/collab" element={<CollabPage />} />
+              <Route path="/plugins" element={<PluginsPage />} />
+              <Route path="/download" element={<DownloadPage />} />
             </Routes>
           </div>
         </main>

@@ -9,7 +9,7 @@ export interface Chip {
   ram: string;
   peripherals: string[];
   package: string;
-  datasheet?: string;
+  datasheetUrl?: string;
   reference?: string;
 }
 
