@@ -40,18 +40,16 @@ async function streamGemini(
   const provider = AI_PROVIDERS.gemini;
   const url = provider.endpoint.replace('{model}', config.model);
 
-  const geminiMessages = [
-    { role: 'user', parts: [{ text: SYSTEM_PROMPT }] },
-    ...messages.map(m => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
-    })),
-  ];
+  const geminiMessages = messages.map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }],
+  }));
 
   const response = await fetch(`${url}?key=${config.apiKey}&alt=sse`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
       contents: geminiMessages,
       generationConfig: {
         temperature: 0.7,
