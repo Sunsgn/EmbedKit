@@ -1,5 +1,5 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { Search, Cpu, Filter, ExternalLink, BookOpen, Globe, Loader2 } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Search, Cpu, Filter, ExternalLink, BookOpen, Globe } from 'lucide-react';
 import { chips, manufacturers } from '../data/chips';
 import type { Chip } from '../types';
 
@@ -11,37 +11,111 @@ interface OnlineChip {
   type: 'datasheet' | 'wiki' | 'manual';
 }
 
-// Known manufacturer datasheet URL patterns
-const mfgPatterns: Record<string, (name: string) => string[]> = {
-  'TI': (n: string) => [
-    `https://www.ti.com/lit/gpn/${n}`,
-    `https://www.ti.com/product/${n}`,
-  ],
-  'Texas Instruments': (n: string) => [
-    `https://www.ti.com/lit/gpn/${n}`,
-    `https://www.ti.com/product/${n}`,
-  ],
-  'STMicroelectronics': (n: string) => [
-    `https://www.st.com/resource/en/datasheet/${n.toLowerCase()}.pdf`,
-    `https://www.st.com/en/microcontrollers-microprocessors/${n.toLowerCase()}.html`,
-  ],
-  'Microchip': (n: string) => [
-    `https://www.microchip.com/wwwproducts/en/${n}`,
-  ],
-  'NXP': (n: string) => [
-    `https://www.nxp.com/docs/en/data-sheet/${n.toUpperCase()}.pdf`,
-  ],
-  'Espressif': (n: string) => [
-    `https://www.espressif.com/en/products/socs/details/${n.toLowerCase()}`,
-  ],
+// Detect manufacturer from chip name
+const detectManufacturer = (name: string): string => {
+  const n = name.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (n.startsWith('STM32') || n.startsWith('STM8')) return 'STMicroelectronics';
+  if (n.startsWith('MSP430') || n.startsWith('LM4F') || n.startsWith('TMS570') || n.startsWith('LM3S') || n.startsWith('TM4C')) return 'Texas Instruments';
+  if (n.startsWith('PIC') || n.startsWith('ATSAME') || n.startsWith('AT32UC') || n.startsWith('ATMEGA') || n.startsWith('ATTINY') || n.startsWith('ATSAMD')) return 'Microchip';
+  if (n.startsWith('K20') || n.startsWith('K64') || n.startsWith('LPC') || n.startsWith('IMX')) return 'NXP';
+  if (n.startsWith('ESP')) return 'Espressif';
+  if (n.startsWith('GD32')) return 'GigaDevice';
+  if (n.startsWith('RP2')) return 'Raspberry Pi';
+  if (n.startsWith('NRF52') || n.startsWith('NRF53')) return 'Nordic';
+  return '';
+};
+
+// Build datasheet links based on detected manufacturer
+const buildDatasheetLinks = (q: string): OnlineChip[] => {
+  const results: OnlineChip[] = [];
+  const mfg = detectManufacturer(q);
+
+  // Manufacturer-specific direct links
+  if (mfg === 'Texas Instruments') {
+    results.push({
+      name: `${q} - TI 产品页`,
+      manufacturer: 'Texas Instruments',
+      description: 'TI 官方产品页面，直接下载 datasheet PDF',
+      link: `https://www.ti.com/product/${q}`,
+      type: 'datasheet',
+    });
+    results.push({
+      name: `${q} - TI Datasheet`,
+      manufacturer: 'Texas Instruments',
+      description: 'TI 直接 datasheet PDF 链接',
+      link: `https://www.ti.com/lit/gpn/${q}`,
+      type: 'datasheet',
+    });
+  } else if (mfg === 'STMicroelectronics') {
+    results.push({
+      name: `${q} - ST 产品页`,
+      manufacturer: 'STMicroelectronics',
+      description: 'ST 官方产品页面，包含 datasheet 下载',
+      link: `https://www.st.com/en/microcontrollers-microprocessors/${q.toLowerCase()}.html`,
+      type: 'datasheet',
+    });
+    results.push({
+      name: `${q} - ST Datasheet PDF`,
+      manufacturer: 'STMicroelectronics',
+      description: 'ST 直接 datasheet PDF 链接',
+      link: `https://www.st.com/resource/en/datasheet/${q.toLowerCase()}.pdf`,
+      type: 'datasheet',
+    });
+  } else if (mfg === 'Microchip') {
+    results.push({
+      name: `${q} - Microchip 产品页`,
+      manufacturer: 'Microchip',
+      description: 'Microchip 官方产品页面，包含 datasheet 下载',
+      link: `https://www.microchip.com/wwwproducts/en/${q}`,
+      type: 'datasheet',
+    });
+  } else if (mfg === 'NXP') {
+    results.push({
+      name: `${q} - NXP Datasheet`,
+      manufacturer: 'NXP',
+      description: 'NXP 直接 datasheet PDF 链接',
+      link: `https://www.nxp.com/docs/en/data-sheet/${q.toUpperCase()}.pdf`,
+      type: 'datasheet',
+    });
+  } else if (mfg === 'Espressif') {
+    results.push({
+      name: `${q} - Espressif 产品页`,
+      manufacturer: 'Espressif',
+      description: '乐鑫官方产品页面，包含技术文档',
+      link: `https://www.espressif.com/en/products/socs/details/${q.toLowerCase()}`,
+      type: 'datasheet',
+    });
+  }
+
+  // Distributor search links (always available)
+  results.push({
+    name: `Octopart - ${q}`,
+    manufacturer: '元器件搜索引擎',
+    description: '搜索多个分销商的 datasheet PDF',
+    link: `https://octopart.com/search?q=${encodeURIComponent(q)}`,
+    type: 'datasheet',
+  });
+  results.push({
+    name: `立创商城 - ${q}`,
+    manufacturer: 'LCSC',
+    description: '国产元器件分销，支持 datasheet 预览',
+    link: `https://www.szlcsc.com/product/search.html?k=${encodeURIComponent(q)}`,
+    type: 'datasheet',
+  });
+  results.push({
+    name: `DigiKey - ${q}`,
+    manufacturer: 'DigiKey',
+    description: '全球最大元器件分销商，PDF 规格书下载',
+    link: `https://www.digikey.com/en/products/results?K=${encodeURIComponent(q)}`,
+    type: 'datasheet',
+  });
+
+  return results;
 };
 
 export default function ChipLibPage() {
   const [search, setSearch] = useState('');
   const [selectedMfg, setSelectedMfg] = useState('');
-  const [onlineResults, setOnlineResults] = useState<OnlineChip[]>([]);
-  const [searchingOnline, setSearchingOnline] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const localFiltered = useMemo(() => {
     if (!search && !selectedMfg) return chips;
@@ -60,106 +134,11 @@ export default function ChipLibPage() {
     });
   }, [search, selectedMfg]);
 
-  // Detect manufacturer from chip name
-  const detectManufacturer = (name: string): string => {
-    const n = name.toUpperCase();
-    if (n.startsWith('STM32') || n.startsWith('STM8') || n.startsWith('STM32G0') || n.startsWith('STM32L') || n.startsWith('STM32H') || n.startsWith('STM32U') || n.startsWith('STM32WB')) return 'STMicroelectronics';
-    if (n.startsWith('MSP430') || n.startsWith('LM4F') || n.startsWith('TMS570')) return 'Texas Instruments';
-    if (n.startsWith('PIC') || n.startsWith('ATSAME') || n.startsWith('AT32UC')) return 'Microchip';
-    if (n.startsWith('LM3S') || n.startsWith('EK-TM4C')) return 'Texas Instruments';
-    if (n.startsWith('K20') || n.startsWith('K64') || n.startsWith('LPC') || n.startsWith('i.MX')) return 'NXP';
-    if (n.startsWith('ESP') || n.startsWith('ESP32')) return 'Espressif';
-    if (n.startsWith('GD32')) return 'GigaDevice';
-    if (n.startsWith('ATmega') || n.startsWith('ATtiny') || n.startsWith('ATSAMD')) return 'Microchip';
-    if (n.startsWith('RP2')) return 'Raspberry Pi';
-    if (n.startsWith('nRF52') || n.startsWith('nRF53')) return 'Nordic';
-    return '';
-  };
-
-  const searchOnline = useCallback(async (query: string) => {
-    if (!query || query.length < 2) {
-      setOnlineResults([]);
-      return;
-    }
-    setSearchingOnline(true);
-    const results: OnlineChip[] = [];
-    const q = query.trim();
-
-    try {
-      // 1. Wikipedia search (CORS-friendly, gives chip info)
-      const wikiRes = await fetch(
-        `https://en.wikipedia.org/w/api.php?action=opensearch&search=${encodeURIComponent(q)}&limit=3&format=json&origin=*`
-      );
-      if (wikiRes.ok) {
-        const [titles, descriptions]: [string[], string[]] = await wikiRes.json();
-        for (let i = 0; i < titles.length; i++) {
-          const title = titles[i];
-          results.push({
-            name: title,
-            manufacturer: 'Wikipedia',
-            description: descriptions[i] || `关于 ${title} 的介绍`,
-            link: `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`,
-            type: 'wiki',
-          });
-        }
-      }
-    } catch { /* ignore */ }
-
-    try {
-      // 2. Manufacturer-specific product pages
-      const mfg = detectManufacturer(q);
-      if (mfg && mfgPatterns[mfg]) {
-        const urls = mfgPatterns[mfg](q);
-        results.push({
-          name: `${q} - ${mfg} 产品页`,
-          manufacturer: mfg,
-          description: '厂商官方产品页面，包含技术文档下载',
-          link: urls[0],
-          type: 'datasheet',
-        });
-      }
-    } catch { /* ignore */ }
-
-    // 3. Always add direct datasheet search from key distributors
-    results.push({
-      name: `Octopart - ${q}`,
-      manufacturer: '元器件搜索引擎',
-      description: '搜索多个分销商的 datasheet PDF',
-      link: `https://octopart.com/search?q=${encodeURIComponent(q)}`,
-      type: 'datasheet',
-    });
-    results.push({
-      name: `立创商城 - ${q}`,
-      manufacturer: 'LCSC',
-      description: '国产元器件分销，支持 datasheet 预览',
-      link: `https://www.szlcsc.com/product/search.html?k=${encodeURIComponent(q)}`,
-      type: 'datasheet',
-    });
-    results.push({
-      name: `DigiKey - ${q}`,
-      manufacturer: 'DigiKey',
-      description: '全球最大元器件分销商，PDF 规格书下载',
-      link: `https://www.digikey.com/en/products/results?K=${encodeURIComponent(q)}`,
-      type: 'datasheet',
-    });
-
-    setOnlineResults(results.slice(0, 8));
-    setSearchingOnline(false);
-  }, []);
-
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (!search || search.length < 2) {
-      setOnlineResults([]);
-      return;
-    }
-    debounceRef.current = setTimeout(() => {
-      searchOnline(search);
-    }, 600);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [search, searchOnline]);
+  // Generate datasheet links based on search query
+  const onlineResults = useMemo(() => {
+    if (!search || search.length < 2) return [];
+    return buildDatasheetLinks(search.trim());
+  }, [search]);
 
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -213,8 +192,7 @@ export default function ChipLibPage() {
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-white flex items-center gap-2">
                 <Globe size={18} className="text-green-400" />
-                在线搜索结果
-                {searchingOnline && <Loader2 size={16} className="animate-spin text-blue-400 ml-2" />}
+                在线搜索结果 (Datasheet & 厂商官网)
               </h2>
               <span className="text-xs text-gray-500">{onlineResults.length} 条结果</span>
             </div>
