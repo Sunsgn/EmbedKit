@@ -12,6 +12,9 @@ export const AI_PROVIDERS = {
     models: [
       { id: 'google/gemini-2.0-flash-exp:free', label: 'Gemini 2.0 Flash (免费)' },
       { id: 'qwen/qwen-2.5-vl-72b-instruct:free', label: 'Qwen 2.5 VL 72B (免费)' },
+      { id: 'qwen/qwen3-235b-a22b-thinking-2507:free', label: 'Qwen3 235B (免费)' },
+      { id: 'deepseek/deepseek-chat:free', label: 'DeepSeek V3 (免费)' },
+      { id: 'deepseek/deepseek-r1-distill-qwen-32b:free', label: 'DeepSeek R1 Distill 32B (免费)' },
       { id: 'meta-llama/llama-3.2-90b-text-preview:free', label: 'Llama 3.2 90B (免费)' },
     ],
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
