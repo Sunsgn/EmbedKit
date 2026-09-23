@@ -14,9 +14,16 @@ import {
   Cpu,
   Terminal,
   Zap,
+  Settings,
+  X,
+  Key,
+  MessageSquare,
+  Loader2,
 } from 'lucide-react';
 import Editor from '@monaco-editor/react';
 import { chips } from '../data/chips';
+import { AI_PROVIDERS, type ProviderKey, type AiConfig } from '../types/ai';
+import { streamAiResponse } from '../services/aiService';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -32,12 +39,30 @@ const quickPrompts = [
   { icon: GitPullRequest, label: '重构 I2C 代码', prompt: '帮我重构 I2C 驱动，使其更加模块化。' },
 ];
 
+const DEFAULT_PROVIDER: ProviderKey = 'gemini';
+const DEFAULT_MODEL = 'gemini-2.0-flash';
+
+function extractCode(content: string): string | undefined {
+  const match = content.match(/```(\w+)?\n([\s\S]*?)```/);
+  if (match) {
+    return match[2].trim();
+  }
+  return undefined;
+}
+
+function extractText(content: string): string {
+  const codeMatch = content.match(/```[\s\S]*?```/);
+  if (codeMatch) {
+    return content.replace(codeMatch[0], '').trim();
+  }
+  return content;
+}
+
 export default function AiPage() {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
-      content:
-        "你好！我是你的嵌入式开发 AI 助手。我可以帮你生成代码、调试问题、架构设计等。今天有什么可以帮你的？",
+      content: '你好！我是你的嵌入式开发 AI 助手。我可以帮你生成代码、调试问题、架构设计等。\n\n请先点击右上角的设置图标配置 API Key，或直接使用模拟模式体验。',
       timestamp: new Date(),
     },
   ]);
@@ -46,17 +71,101 @@ export default function AiPage() {
   const [selectedChip, setSelectedChip] = useState(chips[0]);
   const [showCode, setShowCode] = useState<number | null>(null);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // AI Config (persisted to localStorage)
+  const [config, setConfig] = useState<AiConfig>(() => {
+    try {
+      const saved = localStorage.getItem('embedkit-ai-config');
+      if (saved) return JSON.parse(saved);
+    } catch { /* ignore */ }
+    return { provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL, apiKey: '' };
+  });
+
+  useEffect(() => {
+    localStorage.setItem('embedkit-ai-config', JSON.stringify(config));
+  }, [config]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const generateResponse = (userMessage: string): { content: string; code?: string } => {
-    const lower = userMessage.toLowerCase();
+  const isConfigured = config.apiKey.length > 10;
+  const providerInfo = AI_PROVIDERS[config.provider];
+
+  const handleSend = async () => {
+    if (!input.trim() || isTyping) return;
+
+    const userMsg: Message = { role: 'user', content: input, timestamp: new Date() };
+    setMessages((prev) => [...prev, userMsg]);
+    const userInput = input;
+    setInput('');
+    setIsTyping(true);
+    setError(null);
+
+    // If not configured, use simulated response
+    if (!isConfigured) {
+      await simulateResponse(userInput);
+      return;
+    }
+
+    // Build conversation history
+    const history = messages
+      .filter(m => m.content)
+      .map(m => ({ role: m.role, content: m.content }));
+
+    // Add chip context to user input
+    const enhancedInput = `[目标芯片: ${selectedChip.name} (${selectedChip.series})]\n${userInput}`;
+
+    // Create placeholder for assistant response
+    const assistantIndex = messages.length + 1;
+    setMessages(prev => [...prev, { role: 'assistant', content: '', timestamp: new Date() }]);
+
+    let fullContent = '';
+
+    try {
+      await streamAiResponse(
+        config,
+        [...history.map(m => ({ role: m.role, content: m.content })), { role: 'user', content: enhancedInput }],
+        (chunk) => {
+          fullContent += chunk;
+          const code = extractCode(fullContent);
+          const text = extractText(fullContent);
+          setMessages(prev => {
+            const updated = [...prev];
+            updated[assistantIndex] = {
+              ...updated[assistantIndex],
+              content: text,
+              code: code,
+            };
+            return updated;
+          });
+        },
+        () => {
+          setIsTyping(false);
+        },
+        (err) => {
+          setError(err);
+          setMessages(prev => prev.slice(0, -1));
+          setIsTyping(false);
+        },
+      );
+    } catch {
+      setError('请求失败，请检查网络连接');
+      setMessages(prev => prev.slice(0, -1));
+      setIsTyping(false);
+    }
+  };
+
+  const simulateResponse = (userInput: string) => {
+    const lower = userInput.toLowerCase();
+
+    let response: { content: string; code?: string };
 
     if (lower.includes('uart') || lower.includes('serial')) {
-      return {
+      response = {
         content: `这是 ${selectedChip.name} 的 UART 配置。常见问题包括时钟配置、GPIO 模式设置和 NVIC 中断配置。`,
         code: `#include "stm32f1xx_hal.h"
 
@@ -86,11 +195,9 @@ void HAL_UART_MspInit(UART_HandleTypeDef *huart) {
     __HAL_AFIO_REMAP_USART1_DISABLE();
 }`,
       };
-    }
-
-    if (lower.includes('spi')) {
-      return {
-        content: `这是 ${selectedChip.name} 的 SPI 驱动模板，使用 HAL 库。该主设备配置使用默认引脚的 SPI1。`,
+    } else if (lower.includes('spi')) {
+      response = {
+        content: `这是 ${selectedChip.name} 的 SPI 驱动模板，使用 HAL 库。`,
         code: `#include "stm32f1xx_hal.h"
 
 SPI_HandleTypeDef hspi1;
@@ -112,11 +219,9 @@ void SPI_Transfer(uint8_t* txData, uint8_t* rxData, uint16_t len) {
     HAL_SPI_TransmitReceive(&hspi1, txData, rxData, len, 1000);
 }`,
       };
-    }
-
-    if (lower.includes('freertos') || lower.includes('task') || lower.includes('rtos')) {
-      return {
-        content: "这是针对目标芯片的 FreeRTOS 任务模板，包含队列和信号量的正确使用方式。",
+    } else if (lower.includes('freertos') || lower.includes('task') || lower.includes('rtos')) {
+      response = {
+        content: '这是 FreeRTOS 任务模板，包含队列和信号量。',
         code: `#include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
@@ -156,11 +261,9 @@ void vDataTask(void *pvParameters) {
     }
 }`,
       };
-    }
-
-    if (lower.includes('i2c')) {
-      return {
-        content: `这是 ${selectedChip.name} 的 I2C 驱动结构。采用模块化设计，包含独立的初始化、读取和写入函数。`,
+    } else if (lower.includes('i2c')) {
+      response = {
+        content: `这是 ${selectedChip.name} 的 I2C 驱动结构。`,
         code: `#include "stm32f1xx_hal.h"
 
 I2C_HandleTypeDef hi2c1;
@@ -185,24 +288,13 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
     return HAL_I2C_Mem_Read(&hi2c1, devAddr, reg, I2C_MEMADD_SIZE_8BIT, data, len, 1000);
 }`,
       };
+    } else {
+      response = {
+        content: '我很乐意帮忙！针对你的目标芯片进行嵌入式开发时，建议考虑时钟树配置、外设初始化顺序和内存限制。需要我为你生成具体的代码吗？',
+      };
     }
 
-    return {
-      content: "我很乐意帮忙！针对你的目标芯片进行嵌入式开发时，建议考虑时钟树配置、外设初始化顺序和内存限制。需要我为你生成具体的代码吗？",
-    };
-  };
-
-  const handleSend = () => {
-    if (!input.trim() || isTyping) return;
-
-    const userMsg: Message = { role: 'user', content: input, timestamp: new Date() };
-    setMessages((prev) => [...prev, userMsg]);
-    const userInput = input;
-    setInput('');
-    setIsTyping(true);
-
     setTimeout(() => {
-      const response = generateResponse(userInput);
       const assistantMsg: Message = {
         role: 'assistant',
         content: response.content,
@@ -227,6 +319,13 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
     }
   };
 
+  const handleClearConfig = () => {
+    setConfig({ provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL, apiKey: '' });
+    localStorage.removeItem('embedkit-ai-config');
+  };
+
+  const currentModels = providerInfo.models;
+
   return (
     <div className="flex h-full bg-[#0d1117]">
       {/* Chat Area */}
@@ -236,6 +335,14 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
           <div className="flex items-center gap-2">
             <Sparkles size={18} className="text-purple-400" />
             <span className="text-sm font-medium text-white">AI 助手</span>
+            {!isConfigured && (
+              <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded-full">模拟模式</span>
+            )}
+            {isConfigured && (
+              <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full">
+                {providerInfo.name} / {currentModels.find(m => m.id === config.model)?.label || config.model}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 bg-[#0d1117] rounded-lg px-3 py-1.5">
@@ -254,13 +361,31 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
               </select>
             </div>
             <button
-              onClick={() => setMessages([{ role: 'assistant', content: "新会话已启动。有什么可以帮你的？", timestamp: new Date() }])}
+              onClick={() => setMessages([{ role: 'assistant', content: '新会话已启动。有什么可以帮你的？', timestamp: new Date() }])}
               className="p-1.5 text-gray-400 hover:text-white rounded-lg hover:bg-[#1c2128] transition-colors"
+              title="新对话"
             >
               <RefreshCw size={16} />
             </button>
+            <button
+              onClick={() => setShowSettings(true)}
+              className="p-1.5 text-gray-400 hover:text-white rounded-lg hover:bg-[#1c2128] transition-colors"
+              title="AI 设置"
+            >
+              <Settings size={16} />
+            </button>
           </div>
         </div>
+
+        {/* Error Banner */}
+        {error && (
+          <div className="bg-red-500/10 border-b border-red-500/30 px-4 py-2 flex items-center justify-between">
+            <span className="text-sm text-red-400">{error}</span>
+            <button onClick={() => setError(null)} className="text-red-400 hover:text-red-300">
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto scrollbar-thin p-4 space-y-4">
@@ -273,7 +398,16 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
                     : 'bg-[#161b22] text-gray-200 border border-[#30363d]'
                 }`}
               >
-                <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                {msg.content && (
+                  <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                )}
+
+                {!msg.content && isTyping && i === messages.length - 1 && (
+                  <div className="flex gap-1.5 py-1">
+                    <Loader2 size={14} className="text-gray-500 animate-spin" />
+                    <span className="text-xs text-gray-500">思考中...</span>
+                  </div>
+                )}
 
                 {msg.code && (
                   <div className="mt-3">
@@ -322,7 +456,7 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
             </div>
           ))}
 
-          {isTyping && (
+          {isTyping && messages[messages.length - 1]?.role !== 'assistant' && (
             <div className="flex justify-start">
               <div className="bg-[#161b22] border border-[#30363d] rounded-xl px-4 py-3">
                 <div className="flex gap-1.5">
@@ -358,7 +492,7 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
         </div>
       </div>
 
-      {/* Quick Prompts Sidebar */}
+      {/* Right Sidebar */}
       <div className="w-64 bg-[#161b22] border-l border-[#30363d] flex flex-col">
         <div className="px-3 py-2 border-b border-[#30363d]">
           <span className="text-xs font-semibold text-gray-400 uppercase">快捷提示</span>
@@ -397,6 +531,106 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
           </div>
         </div>
       </div>
+
+      {/* Settings Modal */}
+      {showSettings && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setShowSettings(false)}>
+          <div className="bg-[#161b22] border border-[#30363d] rounded-xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Settings size={18} className="text-blue-400" />
+                AI 设置
+              </h2>
+              <button onClick={() => setShowSettings(false)} className="text-gray-400 hover:text-white">
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Provider Selection */}
+            <div className="mb-4">
+              <label className="block text-sm text-gray-400 mb-2">AI 提供商</label>
+              <div className="grid grid-cols-2 gap-2">
+                {(Object.entries(AI_PROVIDERS) as [ProviderKey, typeof AI_PROVIDERS[ProviderKey]][]).map(([key, info]) => (
+                  <button
+                    key={key}
+                    onClick={() => {
+                      const firstModel = info.models[0]?.id;
+                      setConfig(prev => ({ ...prev, provider: key, model: firstModel || '' }));
+                    }}
+                    className={`p-3 rounded-lg border text-sm transition-colors ${
+                      config.provider === key
+                        ? 'border-blue-500 bg-blue-500/10 text-blue-400'
+                        : 'border-[#30363d] bg-[#0d1117] text-gray-400 hover:border-gray-500'
+                    }`}
+                  >
+                    <MessageSquare size={16} className="mb-1" />
+                    <div>{info.name}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Model Selection */}
+            <div className="mb-4">
+              <label className="block text-sm text-gray-400 mb-2">模型</label>
+              <select
+                value={config.model}
+                onChange={(e) => setConfig(prev => ({ ...prev, model: e.target.value }))}
+                className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+              >
+                {currentModels.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* API Key */}
+            <div className="mb-4">
+              <label className="block text-sm text-gray-400 mb-2">API Key</label>
+              <div className="relative">
+                <Key size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                <input
+                  type="password"
+                  value={config.apiKey}
+                  onChange={(e) => setConfig(prev => ({ ...prev, apiKey: e.target.value }))}
+                  placeholder={config.provider === 'gemini' ? 'AIza...' : 'sk-or-...'}
+                  className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-blue-500"
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-1.5">
+                {config.provider === 'gemini'
+                  ? '在 https://aistudio.google.com/apikey 获取 Gemini API Key（免费）'
+                  : '在 https://openrouter.ai/keys 获取 OpenRouter API Key（免费额度）'}
+              </p>
+            </div>
+
+            {/* Status & Actions */}
+            <div className="flex items-center justify-between">
+              <div className={`text-xs px-2 py-1 rounded-full ${
+                isConfigured ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
+              }`}>
+                {isConfigured ? '✓ 已配置' : '未配置（使用模拟模式）'}
+              </div>
+              <div className="flex gap-2">
+                {isConfigured && (
+                  <button
+                    onClick={handleClearConfig}
+                    className="text-xs text-red-400 hover:text-red-300 px-2 py-1"
+                  >
+                    清除配置
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowSettings(false)}
+                  className="text-sm bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded-lg transition-colors"
+                >
+                  完成
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
