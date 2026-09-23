@@ -659,9 +659,19 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
                   />
                 </div>
                 <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg px-3 py-2">
-                  <p className="text-xs text-blue-400">💡 本地模式直接连接 Ollama、LM Studio 等本地 AI 服务，不受 CORS 限制。请先启动本地服务。</p>
+                  <p className="text-xs text-blue-400">💡 本地模式连接 Ollama、LM Studio 等本地 AI 服务。请先启动本地服务。</p>
                   <p className="text-xs text-gray-500 mt-1">Ollama 默认: http://localhost:11434/v1/chat/completions</p>
                   <p className="text-xs text-gray-500">LM Studio 默认: http://localhost:1234/v1/chat/completions</p>
+                </div>
+                <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-3 py-2">
+                  <p className="text-xs text-yellow-400 font-bold mb-1">⚠️ 重要：必须配置 CORS 才能使用</p>
+                  <p className="text-xs text-yellow-400">由于网站部署在 github.io，浏览器会阻止直接访问 localhost。请选择以下一种方式：</p>
+                  <p className="text-xs text-gray-400 mt-1">方法 1（推荐）：使用 EmbedKit 代理</p>
+                  <p className="text-xs text-gray-500 ml-2">1. 在终端运行：<code className="bg-yellow-500/20 px-1 rounded">cd EmbedKit/proxy &amp;&amp; npm start</code></p>
+                  <p className="text-xs text-gray-500 ml-2">2. 端点填：<code className="bg-yellow-500/20 px-1 rounded">http://localhost:9999/?target=http://localhost:11434/v1/chat/completions</code></p>
+                  <p className="text-xs text-gray-400 mt-1">方法 2：配置服务器 CORS</p>
+                  <p className="text-xs text-gray-500 ml-2">Ollama：<code className="bg-yellow-500/20 px-1 rounded">OLLAMA_ORIGINS=*</code> 环境变量后重启</p>
+                  <p className="text-xs text-gray-500 ml-2">LM Studio：Settings → Security → 勾选 "CORS"</p>
                 </div>
               </div>
             )}

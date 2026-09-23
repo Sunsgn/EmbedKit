@@ -50,8 +50,14 @@ export async function streamAiResponse(
     }
   } catch (e: any) {
     const msg = e.message || e.toString() || '请求失败';
-    if (config.provider === 'huggingface' && (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('CORS'))) {
-      onError('Hugging Face 请求被浏览器 CORS 策略阻止。请切换为 OpenRouter 或其他提供商，或切换到模拟模式。');
+    if ((msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('CORS'))) {
+      if (config.provider === 'local') {
+        onError('本地请求被浏览器 CORS 策略阻止。\n\n解决方法（任选其一）：\n1. 使用 EmbedKit 代理：\n   cd EmbedKit/proxy && npm start\n   然后端点填：http://localhost:9999/?target=http://localhost:11434/v1/chat/completions\n2. Ollama 设置环境变量 OLLAMA_ORIGINS=* 后重启\n3. LM Studio 在 Settings → Security 勾选 CORS');
+      } else if (config.provider === 'huggingface') {
+        onError('Hugging Face 请求被浏览器 CORS 策略阻止。请切换为 OpenRouter 或其他提供商，或切换到模拟模式。');
+      } else {
+        onError(`请求被浏览器阻止 (CORS/Network)。请检查服务器是否配置了 CORS 头允许 ${window.location.origin} 访问。`);
+      }
     } else {
       onError(msg);
     }
