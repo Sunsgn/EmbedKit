@@ -17,7 +17,6 @@ import {
   Settings,
   X,
   Key,
-  MessageSquare,
   Loader2,
 } from 'lucide-react';
 import Editor from '@monaco-editor/react';
@@ -94,7 +93,7 @@ export default function AiPage() {
 
   const providerInfo = AI_PROVIDERS[config.provider];
   const isBuiltInNoKey = !providerInfo.requiresKey;
-  const isConfigured = isBuiltInNoKey || config.apiKey.length > 10 || (config.provider === 'custom' && (config.customEndpoint?.length || 0) > 5);
+  const isConfigured = isBuiltInNoKey || config.apiKey.length > 10 || (config.provider === 'custom' && (config.customEndpoint?.length || 0) > 5) || (config.provider === 'local' && (config.customEndpoint?.length || providerInfo.endpoint.length) > 5);
 
   const handleSend = async () => {
     if (!input.trim() || isTyping) return;
@@ -549,30 +548,6 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
 
             {/* Provider Selection */}
             <div className="mb-4">
-              <label className="block text-sm text-gray-400 mb-2">AI 提供商</label>
-              <div className="grid grid-cols-2 gap-2">
-                {(Object.entries(AI_PROVIDERS) as [ProviderKey, typeof AI_PROVIDERS[ProviderKey]][]).map(([key, info]) => (
-                  <button
-                    key={key}
-                    onClick={() => {
-                      const firstModel = info.models[0]?.id;
-                      setConfig(prev => ({ ...prev, provider: key, model: firstModel || '' }));
-                    }}
-                    className={`p-3 rounded-lg border text-sm transition-colors ${
-                      config.provider === key
-                        ? 'border-blue-500 bg-blue-500/10 text-blue-400'
-                        : 'border-[#30363d] bg-[#0d1117] text-gray-400 hover:border-gray-500'
-                    }`}
-                  >
-                    <MessageSquare size={16} className="mb-1" />
-                    <div>{info.name}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Provider Selection */}
-            <div className="mb-4">
               <label className="block text-sm text-gray-400 mb-2">服务提供方</label>
               <div className="grid grid-cols-2 gap-2">
                 {(Object.keys(AI_PROVIDERS) as ProviderKey[]).map((key) => {
@@ -593,6 +568,8 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
                     <>
                       {key === 'huggingface' ? (
                         <span className="ml-auto text-[10px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded" title="在线部署时可能受浏览器 CORS 限制">受限</span>
+                      ) : key === 'local' ? (
+                        <span className="ml-auto text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">本地</span>
                       ) : (
                         <span className="ml-auto text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">免费</span>
                       )}
@@ -654,6 +631,37 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
                     placeholder="输入自定义 API Key"
                     className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-blue-500"
                   />
+                </div>
+              </div>
+            )}
+
+            {/* Local Provider Fields */}
+            {config.provider === 'local' && (
+              <div className="mb-4 space-y-3">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">API 端点</label>
+                  <input
+                    type="text"
+                    value={config.customEndpoint || 'http://localhost:11434/v1/chat/completions'}
+                    onChange={(e) => setConfig(prev => ({ ...prev, customEndpoint: e.target.value }))}
+                    placeholder="http://localhost:11434/v1/chat/completions"
+                    className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">API Key（可选）</label>
+                  <input
+                    type="password"
+                    value={config.customApiKey || ''}
+                    onChange={(e) => setConfig(prev => ({ ...prev, customApiKey: e.target.value }))}
+                    placeholder="Ollama 不需要 API Key"
+                    className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg px-3 py-2">
+                  <p className="text-xs text-blue-400">💡 本地模式直接连接 Ollama、LM Studio 等本地 AI 服务，不受 CORS 限制。请先启动本地服务。</p>
+                  <p className="text-xs text-gray-500 mt-1">Ollama 默认: http://localhost:11434/v1/chat/completions</p>
+                  <p className="text-xs text-gray-500">LM Studio 默认: http://localhost:1234/v1/chat/completions</p>
                 </div>
               </div>
             )}

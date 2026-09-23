@@ -40,6 +40,21 @@ export const AI_PROVIDERS = {
     apiKey: '',
     requiresKey: true,
   },
+  local: {
+    name: '本地',
+    icon: '🖥️',
+    defaultModel: 'qwen2.5:7b',
+    models: [
+      { id: 'qwen2.5:7b', label: 'Qwen 2.5 7B' },
+      { id: 'qwen2.5:14b', label: 'Qwen 2.5 14B' },
+      { id: 'llama3.2:3b', label: 'Llama 3.2 3B' },
+      { id: 'mistral:7b', label: 'Mistral 7B' },
+      { id: 'deepseek-r1:8b', label: 'DeepSeek R1 8B' },
+    ],
+    endpoint: 'http://localhost:11434/v1/chat/completions',
+    apiKey: '',
+    requiresKey: false,
+  },
   custom: {
     name: '自定义',
     icon: '⚙️',

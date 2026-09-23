@@ -32,6 +32,11 @@ export async function streamAiResponse(
     }
   }
 
+  if (config.provider === 'local') {
+    endpoint = config.customEndpoint || provider.endpoint;
+    apiKey = config.customApiKey || '';
+  }
+
   if (provider.requiresKey && !apiKey) {
     onError('请先配置 API Key');
     return;
@@ -117,8 +122,12 @@ async function streamOpenAIFormat(
     'Content-Type': 'application/json',
   };
 
-  if (config.provider === 'huggingface') {
+  if (config.provider === 'huggingface' || config.provider === 'local') {
     // Hugging Face doesn't need auth header for unauthenticated access
+    // Local provider may not need auth header (Ollama)
+    if (apiKey) {
+      headers['Authorization'] = `Bearer ${apiKey}`;
+    }
   } else {
     headers['Authorization'] = `Bearer ${apiKey}`;
   }
