@@ -4,6 +4,159 @@ import { tutorials } from '../data/tutorials';
 import type { Tutorial } from '../types';
 import Editor from '@monaco-editor/react';
 
+/* ── simple inline markdown parser ── */
+function parseInline(text: string): React.ReactNode {
+  // split on **bold**, `code`, and __italic__
+  const parts: React.ReactNode[] = [];
+  let remaining = text;
+  let key = 0;
+  while (remaining.length) {
+    const boldIdx = remaining.indexOf('**');
+    const codeIdx = remaining.indexOf('`');
+    const italicIdx = remaining.indexOf('__');
+    let pos = remaining.length;
+    let kind: 'bold' | 'code' | 'italic' | null = null;
+
+    if (boldIdx !== -1 && (pos === remaining.length || boldIdx < pos)) { pos = boldIdx; kind = 'bold'; }
+    if (codeIdx !== -1 && (pos === remaining.length || codeIdx < pos)) { pos = codeIdx; kind = 'code'; }
+    if (italicIdx !== -1 && (pos === remaining.length || italicIdx < pos)) { pos = italicIdx; kind = 'italic'; }
+
+    if (pos > 0 || parts.length) {
+      parts.push(remaining.slice(0, pos));
+    }
+
+    if (!kind) break;
+
+    if (kind === 'code') {
+      const end = remaining.indexOf('`', pos + 1);
+      if (end !== -1) {
+        parts.push(<code key={key++} className="px-1.5 py-0.5 bg-[#0d1117] text-blue-300 rounded text-xs font-mono border border-[#30363d]">{remaining.slice(pos + 1, end)}</code>);
+        remaining = remaining.slice(end + 1);
+        continue;
+      }
+    } else if (kind === 'bold') {
+      const end = remaining.indexOf('**', pos + 2);
+      if (end !== -1) {
+        parts.push(<strong key={key++} className="text-white font-semibold">{remaining.slice(pos + 2, end)}</strong>);
+        remaining = remaining.slice(end + 2);
+        continue;
+      }
+    } else if (kind === 'italic') {
+      const end = remaining.indexOf('__', pos + 2);
+      if (end !== -1) {
+        parts.push(<em key={key++} className="text-gray-200">{remaining.slice(pos + 2, end)}</em>);
+        remaining = remaining.slice(end + 2);
+        continue;
+      }
+    }
+    break;
+  }
+  if (remaining.length) parts.push(remaining);
+  return parts;
+}
+
+function renderContent(content: string): React.ReactNode {
+  const lines = content.split('\n');
+  const result: React.ReactNode[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // table row (contains |)
+    if (line.includes('|') && line.trim().startsWith('|')) {
+      const rows: string[][] = [];
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim().startsWith('|')) {
+        const cells = lines[i].split('|').filter((_, idx, arr) => idx > 0 && idx < arr.length - 1).map(c => c.trim());
+        rows.push(cells);
+        i++;
+      }
+      if (rows.length) {
+        result.push(
+          <table key={result.length} className="w-full border-collapse my-3 text-sm">
+            <thead>
+              <tr>
+                {rows[0].map((cell, ci) => (
+                  <th key={ci} className="border border-[#30363d] px-3 py-2 bg-[#161b22] text-white font-semibold text-left">{parseInline(cell)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.slice(1).map((row, ri) => (
+                <tr key={ri}>
+                  {row.map((cell, ci) => (
+                    <td key={ci} className="border border-[#30363d] px-3 py-2 text-gray-300">{parseInline(cell)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        );
+      }
+      continue;
+    }
+
+    // horizontal rule
+    if (line.trim() === '---' || line.trim() === '***') {
+      result.push(<hr key={result.length} className="border-[#30363d] my-4" />);
+      i++;
+      continue;
+    }
+
+    // headers
+    if (line.startsWith('### ')) {
+      result.push(<h3 key={result.length} className="text-base font-semibold text-white mt-4 mb-2">{parseInline(line.slice(4))}</h3>);
+      i++;
+      continue;
+    }
+    if (line.startsWith('## ')) {
+      result.push(<h2 key={result.length} className="text-lg font-semibold text-white mt-4 mb-2">{parseInline(line.slice(3))}</h2>);
+      i++;
+      continue;
+    }
+    if (line.startsWith('# ')) {
+      result.push(<h1 key={result.length} className="text-xl font-bold text-white mt-4 mb-2">{parseInline(line.slice(2))}</h1>);
+      i++;
+      continue;
+    }
+
+    // unordered list
+    if (line.startsWith('- ') || line.startsWith('* ')) {
+      const listItems: React.ReactNode[] = [];
+      while (i < lines.length && (lines[i].startsWith('- ') || lines[i].startsWith('* '))) {
+        listItems.push(<li key={i} className="text-gray-300 ml-4 list-disc">{parseInline(lines[i].slice(2))}</li>);
+        i++;
+      }
+      result.push(<ul key={result.length} className="my-2">{listItems}</ul>);
+      continue;
+    }
+
+    // ordered list
+    if (/^\d+\.\s/.test(line)) {
+      const listItems: React.ReactNode[] = [];
+      while (i < lines.length && /^\d+\.\s/.test(lines[i])) {
+        listItems.push(<li key={i} className="text-gray-300 ml-4 list-decimal">{parseInline(lines[i].replace(/^\d+\.\s/, ''))}</li>);
+        i++;
+      }
+      result.push(<ol key={result.length} className="my-2">{listItems}</ol>);
+      continue;
+    }
+
+    // blank line
+    if (line.trim() === '') {
+      result.push(<div key={result.length} className="h-2" />);
+      i++;
+      continue;
+    }
+
+    // paragraph
+    result.push(<p key={result.length} className="text-gray-300 mb-1 leading-relaxed">{parseInline(line)}</p>);
+    i++;
+  }
+
+  return result;
+}
+
 const difficultyLabel: Record<string, string> = {
   beginner: '入门',
   intermediate: '进阶',
@@ -83,21 +236,7 @@ export default function TutorialPage() {
           <div className="flex-1 flex flex-col min-h-0 overflow-y-auto scrollbar-thin p-6">
             {/* Content */}
             <div className="prose prose-invert prose-sm max-w-none mb-6">
-              {current.content.split('\n').map((line: string, i: number) => {
-                if (line.startsWith('## ')) {
-                  return <h2 key={i} className="text-lg font-semibold text-white mt-4 mb-2">{line.replace('## ', '')}</h2>;
-                }
-                if (line.startsWith('# ')) {
-                  return <h1 key={i} className="text-xl font-bold text-white mt-4 mb-2">{line.replace('# ', '')}</h1>;
-                }
-                if (line.startsWith('- ')) {
-                  return <li key={i} className="text-gray-300 ml-4 list-disc">{line.replace('- ', '')}</li>;
-                }
-                if (line.trim() === '') {
-                  return <div key={i} className="h-2" />;
-                }
-                return <p key={i} className="text-gray-300 mb-1">{line}</p>;
-              })}
+              {renderContent(current.content)}
             </div>
 
             {/* Code Example */}

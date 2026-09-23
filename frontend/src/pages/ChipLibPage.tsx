@@ -1,5 +1,5 @@
-import { useState, useCallback, useMemo } from 'react';
-import { Search, Cpu, Filter, ExternalLink, Loader2, BookOpen } from 'lucide-react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { Search, Cpu, Filter, ExternalLink, Loader2, BookOpen, Globe } from 'lucide-react';
 import { chips, manufacturers } from '../data/chips';
 import type { Chip } from '../types';
 
@@ -15,6 +15,7 @@ export default function ChipLibPage() {
   const [selectedMfg, setSelectedMfg] = useState('');
   const [onlineResults, setOnlineResults] = useState<OnlineChip[]>([]);
   const [searchingOnline, setSearchingOnline] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const localFiltered = useMemo(() => {
     if (!search && !selectedMfg) return chips;
@@ -38,10 +39,6 @@ export default function ChipLibPage() {
       setOnlineResults([]);
       return;
     }
-    if (localFiltered.length > 0) {
-      setOnlineResults([]);
-      return;
-    }
     setSearchingOnline(true);
     try {
       // Use DuckDuckGo Instant Answer API (public, CORS-friendly)
@@ -51,7 +48,6 @@ export default function ChipLibPage() {
       if (res.ok) {
         const data = await res.json();
         const results: OnlineChip[] = [];
-        // Abstract provides a brief description
         if (data.AbstractText && data.AbstractURL) {
           results.push({
             name: data.Heading || query,
@@ -60,7 +56,6 @@ export default function ChipLibPage() {
             link: data.AbstractURL,
           });
         }
-        // Related topics
         if (data.RelatedTopics) {
           for (const topic of data.RelatedTopics) {
             if (topic.Text && topic.FirstURL) {
@@ -82,12 +77,25 @@ export default function ChipLibPage() {
     } finally {
       setSearchingOnline(false);
     }
-  }, [localFiltered.length, search, selectedMfg]);
+  }, []);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!search || search.length < 2) {
+      setOnlineResults([]);
+      return;
+    }
+    debounceRef.current = setTimeout(() => {
+      searchOnline(search);
+    }, 500);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [search, searchOnline]);
 
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setSearch(val);
-    searchOnline(val);
   };
 
   return (
@@ -133,15 +141,18 @@ export default function ChipLibPage() {
         </div>
 
         {searchingOnline && (
-          <div className="text-center py-8 text-gray-400">
-            <Loader2 size={32} className="mx-auto mb-3 animate-spin" />
+          <div className="text-center py-6 text-gray-400">
+            <Loader2 size={28} className="mx-auto mb-2 animate-spin" />
             <p className="text-sm">正在搜索在线芯片数据库...</p>
           </div>
         )}
 
         {!searchingOnline && onlineResults.length > 0 && (
           <div className="mt-6">
-            <h2 className="text-lg font-semibold text-white mb-4">在线搜索结果</h2>
+            <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+              <Globe size={18} className="text-green-400" />
+              在线搜索结果
+            </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {onlineResults.map((chip: OnlineChip, i: number) => (
                 <div key={i} className="bg-[#161b22] border border-[#30363d] rounded-xl p-5 hover:border-[#484f58] transition-colors">
@@ -174,6 +185,13 @@ export default function ChipLibPage() {
           <div className="text-center py-16 text-gray-500">
             <Cpu size={48} className="mx-auto mb-4 opacity-30" />
             <p>未找到匹配的芯片</p>
+          </div>
+        )}
+
+        {localFiltered.length === 0 && !search && !selectedMfg && (
+          <div className="text-center py-16 text-gray-500">
+            <Cpu size={48} className="mx-auto mb-4 opacity-30" />
+            <p>暂无芯片数据</p>
           </div>
         )}
       </div>
