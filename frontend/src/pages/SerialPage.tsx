@@ -12,6 +12,12 @@ import {
 
 let readController: AbortController | null = null;
 
+interface SerialLine {
+  text: string;
+  timestamp: string;
+  type: 'rx' | 'tx' | 'system';
+}
+
 export default function SerialPage() {
   const [connected, setConnected] = useState(false);
   const [portName, setPortName] = useState('未连接');
@@ -20,13 +26,18 @@ export default function SerialPage() {
   const [stopBits, setStopBits] = useState('1');
   const [parity, setParity] = useState<'none' | 'even' | 'odd'>('none');
   const [flowControl, setFlowControl] = useState<'none' | 'hardware'>('none');
-  const [output, setOutput] = useState<string[]>([]);
+  const [output, setOutput] = useState<SerialLine[]>([]);
   const [input, setInput] = useState('');
+  const [sendHistory, setSendHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
   const [showSettings, setShowSettings] = useState(false);
   const [hexMode, setHexMode] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [showTimestamps, setShowTimestamps] = useState(true);
   const [lineEnding, setLineEnding] = useState('\n');
   const [serialSupported, setSerialSupported] = useState(true);
+  const [rxBytes, setRxBytes] = useState(0);
+  const [txBytes, setTxBytes] = useState(0);
   const outputRef = useRef<HTMLDivElement>(null);
   const portRef = useRef<any>(null);
 
@@ -42,8 +53,13 @@ export default function SerialPage() {
     }
   }, [output, autoScroll]);
 
-  const appendOutput = useCallback((text: string) => {
-    setOutput((prev) => [...prev, text]);
+  const getTimestamp = () => {
+    const now = new Date();
+    return now.toLocaleTimeString('zh-CN', { hour12: false }) + '.' + String(now.getMilliseconds()).padStart(3, '0');
+  };
+
+  const appendOutput = useCallback((text: string, type: 'rx' | 'tx' | 'system' = 'rx') => {
+    setOutput((prev) => [...prev, { text, timestamp: getTimestamp(), type }]);
   }, []);
 
   const readLoop = useCallback(async (port: any) => {
@@ -56,23 +72,25 @@ export default function SerialPage() {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        if (hexMode) {
-          const hex = Array.from(value)
-            .map((b) => (b as number).toString(16).padStart(2, '0').toUpperCase())
-            .join(' ');
-          appendOutput(hex);
-        } else {
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split(/\r?\n/);
-          buffer = lines.pop() || '';
-          lines.forEach((line) => {
-            if (line.length > 0) appendOutput(line);
-          });
-        }
+         if (hexMode) {
+            const hex = Array.from(value)
+              .map((b) => (b as number).toString(16).padStart(2, '0').toUpperCase())
+              .join(' ');
+            appendOutput(hex, 'rx');
+            setRxBytes((prev) => prev + value.length);
+          } else {
+            buffer += decoder.decode(value, { stream: true });
+            setRxBytes((prev) => prev + value.length);
+            const lines = buffer.split(/\r?\n/);
+            buffer = lines.pop() || '';
+            lines.forEach((line) => {
+              if (line.length > 0) appendOutput(line, 'rx');
+            });
+          }
       }
     } catch (e: any) {
       if (e.name !== 'AbortError') {
-        appendOutput(`[error] ${e.message}`);
+     appendOutput(`[error] ${e.message}`, 'system');
       }
     } finally {
       reader.releaseLock();
@@ -92,6 +110,7 @@ export default function SerialPage() {
     }
     setConnected(false);
     setPortName('未连接');
+    appendOutput(`\n[ disconnected ]`, 'system');
   }, []);
 
   const handleConnect = useCallback(async () => {
@@ -111,10 +130,12 @@ export default function SerialPage() {
       portRef.current = port;
       setConnected(true);
       setPortName(port.getInfo().productName || 'Serial Port');
-      appendOutput(`\n[ connected at ${baudRate} baud | ${dataBits}${parity.toUpperCase()[0]}${stopBits} | flow:${flowControl} ]`);
+       setRxBytes(0);
+        setTxBytes(0);
+        appendOutput(`\n[ connected at ${baudRate} baud | ${dataBits}${parity.toUpperCase()[0]}${stopBits} | flow:${flowControl} ]`, 'system');
       readLoop(port);
     } catch (e: any) {
-      appendOutput(`[error] ${e.message}`);
+      appendOutput(`[error] ${e.message}`, 'system');
     }
   }, [connected, baudRate, dataBits, stopBits, parity, flowControl, handleDisconnect, appendOutput, readLoop]);
 
@@ -135,8 +156,14 @@ export default function SerialPage() {
     }
     const writer = portRef.current.writable.getWriter();
     writer.write(data).then(() => writer.releaseLock());
-    appendOutput(`> ${input}`);
+    setTxBytes((prev) => prev + data.length);
+    setSendHistory((prev) => {
+      const filtered = prev.filter((s) => s !== input);
+      return [input, ...filtered].slice(0, 50);
+    });
+    appendOutput(`> ${input}`, 'tx');
     setInput('');
+    setHistoryIndex(-1);
   }, [input, connected, hexMode, lineEnding, appendOutput]);
 
   useEffect(() => {
@@ -146,7 +173,11 @@ export default function SerialPage() {
     };
   }, []);
 
-  const handleClear = () => setOutput([]);
+  const handleClear = () => {
+    setOutput([]);
+    setRxBytes(0);
+    setTxBytes(0);
+  };
   const handleSave = () => {
     const blob = new Blob([output.join('\n')], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -327,6 +358,15 @@ export default function SerialPage() {
               <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer select-none">
                 <input
                   type="checkbox"
+                  checked={showTimestamps}
+                  onChange={(e) => setShowTimestamps(e.target.checked)}
+                  className="accent-blue-500"
+                />
+                时间戳
+              </label>
+              <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer select-none">
+                <input
+                  type="checkbox"
                   checked={autoScroll}
                   onChange={(e) => setAutoScroll(e.target.checked)}
                   className="accent-blue-500"
@@ -348,6 +388,32 @@ export default function SerialPage() {
             </div>
           </div>
 
+          {/* Stats Bar */}
+          <div className="flex items-center justify-between px-4 py-1.5 bg-[#0d1117] border-b border-[#30363d] text-xs text-gray-500">
+            <div className="flex items-center gap-4">
+              <span className="flex items-center gap-1">
+                {connected ? (
+                  <>
+                    <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                    <span className="text-green-400">在线</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="w-2 h-2 rounded-full bg-gray-500" />
+                    <span>离线</span>
+                  </>
+                )}
+              </span>
+              {connected && (
+                <>
+                  <span>↑ TX: {txBytes.toLocaleString()} B</span>
+                  <span>↓ RX: {rxBytes.toLocaleString()} B</span>
+                </>
+              )}
+            </div>
+            <span>{output.length} 条消息</span>
+          </div>
+
           {/* Output */}
           <div
             ref={outputRef}
@@ -362,14 +428,19 @@ export default function SerialPage() {
               </div>
             ) : (
               output.map((line, i) => (
-                <div key={i} className="whitespace-pre-wrap">
-                  {line.startsWith('>') ? (
-                    <span className="text-blue-400">{line}</span>
-                  ) : line.startsWith('[') && line.includes(']') ? (
-                    <span className="text-gray-500">{line}</span>
-                  ) : (
-                    <span>{line}</span>
+                <div key={i} className="flex gap-2">
+                  {showTimestamps && (
+                    <span className="text-gray-600 select-none shrink-0">{line.timestamp}</span>
                   )}
+                  <span className="whitespace-pre-wrap">
+                    {line.type === 'tx' ? (
+                      <span className="text-blue-400">{line.text}</span>
+                    ) : line.type === 'system' ? (
+                      <span className="text-gray-500">{line.text}</span>
+                    ) : (
+                      <span>{line.text}</span>
+                    )}
+                  </span>
                 </div>
               ))
             )}
@@ -381,9 +452,33 @@ export default function SerialPage() {
               <input
                 type="text"
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                placeholder={hexMode ? '输入HEX数据 (e.g. DE AD BE EF)...' : '输入数据并回车发送...'}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  setHistoryIndex(-1);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleSend();
+                  } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    if (sendHistory.length > 0) {
+                      const newIndex = historyIndex === -1 ? 0 : Math.min(historyIndex + 1, sendHistory.length - 1);
+                      setHistoryIndex(newIndex);
+                      setInput(sendHistory[newIndex]);
+                    }
+                  } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    if (historyIndex > 0) {
+                      const newIndex = historyIndex - 1;
+                      setHistoryIndex(newIndex);
+                      setInput(sendHistory[newIndex]);
+                    } else {
+                      setHistoryIndex(-1);
+                      setInput('');
+                    }
+                  }
+                }}
+                placeholder={hexMode ? '输入HEX数据 (e.g. DE AD BE EF)...' : '输入数据并回车发送 (↑/↓ 历史)...'}
                 disabled={!connected}
                 className="flex-1 bg-[#161b22] border border-[#30363d] rounded-lg px-4 py-2 text-sm
                   text-white placeholder-gray-500 focus:outline-none focus:border-blue-500

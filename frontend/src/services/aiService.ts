@@ -7,6 +7,37 @@ const SYSTEM_PROMPT = `你是一个嵌入式开发AI助手。你精通嵌入式C
 3. 如果涉及硬件操作，说明引脚配置和注意事项
 4. 代码中不要添加注释，保持简洁`;
 
+const PROXY_BASE = 'http://localhost:9999';
+
+export interface LocalServer {
+  name: string;
+  url: string;
+  chatUrl: string;
+  models: Array<{ id: string; name: string; size?: string }>;
+}
+
+export async function detectLocalServers(): Promise<LocalServer[]> {
+  try {
+    const res = await fetch(`${PROXY_BASE}/api/servers`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.servers || [];
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchLocalModels(serverName: string): Promise<Array<{ id: string; name: string; size?: string }>> {
+  try {
+    const res = await fetch(`${PROXY_BASE}/api/models?server=${encodeURIComponent(serverName)}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.models || [];
+  } catch {
+    return [];
+  }
+}
+
 export async function streamAiResponse(
   config: AiConfig,
   messages: Array<{ role: string; content: string }>,

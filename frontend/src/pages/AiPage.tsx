@@ -22,7 +22,7 @@ import {
 import Editor from '@monaco-editor/react';
 import { chips } from '../data/chips';
 import { AI_PROVIDERS, type ProviderKey, type AiConfig } from '../types/ai';
-import { streamAiResponse } from '../services/aiService';
+import { streamAiResponse, detectLocalServers, type LocalServer } from '../services/aiService';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -72,6 +72,8 @@ export default function AiPage() {
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [detectedServers, setDetectedServers] = useState<LocalServer[]>([]);
+  const [serverLoading, setServerLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // AI Config (persisted to localStorage)
@@ -86,6 +88,28 @@ export default function AiPage() {
   useEffect(() => {
     localStorage.setItem('embedkit-ai-config', JSON.stringify(config));
   }, [config]);
+
+  // Detect local servers when local provider is selected
+  useEffect(() => {
+    if (config.provider === 'local') {
+      setServerLoading(true);
+      detectLocalServers().then(servers => {
+        setDetectedServers(servers);
+        setServerLoading(false);
+        // Auto-select first model if no model configured
+        if (servers.length > 0 && (!config.model || config.model === providerInfo.defaultModel)) {
+          const firstModel = servers[0].models[0];
+          if (firstModel) {
+            setConfig(prev => ({
+              ...prev,
+              model: firstModel.id,
+              customEndpoint: `/proxy/${servers[0].chatUrl}`,
+            }));
+          }
+        }
+      }).catch(() => setServerLoading(false));
+    }
+  }, [config.provider]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -324,7 +348,9 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
     localStorage.removeItem('embedkit-ai-config');
   };
 
-  const currentModels = providerInfo.models;
+  const currentModels = config.provider === 'local'
+    ? detectedServers.flatMap(s => s.models.map(m => ({ id: m.id, label: `${s.name}: ${m.name}${m.size ? ` (${m.size})` : ''}` })))
+    : providerInfo.models;
 
   return (
     <div className="flex h-full bg-[#0d1117]">
@@ -638,11 +664,81 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
             {/* Local Provider Fields */}
             {config.provider === 'local' && (
               <div className="mb-4 space-y-3">
+                {/* Auto-detected servers */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm text-gray-400">本地服务器</label>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setServerLoading(true);
+                        const servers = await detectLocalServers();
+                        setDetectedServers(servers);
+                        setServerLoading(false);
+                      }}
+                      className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                    >
+                      <RefreshCw size={12} className={serverLoading ? 'animate-spin' : ''} />
+                      刷新
+                    </button>
+                  </div>
+                  {serverLoading ? (
+                    <div className="flex items-center justify-center py-4 text-gray-500 text-xs">
+                      <Loader2 size={14} className="animate-spin mr-2" />
+                      检测中...
+                    </div>
+                  ) : detectedServers.length > 0 ? (
+                    <div className="space-y-2">
+                      {detectedServers.map(server => (
+                        <button
+                          key={server.name}
+                          type="button"
+                          onClick={() => {
+                            const firstModel = server.models[0];
+                            if (firstModel) {
+                              setConfig(prev => ({
+                                ...prev,
+                                model: firstModel.id,
+                                customEndpoint: `/proxy/${server.chatUrl}`,
+                              }));
+                            }
+                          }}
+                          className={`w-full text-left p-2 rounded-lg border transition-all ${config.customEndpoint?.includes(server.chatUrl) ? 'bg-blue-500/20 border-blue-500' : 'bg-[#0d1117] border-[#30363d] hover:border-gray-600'}`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm text-white font-medium">{server.name}</span>
+                            <span className="text-xs text-gray-500">{server.models.length} 个模型</span>
+                          </div>
+                          <div className="text-xs text-gray-400 mt-1">{server.url}</div>
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {server.models.slice(0, 3).map(m => (
+                              <span key={m.id} className={`text-[10px] px-1.5 py-0.5 rounded ${config.model === m.id ? 'bg-blue-500/30 text-blue-300' : 'bg-gray-700 text-gray-400'}`}>
+                                {m.name}{m.size ? ` (${m.size})` : ''}
+                              </span>
+                            ))}
+                            {server.models.length > 3 && (
+                              <span className="text-[10px] text-gray-500">+{server.models.length - 3}</span>
+                            )}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-3 py-2.5">
+                      <p className="text-xs text-yellow-400 font-medium mb-1">未检测到本地 AI 服务</p>
+                      <p className="text-xs text-gray-400">请先启动以下任一服务：</p>
+                      <p className="text-xs text-gray-500 mt-0.5">• Ollama: 运行 <code className="bg-yellow-500/20 px-1 rounded">ollama serve</code></p>
+                      <p className="text-xs text-gray-500">• LM Studio: 启动并开启 Local Server</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Manual endpoint */}
                 <div>
                   <label className="block text-sm text-gray-400 mb-2">API 端点</label>
                   <input
                     type="text"
-                    value={config.customEndpoint || 'http://localhost:11434/v1/chat/completions'}
+                    value={config.customEndpoint || ''}
                     onChange={(e) => setConfig(prev => ({ ...prev, customEndpoint: e.target.value }))}
                     placeholder="http://localhost:11434/v1/chat/completions"
                     className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-blue-500"
@@ -658,17 +754,14 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
                     className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-blue-500"
                   />
                 </div>
-                <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg px-3 py-2">
-                  <p className="text-xs text-blue-400">💡 本地模式连接 Ollama、LM Studio 等本地 AI 服务。请先启动本地服务。</p>
-                  <p className="text-xs text-gray-500 mt-1">Ollama 默认: http://localhost:11434/v1/chat/completions</p>
-                  <p className="text-xs text-gray-500">LM Studio 默认: http://localhost:1234/v1/chat/completions</p>
-                </div>
+
+                {/* CORS Instructions */}
                 <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-3 py-2">
                   <p className="text-xs text-yellow-400 font-bold mb-1">⚠️ 重要：必须配置 CORS 才能使用</p>
                   <p className="text-xs text-yellow-400">由于网站部署在 github.io，浏览器会阻止直接访问 localhost。请选择以下一种方式：</p>
                   <p className="text-xs text-gray-400 mt-1">方法 1（推荐）：使用 EmbedKit 代理</p>
                   <p className="text-xs text-gray-500 ml-2">1. 在终端运行：<code className="bg-yellow-500/20 px-1 rounded">cd EmbedKit/proxy &amp;&amp; npm start</code></p>
-                  <p className="text-xs text-gray-500 ml-2">2. 端点填：<code className="bg-yellow-500/20 px-1 rounded">http://localhost:9999/?target=http://localhost:11434/v1/chat/completions</code></p>
+                  <p className="text-xs text-gray-500 ml-2">2. 上方会自动检测到你的本地服务，点击即可配置</p>
                   <p className="text-xs text-gray-400 mt-1">方法 2：配置服务器 CORS</p>
                   <p className="text-xs text-gray-500 ml-2">Ollama：<code className="bg-yellow-500/20 px-1 rounded">OLLAMA_ORIGINS=*</code> 环境变量后重启</p>
                   <p className="text-xs text-gray-500 ml-2">LM Studio：Settings → Security → 勾选 "CORS"</p>

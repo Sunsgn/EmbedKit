@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Search, Cpu, Filter, ExternalLink, Loader2 } from 'lucide-react';
+import { Search, Cpu, Filter, ExternalLink, Loader2, BookOpen } from 'lucide-react';
 import { chips, manufacturers } from '../data/chips';
 import type { Chip } from '../types';
 
@@ -16,21 +16,28 @@ export default function ChipLibPage() {
   const [onlineResults, setOnlineResults] = useState<OnlineChip[]>([]);
   const [searchingOnline, setSearchingOnline] = useState(false);
 
-  const localFiltered = chips.filter((c: Chip) => {
-    const matchSearch =
-      !search ||
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      c.cores.toLowerCase().includes(search.toLowerCase());
-    const matchMfg = !selectedMfg || c.manufacturer === selectedMfg;
-    return matchSearch && matchMfg;
-  });
+  const localFiltered = useMemo(() => {
+    if (!search && !selectedMfg) return chips;
+    const q = search.toLowerCase();
+    return chips.filter((c: Chip) => {
+      const matchSearch =
+        !q ||
+        c.name.toLowerCase().includes(q) ||
+        c.cores.toLowerCase().includes(q) ||
+        c.series.toLowerCase().includes(q) ||
+        c.manufacturer.toLowerCase().includes(q) ||
+        c.package.toLowerCase().includes(q) ||
+        c.peripherals.some((p) => p.toLowerCase().includes(q));
+      const matchMfg = !selectedMfg || c.manufacturer === selectedMfg;
+      return matchSearch && matchMfg;
+    });
+  }, [search, selectedMfg]);
 
   const searchOnline = useCallback(async (query: string) => {
     if (!query || query.length < 2) {
       setOnlineResults([]);
       return;
     }
-    // Only search online if local search yields no results
     if (localFiltered.length > 0) {
       setOnlineResults([]);
       return;
@@ -75,7 +82,7 @@ export default function ChipLibPage() {
     } finally {
       setSearchingOnline(false);
     }
-  }, [localFiltered.length]);
+  }, [localFiltered.length, search, selectedMfg]);
 
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -230,22 +237,35 @@ function ChipCard({ chip }: { chip: Chip }) {
           </div>
           <div className="flex items-center justify-between">
             <div className="text-xs text-gray-500">封装: {chip.package}</div>
-            {chip.datasheetUrl ? (
-              <a
-                href={chip.datasheetUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300"
-              >
-                <ExternalLink size={14} />
-                数据手册
-              </a>
-            ) : (
-              <span className="flex items-center gap-1 text-sm text-gray-600">
-                <ExternalLink size={14} />
-                暂无数据手册
-              </span>
-            )}
+            <div className="flex items-center gap-3">
+              {chip.reference ? (
+                <a
+                  href={chip.reference}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-sm text-green-400 hover:text-green-300"
+                >
+                  <BookOpen size={14} />
+                  用户手册
+                </a>
+              ) : null}
+              {chip.datasheetUrl ? (
+                <a
+                  href={chip.datasheetUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300"
+                >
+                  <ExternalLink size={14} />
+                  数据手册
+                </a>
+              ) : (
+                <span className="flex items-center gap-1 text-sm text-gray-600">
+                  <ExternalLink size={14} />
+                  暂无数据手册
+                </span>
+              )}
+            </div>
           </div>
         </div>
       )}
