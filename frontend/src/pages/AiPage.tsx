@@ -589,10 +589,22 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
                     >
                       <span className="text-base">{p.icon}</span>
                       <span className="truncate">{p.name}</span>
-                      {!p.requiresKey && <span className="ml-auto text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">免费</span>}
+                      {!p.requiresKey && (
+                    <>
+                      {key === 'huggingface' ? (
+                        <span className="ml-auto text-[10px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded" title="在线部署时可能受浏览器 CORS 限制">受限</span>
+                      ) : (
+                        <span className="ml-auto text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">免费</span>
+                      )}
+                    </>
+                  )}
                     </button>
                   );
                 })}
+              </div>
+              <div className="mt-2 bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2">
+                <p className="text-xs text-gray-400">💡 <span className="text-gray-300 font-medium">推荐</span>：在线部署使用 <span className="text-blue-400">OpenRouter</span>，支持 CORS 且有免费模型（Gemini 2.0 Flash、DeepSeek V3 等）</p>
+                <p className="text-xs text-gray-500 mt-1">Hugging Face 在本地开发环境（localhost）正常工作，GitHub Pages 部署可能受限</p>
               </div>
             </div>
 
@@ -646,10 +658,10 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
               </div>
             )}
 
-            {/* Hugging Face No-Key Notice */}
+            {/* Hugging Face Notice */}
             {config.provider === 'huggingface' && (
-              <div className="mb-4 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-3 py-2">
-                <p className="text-xs text-emerald-400">✓ Hugging Face 无需 API Key，可直接使用</p>
+              <div className="mb-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-3 py-2">
+                <p className="text-xs text-yellow-400">⚠️ Hugging Face 在线部署时可能因浏览器 CORS 限制无法使用。如遇"Failed to fetch"错误，请切换为 OpenRouter（有免费模型）或使用模拟模式。</p>
               </div>
             )}
 

@@ -44,7 +44,12 @@ export async function streamAiResponse(
       await streamOpenAIFormat(config, messages, endpoint, apiKey, onChunk, onDone, onError);
     }
   } catch (e: any) {
-    onError(e.message || '请求失败');
+    const msg = e.message || e.toString() || '请求失败';
+    if (config.provider === 'huggingface' && (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('CORS'))) {
+      onError('Hugging Face 请求被浏览器 CORS 策略阻止。请切换为 OpenRouter 或其他提供商，或切换到模拟模式。');
+    } else {
+      onError(msg);
+    }
   }
 }
 
