@@ -1,9 +1,9 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { Search, Cpu, Filter, ExternalLink, Loader2, BookOpen, Globe } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Search, Cpu, Filter, ExternalLink, BookOpen, Globe } from 'lucide-react';
 import { chips, manufacturers } from '../data/chips';
 import type { Chip } from '../types';
 
-interface OnlineChip {
+interface OnlineSearchLink {
   name: string;
   manufacturer: string;
   description: string;
@@ -13,9 +13,7 @@ interface OnlineChip {
 export default function ChipLibPage() {
   const [search, setSearch] = useState('');
   const [selectedMfg, setSelectedMfg] = useState('');
-  const [onlineResults, setOnlineResults] = useState<OnlineChip[]>([]);
-  const [searchingOnline, setSearchingOnline] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const [showOnlineLinks, setShowOnlineLinks] = useState(false);
 
   const localFiltered = useMemo(() => {
     if (!search && !selectedMfg) return chips;
@@ -34,64 +32,16 @@ export default function ChipLibPage() {
     });
   }, [search, selectedMfg]);
 
-  const searchOnline = useCallback(async (query: string) => {
-    if (!query || query.length < 2) {
-      setOnlineResults([]);
-      return;
-    }
-    setSearchingOnline(true);
-    try {
-      // Use DuckDuckGo Instant Answer API (public, CORS-friendly)
-      const res = await fetch(
-        `https://api.duckduckgo.com/?q=${encodeURIComponent(query + ' microchip datasheet')}&format=json&no_redirect=1&no_html=1`
-      );
-      if (res.ok) {
-        const data = await res.json();
-        const results: OnlineChip[] = [];
-        if (data.AbstractText && data.AbstractURL) {
-          results.push({
-            name: data.Heading || query,
-            manufacturer: '',
-            description: data.AbstractText,
-            link: data.AbstractURL,
-          });
-        }
-        if (data.RelatedTopics) {
-          for (const topic of data.RelatedTopics) {
-            if (topic.Text && topic.FirstURL) {
-              results.push({
-                name: topic.Text.split('|')[0]?.trim() || topic.Text,
-                manufacturer: '',
-                description: topic.Text.split('|')[1]?.trim() || '',
-                link: topic.FirstURL,
-              });
-            }
-          }
-        }
-        setOnlineResults(results.slice(0, 6));
-      } else {
-        setOnlineResults([]);
-      }
-    } catch {
-      setOnlineResults([]);
-    } finally {
-      setSearchingOnline(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (!search || search.length < 2) {
-      setOnlineResults([]);
-      return;
-    }
-    debounceRef.current = setTimeout(() => {
-      searchOnline(search);
-    }, 500);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [search, searchOnline]);
+  // Generate direct search links to chip databases
+  const onlineSearchLinks = useMemo(() => {
+    if (!search || search.length < 2) return [];
+    return [
+      { name: 'DigiKey', manufacturer: '全球元器件分销商', description: '搜索库存、价格及规格参数', link: `https://www.digikey.com/en/products/results?K=${search}` },
+      { name: 'LCSC (立创商城)', manufacturer: '元器件分销商', description: '搜索库存、价格及规格书', link: `https://www.szlcsc.com/product/search.html?k=${search}` },
+      { name: 'Octopart', manufacturer: '元器件搜索引擎', description: '多平台比价和规格查询', link: `https://octopart.com/search?q=${search}` },
+      { name: '制造商官网', manufacturer: '原厂数据', description: 'Google 搜索芯片数据手册', link: `https://www.google.com/search?q=${search}+datasheet` },
+    ] as OnlineSearchLink[];
+  }, [search]);
 
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
@@ -140,48 +90,48 @@ export default function ChipLibPage() {
           ))}
         </div>
 
-        {searchingOnline && (
-          <div className="text-center py-6 text-gray-400">
-            <Loader2 size={28} className="mx-auto mb-2 animate-spin" />
-            <p className="text-sm">正在搜索在线芯片数据库...</p>
-          </div>
-        )}
-
-        {!searchingOnline && onlineResults.length > 0 && (
+        {search && search.length >= 2 && (
           <div className="mt-6">
-            <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-              <Globe size={18} className="text-green-400" />
-              在线搜索结果
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {onlineResults.map((chip: OnlineChip, i: number) => (
-                <div key={i} className="bg-[#161b22] border border-[#30363d] rounded-xl p-5 hover:border-[#484f58] transition-colors">
-                  <div className="flex items-start justify-between mb-3">
-                    <div>
-                      <h3 className="text-lg font-semibold text-white">{chip.name}</h3>
-                      <p className="text-sm text-gray-400">{chip.manufacturer}</p>
-                    </div>
-                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-green-500/20 to-blue-500/20 flex items-center justify-center">
-                      <Cpu size={20} className="text-green-400" />
-                    </div>
-                  </div>
-                  <p className="text-sm text-gray-300 mb-3">{chip.description}</p>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <Globe size={18} className="text-green-400" />
+                在线搜索
+              </h2>
+              <button
+                onClick={() => setShowOnlineLinks(!showOnlineLinks)}
+                className="text-sm text-gray-400 hover:text-white transition-colors"
+              >
+                {showOnlineLinks ? '收起' : '展开'}
+              </button>
+            </div>
+            {showOnlineLinks && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {onlineSearchLinks.map((link, i) => (
                   <a
-                    href={chip.link}
+                    key={i}
+                    href={link.link}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300"
+                    className="bg-[#161b22] border border-[#30363d] rounded-xl p-5 hover:border-[#484f58] transition-colors block"
                   >
-                    <ExternalLink size={14} />
-                    查看详情
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <h3 className="text-lg font-semibold text-white">{link.name}</h3>
+                        <p className="text-sm text-gray-400">{link.manufacturer}</p>
+                      </div>
+                      <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-green-500/20 to-blue-500/20 flex items-center justify-center">
+                        <ExternalLink size={18} className="text-green-400" />
+                      </div>
+                    </div>
+                    <p className="text-sm text-gray-300">{link.description}</p>
                   </a>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
-        {localFiltered.length === 0 && !searchingOnline && onlineResults.length === 0 && search.length >= 2 && (
+        {localFiltered.length === 0 && search.length >= 2 && (
           <div className="text-center py-16 text-gray-500">
             <Cpu size={48} className="mx-auto mb-4 opacity-30" />
             <p>未找到匹配的芯片</p>

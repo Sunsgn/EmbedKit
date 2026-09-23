@@ -40,6 +40,8 @@ export default function SerialPage() {
   const [txBytes, setTxBytes] = useState(0);
   const outputRef = useRef<HTMLDivElement>(null);
   const portRef = useRef<any>(null);
+  const hexModeRef = useRef(hexMode);
+  useEffect(() => { hexModeRef.current = hexMode; }, [hexMode]);
 
   useEffect(() => {
     if (typeof navigator === 'undefined' || !('serial' in navigator)) {
@@ -72,7 +74,7 @@ export default function SerialPage() {
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-         if (hexMode) {
+         if (hexModeRef.current) {
             const hex = Array.from(value)
               .map((b) => (b as number).toString(16).padStart(2, '0').toUpperCase())
               .join(' ');
@@ -95,7 +97,7 @@ export default function SerialPage() {
     } finally {
       reader.releaseLock();
     }
-  }, [hexMode, appendOutput]);
+  }, [appendOutput]);
 
   const handleDisconnect = useCallback(async () => {
     if (readController) {
