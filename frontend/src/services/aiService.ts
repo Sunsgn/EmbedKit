@@ -14,16 +14,34 @@ export async function streamAiResponse(
   onDone: () => void,
   onError: (error: string) => void,
 ) {
-  if (!config.apiKey) {
+  const provider = AI_PROVIDERS[config.provider];
+  if (!provider) {
+    onError('未知的模型提供商');
+    return;
+  }
+
+  let endpoint: string = provider.endpoint;
+  let apiKey: string = provider.apiKey || config.apiKey || '';
+
+  if (config.provider === 'custom') {
+    endpoint = config.customEndpoint || '';
+    apiKey = config.customApiKey || '';
+    if (!endpoint) {
+      onError('请先配置自定义 API 地址');
+      return;
+    }
+  }
+
+  if (provider.requiresKey && !apiKey) {
     onError('请先配置 API Key');
     return;
   }
 
   try {
     if (config.provider === 'gemini') {
-      await streamGemini(config, messages, onChunk, onDone, onError);
-    } else if (config.provider === 'openrouter') {
-      await streamOpenRouter(config, messages, onChunk, onDone, onError);
+      await streamGemini(config, messages, endpoint, apiKey, onChunk, onDone, onError);
+    } else {
+      await streamOpenAIFormat(config, messages, endpoint, apiKey, onChunk, onDone, onError);
     }
   } catch (e: any) {
     onError(e.message || '请求失败');
@@ -33,19 +51,20 @@ export async function streamAiResponse(
 async function streamGemini(
   config: AiConfig,
   messages: Array<{ role: string; content: string }>,
+  endpoint: string,
+  apiKey: string,
   onChunk: (text: string) => void,
   onDone: () => void,
   onError: (error: string) => void,
 ) {
-  const provider = AI_PROVIDERS.gemini;
-  const url = provider.endpoint.replace('{model}', config.model);
+  const url = endpoint.replace('{model}', config.model);
 
   const geminiMessages = messages.map(m => ({
     role: m.role === 'assistant' ? 'model' : 'user',
     parts: [{ text: m.content }],
   }));
 
-  const response = await fetch(`${url}?key=${config.apiKey}&alt=sse`, {
+  const response = await fetch(`${url}?key=${apiKey}&alt=sse`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -64,66 +83,49 @@ async function streamGemini(
     return;
   }
 
-  const reader = response.body?.getReader();
-  if (!reader) {
-    onError('不支持流式响应');
-    return;
-  }
-
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        const data = line.slice(6).trim();
-        if (data) {
-          try {
-            const json = JSON.parse(data);
-            const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (text) {
-              onChunk(text);
-            }
-          } catch {
-            // ignore parse errors for partial JSON
-          }
-        }
-      }
+  await readStream(response, onChunk, onDone, (text) => {
+    try {
+      const json = JSON.parse(text);
+      const content = json.candidates?.[0]?.content?.parts?.[0]?.text;
+      return content || '';
+    } catch {
+      return '';
     }
-  }
-
-  onDone();
+  }, onError);
 }
 
-async function streamOpenRouter(
+async function streamOpenAIFormat(
   config: AiConfig,
   messages: Array<{ role: string; content: string }>,
+  endpoint: string,
+  apiKey: string,
   onChunk: (text: string) => void,
   onDone: () => void,
   onError: (error: string) => void,
 ) {
-  const url = AI_PROVIDERS.openrouter.endpoint;
-
   const orMessages = [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system' as const, content: SYSTEM_PROMPT },
     ...messages,
   ];
 
-  const response = await fetch(url, {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (config.provider === 'huggingface') {
+    // Hugging Face doesn't need auth header for unauthenticated access
+  } else {
+    headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+
+  if (config.provider === 'openrouter') {
+    headers['HTTP-Referer'] = window.location.origin;
+    headers['X-Title'] = 'EmbedKit AI';
+  }
+
+  const response = await fetch(endpoint, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${config.apiKey}`,
-      'HTTP-Referer': window.location.origin,
-      'X-Title': 'EmbedKit AI',
-    },
+    headers,
     body: JSON.stringify({
       model: config.model,
       messages: orMessages,
@@ -135,10 +137,28 @@ async function streamOpenRouter(
 
   if (!response.ok) {
     const err = await response.text();
-    onError(`OpenRouter API 错误 (${response.status}): ${err}`);
+    const providerName = AI_PROVIDERS[config.provider]?.name || config.provider;
+    onError(`${providerName} API 错误 (${response.status}): ${err}`);
     return;
   }
 
+  await readStream(response, onChunk, onDone, (text) => {
+    try {
+      const json = JSON.parse(text);
+      return json.choices?.[0]?.delta?.content || '';
+    } catch {
+      return '';
+    }
+  }, onError);
+}
+
+async function readStream(
+  response: Response,
+  onChunk: (text: string) => void,
+  onDone: () => void,
+  extractText: (jsonStr: string) => string,
+  onError: (error: string) => void,
+) {
   const reader = response.body?.getReader();
   if (!reader) {
     onError('不支持流式响应');
@@ -148,30 +168,30 @@ async function streamOpenRouter(
   const decoder = new TextDecoder();
   let buffer = '';
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
 
-    for (const line of lines) {
-      if (line.startsWith('data: ')) {
-        const data = line.slice(6).trim();
-        if (data && data !== '[DONE]') {
-          try {
-            const json = JSON.parse(data);
-            const text = json.choices?.[0]?.delta?.content;
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('data: ')) {
+          const data = trimmed.slice(6).trim();
+          if (data && data !== '[DONE]') {
+            const text = extractText(data);
             if (text) {
               onChunk(text);
             }
-          } catch {
-            // ignore
           }
         }
       }
     }
+  } finally {
+    reader.releaseLock();
   }
 
   onDone();

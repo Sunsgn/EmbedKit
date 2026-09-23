@@ -39,8 +39,8 @@ const quickPrompts = [
   { icon: GitPullRequest, label: '重构 I2C 代码', prompt: '帮我重构 I2C 驱动，使其更加模块化。' },
 ];
 
-const DEFAULT_PROVIDER: ProviderKey = 'gemini';
-const DEFAULT_MODEL = 'gemini-2.0-flash';
+const DEFAULT_PROVIDER: ProviderKey = 'huggingface';
+const DEFAULT_MODEL = 'meta-llama/Llama-3.3-70B-Instruct';
 
 function extractCode(content: string): string | undefined {
   const match = content.match(/```(\w+)?\n([\s\S]*?)```/);
@@ -92,8 +92,9 @@ export default function AiPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const isConfigured = config.apiKey.length > 10;
   const providerInfo = AI_PROVIDERS[config.provider];
+  const isBuiltInNoKey = !providerInfo.requiresKey;
+  const isConfigured = isBuiltInNoKey || config.apiKey.length > 10 || (config.provider === 'custom' && (config.customEndpoint?.length || 0) > 5);
 
   const handleSend = async () => {
     if (!input.trim() || isTyping) return;
@@ -340,7 +341,7 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
             )}
             {isConfigured && (
               <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full">
-                {providerInfo.name} / {currentModels.find(m => m.id === config.model)?.label || config.model}
+                {providerInfo.icon} {providerInfo.name} / {currentModels.find(m => m.id === config.model)?.label || config.model}
               </span>
             )}
           </div>
@@ -570,6 +571,88 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
               </div>
             </div>
 
+            {/* Provider Selection */}
+            <div className="mb-4">
+              <label className="block text-sm text-gray-400 mb-2">服务提供方</label>
+              <div className="grid grid-cols-2 gap-2">
+                {(Object.keys(AI_PROVIDERS) as ProviderKey[]).map((key) => {
+                  const p = AI_PROVIDERS[key];
+                  const isActive = config.provider === key;
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => {
+                        setConfig(prev => ({ ...prev, provider: key, model: p.defaultModel }));
+                      }}
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all ${isActive ? 'bg-blue-500/20 border-blue-500 text-blue-300' : 'bg-[#0d1117] border-[#30363d] text-gray-400 hover:border-gray-600'}`}
+                    >
+                      <span className="text-base">{p.icon}</span>
+                      <span className="truncate">{p.name}</span>
+                      {!p.requiresKey && <span className="ml-auto text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">免费</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* API Key (for providers that require it) */}
+            {providerInfo.requiresKey && config.provider !== 'custom' && (
+              <div className="mb-4">
+                <label className="block text-sm text-gray-400 mb-2">API Key</label>
+                <div className="relative">
+                  <Key size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                  <input
+                    type="password"
+                    value={config.apiKey}
+                    onChange={(e) => setConfig(prev => ({ ...prev, apiKey: e.target.value }))}
+                    placeholder={`输入 ${providerInfo.name} API Key`}
+                    className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-blue-500"
+                  />
+                </div>
+                <p className="text-xs text-gray-500 mt-1.5">
+                  {config.provider === 'gemini'
+                    ? '在 https://aistudio.google.com/apikey 获取 Gemini API Key'
+                    : config.provider === 'openrouter'
+                      ? '在 https://openrouter.ai/keys 获取 OpenRouter API Key（有免费额度）'
+                      : ''}
+                </p>
+              </div>
+            )}
+
+            {/* Custom Provider Fields */}
+            {config.provider === 'custom' && (
+              <div className="mb-4 space-y-3">
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">API 端点</label>
+                  <input
+                    type="text"
+                    value={config.customEndpoint}
+                    onChange={(e) => setConfig(prev => ({ ...prev, customEndpoint: e.target.value }))}
+                    placeholder="https://api.example.com/v1/chat/completions"
+                    className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">API Key（可选）</label>
+                  <input
+                    type="password"
+                    value={config.customApiKey}
+                    onChange={(e) => setConfig(prev => ({ ...prev, customApiKey: e.target.value }))}
+                    placeholder="输入自定义 API Key"
+                    className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Hugging Face No-Key Notice */}
+            {config.provider === 'huggingface' && (
+              <div className="mb-4 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-3 py-2">
+                <p className="text-xs text-emerald-400">✓ Hugging Face 无需 API Key，可直接使用</p>
+              </div>
+            )}
+
             {/* Model Selection */}
             <div className="mb-4">
               <label className="block text-sm text-gray-400 mb-2">模型</label>
@@ -584,31 +667,9 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
               </select>
             </div>
 
-            {/* API Key */}
-            <div className="mb-4">
-              <label className="block text-sm text-gray-400 mb-2">API Key</label>
-              <div className="relative">
-                <Key size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-                <input
-                  type="password"
-                  value={config.apiKey}
-                  onChange={(e) => setConfig(prev => ({ ...prev, apiKey: e.target.value }))}
-                  placeholder={config.provider === 'gemini' ? 'AIza...' : 'sk-or-...'}
-                  className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-blue-500"
-                />
-              </div>
-              <p className="text-xs text-gray-500 mt-1.5">
-                {config.provider === 'gemini'
-                  ? '在 https://aistudio.google.com/apikey 获取 Gemini API Key（免费）'
-                  : '在 https://openrouter.ai/keys 获取 OpenRouter API Key（免费额度）'}
-              </p>
-            </div>
-
             {/* Status & Actions */}
             <div className="flex items-center justify-between">
-              <div className={`text-xs px-2 py-1 rounded-full ${
-                isConfigured ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
-              }`}>
+              <div className={`text-xs px-2 py-1 rounded-full ${isConfigured ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
                 {isConfigured ? '✓ 已配置' : '未配置（使用模拟模式）'}
               </div>
               <div className="flex gap-2">
