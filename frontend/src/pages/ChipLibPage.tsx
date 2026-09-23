@@ -1,113 +1,152 @@
-import { useState, useMemo } from 'react';
-import { Search, Cpu, Filter, ExternalLink, BookOpen, Globe } from 'lucide-react';
+import { useState, useMemo, useCallback } from 'react';
+import { Search, Cpu, Filter, ExternalLink, BookOpen, Globe, FileText, ReplaceAll, ShoppingCart, Layers } from 'lucide-react';
 import { chips, manufacturers } from '../data/chips';
 import type { Chip } from '../types';
 
-interface OnlineChip {
+type LinkType = 'datasheet' | 'datasheet-aggregate' | 'reference-design' | 'alternative' | 'distributor';
+
+interface ChipLink {
   name: string;
-  manufacturer: string;
+  source: string;
   description: string;
   link: string;
-  type: 'datasheet' | 'wiki' | 'manual';
+  type: LinkType;
 }
 
-// Detect manufacturer from chip name
-const detectManufacturer = (name: string): string => {
+const MANUFACTURER_RULES: Array<{ name: string; prefixes: string[]; productUrl: (q: string) => string; datasheetUrl?: (q: string) => string }> = [
+  { name: 'Texas Instruments', prefixes: ['MSP430', 'LM4F', 'TMS570', 'LM3S', 'TM4C', 'TMS320', 'LM', 'TLV', 'TPS', 'SN74', 'SN65', 'UC', 'BQ', 'INA', 'OPA', 'DAC', 'ADC', 'LPM'], productUrl: q => `https://www.ti.com/product/${q}`, datasheetUrl: q => `https://www.ti.com/lit/gpn/${q}` },
+  { name: 'STMicroelectronics', prefixes: ['STM32', 'STM8', 'L476', 'L552', 'SPC5', 'STSPIN', 'STEVAL'], productUrl: q => `https://www.st.com/en/microcontrollers-microprocessors/${q.toLowerCase()}.html`, datasheetUrl: q => `https://www.st.com/resource/en/datasheet/${q.toLowerCase()}.pdf` },
+  { name: 'Microchip', prefixes: ['PIC', 'PIC1', 'PIC2', 'PIC3', 'PIC16', 'PIC18', 'PIC24', 'PIC32', 'ATSAME', 'AT32UC', 'ATMEGA', 'ATTINY', 'ATSAMD', 'AVR', 'DSPIC'], productUrl: q => `https://www.microchip.com/wwwproducts/en/${q}` },
+  { name: 'NXP', prefixes: ['K20', 'K64', 'K1', 'K2', 'K3', 'K4', 'K6', 'K80', 'LPC', 'IMX', 'i.MX', 'MCF', 'S32K', 'TWR', 'MCX', 'RT1', 'RT6'], productUrl: q => `https://www.nxp.com/docs/en/data-sheet/${q.toUpperCase()}.pdf` },
+  { name: 'Espressif', prefixes: ['ESP'], productUrl: q => `https://www.espressif.com/en/products/socs/details/${q.toLowerCase()}` },
+  { name: 'GigaDevice', prefixes: ['GD32'], productUrl: q => `https://www.gd-mcu.com/product.html?id=${q.toUpperCase()}` },
+  { name: 'Raspberry Pi', prefixes: ['RP2'], productUrl: q => `https://www.raspberrypi.com/documentation/microcontrollers/${q.toLowerCase()}.html` },
+  { name: 'Nordic', prefixes: ['NRF52', 'NRF53', 'NRF51', 'NRF54', 'NRF24', 'NRF5'], productUrl: q => `https://www.nordicsemi.com/products/${q.toLowerCase()}` },
+  { name: 'Analog Devices', prefixes: ['AD', 'ADA', 'ADF', 'ADM', 'ADSP', 'MAX', 'MAXIM'], productUrl: q => `https://www.analog.com/en/products/${q.toUpperCase()}.html` },
+  { name: 'Infineon', prefixes: ['XMC', 'CY8C', 'CY8P', 'SAC', 'TC3', 'TC2', 'TLX', 'XEE', 'XMC1', 'XMC2', 'XMC4', 'XMC14', 'XMC47', 'XMC48'], productUrl: q => `https://www.infineon.com/cms/en/product/microcontroller/${q.toLowerCase()}` },
+  { name: 'Renesas', prefixes: ['RL78', 'RX', 'RH850', 'R7F', 'RA', 'RL', 'RZ'], productUrl: q => `https://www.renesas.com/us/en/products/${q.toUpperCase()}` },
+  { name: 'ON Semiconductor', prefixes: ['MC68', 'MC9S', 'Freescale', 'MK', 'KL', 'KW', 'KV', 'KE', 'FR'], productUrl: q => `https://www.onsemi.com/detail/html/${q.toUpperCase()}.html` },
+  { name: 'Dialog Semiconductor', prefixes: ['DA14', 'DA16', 'DA17'], productUrl: q => `https://www.dialog-semiconductor.com/products/${q.toLowerCase()}` },
+  { name: 'Actions', prefixes: ['AT32', 'AT62', 'AT32F', 'AT32V'], productUrl: q => `https://www.action-semi.com/en/products/details.html?mcuId=${q.toUpperCase()}` },
+  { name: 'WCH', prefixes: ['CH32', 'CH57', 'CH58', 'WCH'], productUrl: q => `https://www.wch-ic.com/search/${q.toUpperCase()}` },
+  { name: 'Beken', prefixes: ['BK'], productUrl: q => `https://www.beken.com/search/${q.toUpperCase()}` },
+  { name: 'MindMotion', prefixes: ['MM32'], productUrl: q => `https://www.mindmotion.com/web/search/${q.toUpperCase()}` },
+  { name: 'Holtek', prefixes: ['HT'], productUrl: q => `https://www.htek.com.tw/product.html?m=search&s=${q.toUpperCase()}` },
+  { name: 'YangTze Memory', prefixes: ['TM'], productUrl: q => `https://www.tm-micro.com/product.html?m=search&s=${q.toUpperCase()}` },
+];
+
+const detectManufacturer = (name: string): typeof MANUFACTURER_RULES[number] | null => {
   const n = name.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  if (n.startsWith('STM32') || n.startsWith('STM8')) return 'STMicroelectronics';
-  if (n.startsWith('MSP430') || n.startsWith('LM4F') || n.startsWith('TMS570') || n.startsWith('LM3S') || n.startsWith('TM4C')) return 'Texas Instruments';
-  if (n.startsWith('PIC') || n.startsWith('ATSAME') || n.startsWith('AT32UC') || n.startsWith('ATMEGA') || n.startsWith('ATTINY') || n.startsWith('ATSAMD')) return 'Microchip';
-  if (n.startsWith('K20') || n.startsWith('K64') || n.startsWith('LPC') || n.startsWith('IMX')) return 'NXP';
-  if (n.startsWith('ESP')) return 'Espressif';
-  if (n.startsWith('GD32')) return 'GigaDevice';
-  if (n.startsWith('RP2')) return 'Raspberry Pi';
-  if (n.startsWith('NRF52') || n.startsWith('NRF53')) return 'Nordic';
-  return '';
+  for (const rule of MANUFACTURER_RULES) {
+    for (const prefix of rule.prefixes) {
+      if (n.startsWith(prefix.toUpperCase())) {
+        return rule;
+      }
+    }
+  }
+  return null;
 };
 
-// Build datasheet links based on detected manufacturer
-const buildDatasheetLinks = (q: string): OnlineChip[] => {
-  const results: OnlineChip[] = [];
-  const mfg = detectManufacturer(q);
+const buildChipLinks = (q: string): ChipLink[] => {
+  const results: ChipLink[] = [];
+  const rule = detectManufacturer(q);
 
-  // Manufacturer-specific direct links
-  if (mfg === 'Texas Instruments') {
+  // 1. Manufacturer official links
+  if (rule) {
     results.push({
-      name: `${q} - TI 产品页`,
-      manufacturer: 'Texas Instruments',
-      description: 'TI 官方产品页面，直接下载 datasheet PDF',
-      link: `https://www.ti.com/product/${q}`,
+      name: `${q} - ${rule.name} 产品页`,
+      source: rule.name,
+      description: `${rule.name} 官方产品页面`,
+      link: rule.productUrl(q),
       type: 'datasheet',
     });
-    results.push({
-      name: `${q} - TI Datasheet`,
-      manufacturer: 'Texas Instruments',
-      description: 'TI 直接 datasheet PDF 链接',
-      link: `https://www.ti.com/lit/gpn/${q}`,
-      type: 'datasheet',
-    });
-  } else if (mfg === 'STMicroelectronics') {
-    results.push({
-      name: `${q} - ST 产品页`,
-      manufacturer: 'STMicroelectronics',
-      description: 'ST 官方产品页面，包含 datasheet 下载',
-      link: `https://www.st.com/en/microcontrollers-microprocessors/${q.toLowerCase()}.html`,
-      type: 'datasheet',
-    });
-    results.push({
-      name: `${q} - ST Datasheet PDF`,
-      manufacturer: 'STMicroelectronics',
-      description: 'ST 直接 datasheet PDF 链接',
-      link: `https://www.st.com/resource/en/datasheet/${q.toLowerCase()}.pdf`,
-      type: 'datasheet',
-    });
-  } else if (mfg === 'Microchip') {
-    results.push({
-      name: `${q} - Microchip 产品页`,
-      manufacturer: 'Microchip',
-      description: 'Microchip 官方产品页面，包含 datasheet 下载',
-      link: `https://www.microchip.com/wwwproducts/en/${q}`,
-      type: 'datasheet',
-    });
-  } else if (mfg === 'NXP') {
-    results.push({
-      name: `${q} - NXP Datasheet`,
-      manufacturer: 'NXP',
-      description: 'NXP 直接 datasheet PDF 链接',
-      link: `https://www.nxp.com/docs/en/data-sheet/${q.toUpperCase()}.pdf`,
-      type: 'datasheet',
-    });
-  } else if (mfg === 'Espressif') {
-    results.push({
-      name: `${q} - Espressif 产品页`,
-      manufacturer: 'Espressif',
-      description: '乐鑫官方产品页面，包含技术文档',
-      link: `https://www.espressif.com/en/products/socs/details/${q.toLowerCase()}`,
-      type: 'datasheet',
-    });
+    if (rule.datasheetUrl) {
+      results.push({
+        name: `${q} - 直接下载 PDF`,
+        source: rule.name,
+        description: '官方 Datasheet PDF 直链',
+        link: rule.datasheetUrl(q),
+        type: 'datasheet',
+      });
+    }
   }
 
-  // Distributor search links (always available)
+  // 2. Datasheet aggregation sites
   results.push({
-    name: `Octopart - ${q}`,
-    manufacturer: '元器件搜索引擎',
-    description: '搜索多个分销商的 datasheet PDF',
-    link: `https://octopart.com/search?q=${encodeURIComponent(q)}`,
-    type: 'datasheet',
+    name: ` datasheet - ${q}`,
+    source: 'DATASHEET搜索',
+    description: '全球 datasheet PDF 数据库',
+    link: `https://www.datasheet.com/search?q=${encodeURIComponent(q)}`,
+    type: 'datasheet-aggregate',
   });
   results.push({
-    name: `立创商城 - ${q}`,
-    manufacturer: 'LCSC',
+    name: `alldatasheet - ${q}`,
+    source: 'alldatasheet',
+    description: 'PDF datasheet 查看器和下载',
+    link: `https://www.alldatasheet.com/view.jsp?Searchword=${encodeURIComponent(q)}`,
+    type: 'datasheet-aggregate',
+  });
+  results.push({
+    name: `icpdf - ${q}`,
+    source: 'icpdf',
+    description: 'IC datasheet PDF 在线查看',
+    link: `https://www.icpdf.com/s?q=${encodeURIComponent(q)}`,
+    type: 'datasheet-aggregate',
+  });
+
+  // 3. Reference design & development board
+  results.push({
+    name: `参考设计 - ${q}`,
+    source: '参考设计',
+    description: '参考电路、评估板和开发套件',
+    link: `https://www.digikey.com/en/products/detail?q=${encodeURIComponent(q)}&k=development+board&k=evaluation+kit`,
+    type: 'reference-design',
+  });
+
+  // 4. Alternative / cross-reference
+  results.push({
+    name: `替代型号 - ${q}`,
+    source: '替代查询',
+    description: '查找引脚兼容替代型号、国产替代',
+    link: `https://www.semiee.com/search?searchModel=${encodeURIComponent(q)}`,
+    type: 'alternative',
+  });
+  results.push({
+    name: `交叉参考 - ${q}`,
+    source: 'Cross Reference',
+    description: '查找等效和兼容型号',
+    link: `https://www.findchips.com/search/${encodeURIComponent(q)}`,
+    type: 'alternative',
+  });
+
+  // 5. Distributors
+  results.push({
+    name: `购买 - ${q}`,
+    source: 'Octopart',
+    description: '搜索多个分销商的库存和价格',
+    link: `https://octopart.com/search?q=${encodeURIComponent(q)}`,
+    type: 'distributor',
+  });
+  results.push({
+    name: `购买 - ${q}`,
+    source: '立创商城',
     description: '国产元器件分销，支持 datasheet 预览',
     link: `https://www.szlcsc.com/product/search.html?k=${encodeURIComponent(q)}`,
-    type: 'datasheet',
+    type: 'distributor',
   });
   results.push({
-    name: `DigiKey - ${q}`,
-    manufacturer: 'DigiKey',
-    description: '全球最大元器件分销商，PDF 规格书下载',
+    name: `购买 - ${q}`,
+    source: 'DigiKey',
+    description: '全球最大元器件分销商',
     link: `https://www.digikey.com/en/products/results?K=${encodeURIComponent(q)}`,
-    type: 'datasheet',
+    type: 'distributor',
+  });
+  results.push({
+    name: `购买 - ${q}`,
+    source: 'Mouser',
+    description: '新品授权分销商',
+    link: `https://www.mouser.com.cn/Search/Results.aspx?Keyword=${encodeURIComponent(q)}`,
+    type: 'distributor',
   });
 
   return results;
@@ -137,7 +176,7 @@ export default function ChipLibPage() {
   // Generate datasheet links based on search query
   const onlineResults = useMemo(() => {
     if (!search || search.length < 2) return [];
-    return buildDatasheetLinks(search.trim());
+    return buildChipLinks(search.trim());
   }, [search]);
 
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -188,49 +227,42 @@ export default function ChipLibPage() {
         </div>
 
         {search && search.length >= 2 && (
-          <div className="mt-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                <Globe size={18} className="text-green-400" />
-                在线搜索结果 (Datasheet & 厂商官网)
-              </h2>
-              <span className="text-xs text-gray-500">{onlineResults.length} 条结果</span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {onlineResults.map((result, i) => {
-                const iconBg = result.type === 'datasheet'
-                  ? 'from-blue-500/20 to-cyan-500/20'
-                  : result.type === 'wiki'
-                    ? 'from-yellow-500/20 to-orange-500/20'
-                    : 'from-green-500/20 to-teal-500/20';
-                const iconColor = result.type === 'datasheet'
-                  ? 'text-blue-400'
-                  : result.type === 'wiki'
-                    ? 'text-yellow-400'
-                    : 'text-green-400';
-                const Icon = result.type === 'datasheet' ? BookOpen : result.type === 'wiki' ? Globe : ExternalLink;
-                return (
-                  <a
-                    key={i}
-                    href={result.link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="bg-[#161b22] border border-[#30363d] rounded-xl p-5 hover:border-[#484f58] transition-colors block"
-                  >
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-base font-semibold text-white truncate">{result.name}</h3>
-                        <p className="text-xs text-gray-400">{result.manufacturer}</p>
-                      </div>
-                      <div className={`w-10 h-10 rounded-lg bg-gradient-to-br ${iconBg} flex items-center justify-center flex-shrink-0 ml-3`}>
-                        <Icon size={16} className={iconColor} />
-                      </div>
-                    </div>
-                    <p className="text-xs text-gray-300 line-clamp-2">{result.description}</p>
-                  </a>
-                );
-              })}
-            </div>
+          <div className="mt-6 space-y-6">
+            {/* Datasheet section */}
+            {(() => {
+              const ds = onlineResults.filter(r => r.type === 'datasheet' || r.type === 'datasheet-aggregate');
+              if (ds.length === 0) return null;
+              return (
+                <LinkSection title="数据手册 & 厂商官网" icon={FileText} color="blue" items={ds} />
+              );
+            })()}
+
+            {/* Reference design section */}
+            {(() => {
+              const rd = onlineResults.filter(r => r.type === 'reference-design');
+              if (rd.length === 0) return null;
+              return (
+                <LinkSection title="参考设计 & 评估板" icon={Layers} color="purple" items={rd} />
+              );
+            })()}
+
+            {/* Alternative section */}
+            {(() => {
+              const alt = onlineResults.filter(r => r.type === 'alternative');
+              if (alt.length === 0) return null;
+              return (
+                <LinkSection title="替代型号 & 交叉参考" icon={ReplaceAll} color="yellow" items={alt} />
+              );
+            })()}
+
+            {/* Distributor section */}
+            {(() => {
+              const dist = onlineResults.filter(r => r.type === 'distributor');
+              if (dist.length === 0) return null;
+              return (
+                <LinkSection title="采购渠道" icon={ShoppingCart} color="green" items={dist} />
+              );
+            })()}
           </div>
         )}
 
@@ -247,6 +279,50 @@ export default function ChipLibPage() {
             <p>暂无芯片数据</p>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+const LINK_STYLES: Record<string, { bg: string; color: string }> = {
+  blue: { bg: 'from-blue-500/20 to-cyan-500/20', color: 'text-blue-400' },
+  purple: { bg: 'from-purple-500/20 to-pink-500/20', color: 'text-purple-400' },
+  yellow: { bg: 'from-yellow-500/20 to-orange-500/20', color: 'text-yellow-400' },
+  green: { bg: 'from-green-500/20 to-teal-500/20', color: 'text-green-400' },
+};
+
+function LinkSection({ title, icon: Icon, color, items }: { title: string; icon: any; color: string; items: ChipLink[] }) {
+  const style = LINK_STYLES[color] || LINK_STYLES.blue;
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-base font-semibold text-white flex items-center gap-2">
+          <Icon size={16} className={style.color} />
+          {title}
+        </h2>
+        <span className="text-xs text-gray-500">{items.length} 条</span>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {items.map((item, i) => (
+          <a
+            key={i}
+            href={item.link}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-[#161b22] border border-[#30363d] rounded-lg p-4 hover:border-[#484f58] transition-colors block group"
+          >
+            <div className="flex items-start gap-3">
+              <div className={`w-8 h-8 rounded-md bg-gradient-to-br ${style.bg} flex items-center justify-center flex-shrink-0 mt-0.5`}>
+                <ExternalLink size={14} className={style.color} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-semibold text-white truncate group-hover:text-blue-300 transition-colors">{item.name}</h3>
+                <p className="text-xs text-gray-400 mt-0.5">{item.source}</p>
+                <p className="text-xs text-gray-500 mt-1 line-clamp-1">{item.description}</p>
+              </div>
+            </div>
+          </a>
+        ))}
       </div>
     </div>
   );
