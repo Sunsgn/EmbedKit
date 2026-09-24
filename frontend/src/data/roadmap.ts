@@ -25,7 +25,7 @@ export const roadmapPhases: RoadmapPhase[] = [
         ],
         resources: [
           { title: 'C 语言教程', url: 'https://www.runoob.com/cprogramming/c-tutorial.html', lang: 'zh', type: 'doc' },
-          { title: 'C Language Tutorial - TutorialsPoint', url: 'https://www.tutorialspoint.com/cprogramming/index.htm', lang: 'en', type: 'doc' },
+          { title: 'C Language Tutorial - W3Schools', url: 'https://www.w3schools.com/c/', lang: 'en', type: 'doc' },
           { title: 'C语言入门教程 - 黑马程序员', url: 'https://www.bilibili.com/video/BV1et411b7SU', lang: 'zh', type: 'video' },
         ],
         codeExample: `#include <stdio.h>
@@ -105,7 +105,7 @@ int main() {
         ],
         resources: [
           { title: 'C 指针详解', url: 'https://www.runoob.com/cprogramming/c-pointers.html', lang: 'zh', type: 'doc' },
-          { title: 'Pointers in C - GeeksForGeeks', url: 'https://www.geeksforgeeks.org/c-pointers-set-1-introduction-and-declaration/', lang: 'en', type: 'doc' },
+          { title: 'Pointers in C - W3Schools', url: 'https://www.w3schools.com/c/c_pointers.php', lang: 'en', type: 'doc' },
           { title: 'C语言指针详解 - 菜鸟教程视频', url: 'https://www.bilibili.com/video/BV1YK411s7eG', lang: 'zh', type: 'video' },
         ],
         codeExample: `#include <stdio.h>
@@ -268,7 +268,7 @@ int main() {
         ],
         resources: [
           { title: '模拟电子技术 - 清华大学', url: 'https://www.bilibili.com/video/BV131411L7Ry', lang: 'zh', type: 'video' },
-          { title: 'Basic Electronics - AllAboutCircuits', url: 'https://www.allaboutcircuits.com/textbook/', lang: 'en', type: 'doc' },
+          { title: 'Basic Electronics - Electronics-Tutorials', url: 'https://www.electronics-tutorials.ws/', lang: 'en', type: 'doc' },
           { title: '电子技术基础(模拟部分) - 康华光', url: 'https://www.bilibili.com/video/BV1Yh411o7Qe', lang: 'zh', type: 'video' },
         ],
         codeExample: `// 模拟电路计算示例 - 使用Python进行电路分析
@@ -442,7 +442,7 @@ endmodule`,
         ],
         resources: [
           { title: 'Altium Designer教程', url: 'https://www.bilibili.com/video/BV1bQ4y1n7jY', lang: 'zh', type: 'video' },
-          { title: 'KiCad PCB Design - Phil\'s Lab', url: 'https://www.youtube.com/c/PhilseLab', lang: 'en', type: 'video' },
+          { title: 'KiCad PCB Design - Phil\'s Lab', url: 'https://www.youtube.com/@PhilsLab', lang: 'en', type: 'video' },
         ],
         codeExample: `// 原理图识读实战 - STM32最小系统电路分析
 // ============================================================
@@ -508,7 +508,7 @@ endmodule`,
         ],
         resources: [
           { title: 'STM32参考手册(RM)', url: 'https://www.st.com/resource/en/reference_manual/rm0008-stm32f101xx-stm32f102xx-stm32f103xx-advanced-armbased-32bit-mcus-stmicroelectronics.pdf', lang: 'en', type: 'doc' },
-          { title: 'STM32 HAL库文档', url: 'https://docs.st.com/stm32cube/DM00084071', lang: 'en', type: 'doc' },
+          { title: 'STM32 HAL库文档', url: 'https://www.st.com/en/ecosystems/stm32-software.html', lang: 'en', type: 'doc' },
           { title: 'STM32入门教程 - 正点原子', url: 'https://www.bilibili.com/video/BV1KJ411d7Pb', lang: 'zh', type: 'video' },
           { title: 'STM32 HAL库开发详解', url: 'https://www.bilibili.com/video/BV15K411N7CF', lang: 'zh', type: 'video' },
         ],
@@ -571,7 +571,7 @@ void NVIC_Config(void) {
           '串口调试技巧',
         ],
         resources: [
-          { title: 'STM32 GPIO教程 - 野火', url: 'https://www.firebbs.cn/forum.php', lang: 'zh', type: 'doc' },
+          { title: 'STM32 GPIO HAL库详解', url: 'https://community.st.com/t5/stm32-mcus-wiki/stm32l4-gpio-configuration-using-hal-driver/ta-p/568505', lang: 'en', type: 'doc' },
           { title: 'STM32 UART通信详解', url: 'https://www.bilibili.com/video/BV1Xh411o7Ym', lang: 'zh', type: 'video' },
         ],
         codeExample: `#include "stm32f1xx_hal.h"
@@ -927,8 +927,8 @@ void loop() {
         ],
         resources: [
           { title: 'MQTT协议入门', url: 'https://www.runoob.com/w3cnote/mqtt.html', lang: 'zh', type: 'doc' },
-          { title: 'MQTT Essentials - HiveMQ', url: 'https://www.hivemq.com/blog/mqtt-essentials-part-1-introduction-to-mqtt/', lang: 'en', type: 'doc' },
-          { title: 'ESP32 MQTT教程', url: 'https://randomnerdtutorials.com/esp32-mqtt-publish-subscribe-arduino-ide/', lang: 'en', type: 'doc' },
+          { title: 'MQTT Essentials - HiveMQ', url: 'https://www.hivemq.com/blog/mqtt-essentials/', lang: 'en', type: 'doc' },
+          { title: 'ESP32 MQTT教程', url: 'https://randomnerdtutorials.com/?s=esp32+mqtt', lang: 'en', type: 'doc' },
         ],
         codeExample: `#include <WiFi.h>
 #include <PubSubClient.h>
@@ -1002,7 +1002,7 @@ void loop() {
           'ESP-IDF OTA实现',
         ],
         resources: [
-          { title: 'ESP32 BLE教程', url: 'https://randomnerdtutorials.com/esp32-bluetooth-low-energy-ble-arduino/', lang: 'en', type: 'doc' },
+          { title: 'ESP32 BLE教程', url: 'https://randomnerdtutorials.com/?s=esp32+bluetooth', lang: 'en', type: 'doc' },
           { title: 'ESP32 OTA升级 - 乐鑫文档', url: 'https://docs.espressif.com/projects/esp-idf/zh_CN/latest/esp32/api-reference/system/ota.html', lang: 'zh', type: 'doc' },
         ],
         codeExample: `#include <Arduino.h>
@@ -1096,8 +1096,8 @@ void handleFirmwareUpdate() {
           '协议对比与选型指南',
         ],
         resources: [
-          { title: 'I2C协议详解 - NXP应用笔记', url: 'https://www.nxp.com/docs/en/application-note/AN10243.pdf', lang: 'en', type: 'doc' },
-          { title: 'SPI vs I2C vs UART', url: 'https://www.circuitbasics.com/breaking-down-serial-communication-i2c-spi-uart/', lang: 'en', type: 'doc' },
+          { title: 'I2C协议详解 - NXP应用笔记', url: 'https://www.nxp.com/docs/en/application-note/AN03377.pdf', lang: 'en', type: 'doc' },
+          { title: 'SPI vs I2C vs UART', url: 'https://www.rs-online.com/designspark/spi-vs-i2c-vs-uart', lang: 'en', type: 'doc' },
         ],
         codeExample: `// UART多机通信示例 - 使用地址帧区分目标从机
 #include "stm32f1xx_hal.h"
@@ -1161,7 +1161,7 @@ uint8_t I2C_ScanDevices(void) {
         ],
         resources: [
           { title: 'CAN总线协议详解', url: 'https://www.bilibili.com/video/BV1qY411d7XB', lang: 'zh', type: 'video' },
-          { title: 'Modbus协议入门', url: 'https://www.modbus.org/docs/modbus-mec-161-revmp.pdf', lang: 'en', type: 'doc' },
+          { title: 'Modbus协议入门', url: 'https://modbus.org/specs.php', lang: 'en', type: 'doc' },
         ],
         codeExample: `// Modbus RTU从站示例 - RS485通信
 #include "stm32f1xx_hal.h"
@@ -1248,8 +1248,8 @@ void FC06_Process(ModbusFrame_t* frame) {
           '优先级继承与天花板',
         ],
         resources: [
-          { title: 'FreeRTOS官方文档', url: 'https://www.freertos.org/Documentation/FAQ-FREERTOS-CORE', lang: 'en', type: 'doc' },
-          { title: 'FreeRTOS中文教程', url: 'https://www.cnblogs.com/bianmaze/p/13648278.html', lang: 'zh', type: 'doc' },
+          { title: 'FreeRTOS官方文档', url: 'https://www.freertos.org/Documentation/', lang: 'en', type: 'doc' },
+          { title: 'FreeRTOS中文教程', url: 'https://www.oschina.net/question/1249040_2269142', lang: 'zh', type: 'doc' },
           { title: 'FreeRTOS入门教程 - 正点原子', url: 'https://www.bilibili.com/video/BV1bQ4y1n7jY', lang: 'zh', type: 'video' },
         ],
         codeExample: `#include "FreeRTOS.h"
@@ -1510,8 +1510,8 @@ void loop() {
           '项目部署与维护',
         ],
         resources: [
-          { title: 'IoT项目合集 - Hackster', url: 'https://www.hackster.io/interest-map/internet-of-things', lang: 'en', type: 'project' },
-          { title: 'DIY综合项目 - CSDN', url: 'https://blog.csdn.net/weixin_44752416/article/details/123456789', lang: 'zh', type: 'doc' },
+          { title: 'IoT项目合集 - Hackster', url: 'https://www.hackster.io/search?q=iot&content_type=projects', lang: 'en', type: 'project' },
+          { title: 'ESP32综合项目实战 - 极客工坊', url: 'https://www.geek-workshop.com/forum.php?mod=forumdisplay&fid=84', lang: 'zh', type: 'project' },
         ],
         codeExample: `# ESP32智能家居灯控系统 - 完整项目框架
 #include <WiFi.h>
@@ -1669,7 +1669,7 @@ void loop() {
         ],
         resources: [
           { title: 'Altium Designer完整教程', url: 'https://www.bilibili.com/video/BV1bQ4y1n7jY', lang: 'zh', type: 'video' },
-          { title: 'AD官方教程', url: 'https://www.altium.com/learn/training', lang: 'en', type: 'doc' },
+          { title: 'AD官方教程', url: 'https://www.altium.com/learn', lang: 'en', type: 'doc' },
         ],
         codeExample: `; Altium Designer PCB规则脚本示例
 ; 用于自动化PCB设计规则检查 (DesignRule脚本)
@@ -1735,7 +1735,7 @@ print("BOM generated: bom.csv")`,
         ],
         resources: [
         { title: 'PCB设计EMC指南', url: 'https://www.bilibili.com/video/BV1q4411H7Kx', lang: 'zh', type: 'video' },
-           { title: 'PCB Design Rules - SparkFun', url: 'https://learn.sparkfun.com/tutorials/how-to-read-a-schematic/all', lang: 'en', type: 'doc' },
+           { title: 'PCB EMC Design Guidelines - TI', url: 'https://www.ti.com/lit/pdf/spra997', lang: 'en', type: 'doc' },
         ],
         codeExample: `; Altium Designer - PCB布线关键规则配置
 ; 对应 Design Rule 设置
