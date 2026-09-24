@@ -3,6 +3,7 @@ import type { RoadmapPhase } from '../types';
 export const roadmapPhases: RoadmapPhase[] = [
   {
     id: 'c-fundamentals',
+    prerequisites: [],
     title: 'C语言基础',
     icon: 'code',
     color: '#3b82f6',
@@ -246,6 +247,7 @@ int main() {
   },
   {
     id: 'electronics-basics',
+    prerequisites: [],
     title: '电子电路基础',
     icon: 'zap',
     color: '#f59e0b',
@@ -487,6 +489,7 @@ endmodule`,
   },
   {
     id: 'stm32-development',
+    prerequisites: ['c-fundamentals', 'electronics-basics'],
     title: 'STM32开发',
     icon: 'cpu',
     color: '#10b981',
@@ -845,6 +848,7 @@ void W25Q_PageProgram(uint32_t addr, uint8_t* data, uint16_t len) {
   },
   {
     id: 'stm32-advanced-peripherals',
+    prerequisites: ['stm32-development'],
     title: 'DMA、NVIC与看门狗',
     icon: 'cpu',
     color: '#0ea5e9',
@@ -1011,6 +1015,7 @@ void MainLoop(void) {
   },
   {
     id: 'protocols',
+    prerequisites: ['electronics-basics', 'stm32-development'],
     title: '通信协议深入',
     icon: 'network',
     color: '#06b6d4',
@@ -1322,6 +1327,7 @@ static ble_gatts_attr_t char_attr = {
   },
   {
     id: 'debugging',
+    prerequisites: ['stm32-development'],
     title: '调试技术与工具',
     icon: 'bug',
     color: '#f59e0b',
@@ -1545,6 +1551,7 @@ void HardFault_Handler(void) {
   },
   {
     id: 'build-tools',
+    prerequisites: ['c-fundamentals'],
     title: '构建工具与版本控制',
     icon: 'tools',
     color: '#64748b',
@@ -1708,6 +1715,7 @@ Thumbs.db
   },
   {
     id: 'rtos',
+    prerequisites: ['stm32-development', 'debugging'],
     title: 'RTOS实时操作系统',
     icon: 'layers',
     color: '#ef4444',
@@ -1876,6 +1884,7 @@ INIT_APP_EXPORT(application_init);`,
   },
   {
     id: 'embedded-linux',
+    prerequisites: ['build-tools', 'rtos'],
     title: '嵌入式Linux',
     icon: 'server',
     color: '#10b981',
@@ -2040,6 +2049,7 @@ bitbake core-image-minimal
   },
   {
     id: 'esp32-development',
+    prerequisites: ['c-fundamentals', 'protocols'],
     title: 'ESP32物联网开发',
     icon: 'wifi',
     color: '#8b5cf6',
@@ -2271,6 +2281,7 @@ void handleFirmwareUpdate() {
   },
   {
     id: 'iot-cloud',
+    prerequisites: ['esp32-development', 'protocols'],
     title: '物联网云平台',
     icon: 'cloud',
     color: '#6366f1',
@@ -2523,6 +2534,7 @@ void loop() {
   },
   {
     id: 'low-power',
+    prerequisites: ['stm32-development', 'stm32-advanced-peripherals'],
     title: '低功耗设计',
     icon: 'battery',
     color: '#16a34a',
@@ -2742,6 +2754,7 @@ float CalculateBatteryLife(float batteryCapacity_mAh, float avgCurrent_mA) {
   },
   {
     id: 'security',
+    prerequisites: ['rtos', 'embedded-linux'],
     title: '嵌入式安全',
     icon: 'shield',
     color: '#dc2626',
@@ -2923,6 +2936,7 @@ void EnableFlashProtection(void) {
   },
   {
     id: 'pcb-design',
+    prerequisites: ['electronics-basics'],
     title: 'PCB设计与硬件',
     icon: 'layers',
     color: '#84cc16',
@@ -3087,6 +3101,7 @@ print(f"Production files generated in {plot_dir}")`,
  },
   {
     id: 'edge-ai',
+    prerequisites: ['embedded-linux', 'rtos'],
     title: '边缘AI / TinyML',
     icon: 'brain',
     color: '#8b5cf6',

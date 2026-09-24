@@ -73,6 +73,7 @@ export interface RoadmapPhase {
   color: string;
   description: string;
   duration: string;
+  prerequisites?: string[];
   modules: RoadmapModule[];
 }
 

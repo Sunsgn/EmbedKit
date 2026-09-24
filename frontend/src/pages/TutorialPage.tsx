@@ -276,34 +276,93 @@ function ModuleDetail({ module, onClose }: { module: RoadmapModule; onClose: () 
   );
 }
 
-/* ── roadmap view component ── */
+/* ── tree roadmap view ── */
 function RoadmapView({ phases, onSelectModule }: { phases: typeof roadmapPhases; onSelectModule: (m: RoadmapModule) => void }) {
   const [selectedPhase, setSelectedPhase] = useState<string | null>(null);
+  const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);
 
-  const phaseColors: Record<string, string> = {
-    'c-fundamentals': '#60a5fa',
-    'electronics-basics': '#34d399',
-    'stm32-development': '#fbbf24',
-    'stm32-advanced-peripherals': '#f87171',
-    'protocols': '#a78bfa',
-    'debugging': '#f59e0b',
-    'build-tools': '#a78bfa',
-    'rtos': '#34d399',
-    'embedded-linux': '#06b6d4',
-    'esp32-development': '#f97316',
-    'iot-cloud': '#06b6d4',
-    'low-power': '#84cc16',
-    'security': '#f87171',
-    'pcb-design': '#f59e0b',
-    'edge-ai': '#d946ef',
+  // Find the single root (phase with no prerequisites)
+  const rootPhase = phases.find(p => !p.prerequisites || p.prerequisites.length === 0);
+
+  // Build children map: parentId -> childId[]
+  const childrenMap = useMemo(() => {
+    const map = new Map<string, string[]>();
+    phases.forEach(p => map.set(p.id, []));
+    phases.forEach(p => {
+      (p.prerequisites || []).forEach(depId => {
+        if (map.has(depId)) {
+          map.get(depId)!.push(p.id);
+        }
+      });
+    });
+    return map;
+  }, [phases]);
+
+  // Recursive tree layout: left-to-right positioning
+  const nodePositions = useMemo(() => {
+    const positions: Record<string, { x: number; y: number }> = {};
+    if (!rootPhase) return positions;
+
+    const V_SPACING = 80;
+    const H_SPACING = 200;
+
+    const layoutTree = (nodeId: string, depth: number, startY: number): number => {
+      const children = childrenMap.get(nodeId) || [];
+      const x = 80 + depth * H_SPACING;
+
+      if (children.length === 0) {
+        positions[nodeId] = { x, y: startY };
+        return V_SPACING;
+      }
+
+      let childY = startY;
+      children.forEach(childId => {
+        childY += layoutTree(childId, depth + 1, childY);
+      });
+
+      const totalChildrenHeight = childY - startY;
+      positions[nodeId] = { x, y: startY + totalChildrenHeight / 2 - 28 };
+
+      children.forEach(() => { });
+      return totalChildrenHeight;
+    };
+
+    layoutTree(rootPhase.id, 0, 60);
+    return positions;
+  }, [rootPhase, childrenMap]);
+
+  const phaseColor = (id: string) => {
+    const phase = phases.find(p => p.id === id);
+    return phase?.color || '#60a5fa';
   };
+
+  const phaseMap = useMemo(() => {
+    const map: Record<string, (typeof phases)[0]> = {};
+    phases.forEach(p => { map[p.id] = p; });
+    return map;
+  }, [phases]);
+
+  // Build tree edges from children map (left-to-right tree)
+  const edges = useMemo(() => {
+    const result: Array<{ from: string; to: string }> = [];
+    childrenMap.forEach((children, parentId) => {
+      children.forEach(childId => {
+        result.push({ from: parentId, to: childId });
+      });
+    });
+    return result;
+  }, [childrenMap]);
+
+  const totalResources = phases.reduce(
+    (sum, p) => sum + p.modules.reduce((s, m) => s + m.resources.length, 0), 0
+  );
 
   return (
     <div className="overflow-x-auto overflow-y-visible scrollbar-thin py-6">
       <svg
         className="w-full"
-        style={{ minWidth: '1600px', height: '520px' }}
-        viewBox="0 0 2100 520"
+        style={{ minWidth: '1400px', height: '580px' }}
+        viewBox="0 0 1600 580"
         preserveAspectRatio="xMidYMid meet"
       >
         <defs>
@@ -311,115 +370,160 @@ function RoadmapView({ phases, onSelectModule }: { phases: typeof roadmapPhases;
             <polygon points="0 0, 10 3.5, 0 7" fill="#484f58" />
           </marker>
           <filter id="glow">
-            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+            <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
             <feMerge>
               <feMergeNode in="coloredBlur"/>
               <feMergeNode in="SourceGraphic"/>
             </feMerge>
           </filter>
-          <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#30363d" />
-            <stop offset="100%" stopColor="#484f58" />
-          </linearGradient>
         </defs>
 
         {/* Title */}
-        <text x="1050" y="36" textAnchor="middle" fill="#ffffff" fontSize="18" fontWeight="bold">
+        <text x="800" y="30" textAnchor="middle" fill="#ffffff" fontSize="18" fontWeight="bold">
           嵌入式开发学习路线图
         </text>
-        <text x="1050" y="58" textAnchor="middle" fill="#8b949e" fontSize="12">
-          点击节点查看详情
+        <text x="800" y="50" textAnchor="middle" fill="#8b949e" fontSize="12">
+          点击节点查看详情 · 箭头表示依赖关系
         </text>
 
-        {/* Horizontal timeline line */}
-        <line x1="100" y1="100" x2="1950" y2="100" stroke="url(#lineGrad)" strokeWidth="3" />
 
-        {phases.map((phase, idx) => {
-          const x = 100 + idx * 120;
-          const color = phaseColors[phase.id] || phase.color;
+        {/* Edges - smooth left-to-right curves */}
+        {edges.map((edge, idx) => {
+          const from = nodePositions[edge.from];
+          const to = nodePositions[edge.to];
+          if (!from || !to) return null;
+          const isHighlighted = hoveredPhase === edge.from || hoveredPhase === edge.to || selectedPhase === edge.from || selectedPhase === edge.to;
+          const toColor = phaseColor(edge.to);
+          const x1 = from.x + 60;
+          const y1 = from.y;
+          const x2 = to.x - 60;
+          const y2 = to.y;
+          const cpx = (x1 + x2) / 2;
+          return (
+            <g key={`${edge.from}-${edge.to}-${idx}`}>
+              <path
+                d={`M ${x1} ${y1} C ${cpx} ${y1}, ${cpx} ${y2}, ${x2} ${y2}`}
+                fill="none"
+                stroke={isHighlighted ? toColor : '#30363d'}
+                strokeWidth={isHighlighted ? 2.5 : 1.5}
+                opacity={isHighlighted ? 0.9 : 0.5}
+                markerEnd="url(#arrowhead)"
+                style={{ transition: 'all 0.3s ease' }}
+              />
+            </g>
+          );
+        })}
+
+        {/* Nodes */}
+        {phases.map((phase) => {
+          const pos = nodePositions[phase.id];
+          if (!pos) return null;
+          const color = phaseColor(phase.id);
           const isSelected = selectedPhase === phase.id;
+          const isHovered = hoveredPhase === phase.id;
+          const isHighlighted = isHovered || isSelected;
+
+          // Check if this phase is connected to hovered/selected
+          const isConnected = hoveredPhase && (
+            (phase.prerequisites || []).includes(hoveredPhase) ||
+            phases.some(p => (p.prerequisites || []).includes(hoveredPhase) && p.id === phase.id) ||
+            (phase.prerequisites || []).includes(selectedPhase!) ||
+            phases.some(p => (p.prerequisites || []).includes(selectedPhase!) && p.id === phase.id)
+          );
+          const dimmed = (hoveredPhase || selectedPhase) && !isHovered && !isSelected && !isConnected;
 
           return (
-            <g key={phase.id}>
-              {/* Connector lines between nodes */}
-              {idx > 0 && (
-                <line
-                  x1={x - 120 + 20} y1="100"
-                  x2={x - 20} y2="100"
-                  stroke={color} strokeWidth="2"
-                  opacity="0.4"
-                  markerEnd="url(#arrowhead)"
-                />
-              )}
-
-              {/* Vertical connector to details */}
-              {isSelected && (
-                <line x1={x} y1="130" x2={x} y2="200" stroke={color} strokeWidth="2" strokeDasharray="4 2" opacity="0.6" />
-              )}
-
-              {/* Node circle */}
-              <circle
-                cx={x} cy="100" r={isSelected ? 28 : 22}
-                fill={isSelected ? `${color}30` : '#161b22'}
+            <g
+              key={phase.id}
+              opacity={dimmed ? 0.25 : 1}
+              style={{ transition: 'opacity 0.3s ease' }}
+            >
+              {/* Node background */}
+              <rect
+                x={pos.x - 60} y={pos.y - 28} width="120" height="56" rx="10"
+                fill={isHighlighted ? `${color}25` : '#0d1117'}
                 stroke={color}
-                strokeWidth={isSelected ? 3 : 2}
-                className="cursor-pointer transition-all duration-200"
-                filter={isSelected ? 'url(#glow)' : undefined}
+                strokeWidth={isHighlighted ? 2.5 : 1.5}
+                className="cursor-pointer"
+                filter={isHighlighted ? 'url(#glow)' : undefined}
                 onClick={() => setSelectedPhase(isSelected ? null : phase.id)}
+                onMouseEnter={() => setHoveredPhase(phase.id)}
+                onMouseLeave={() => setHoveredPhase(null)}
+                style={{ transition: 'all 0.3s ease' }}
               />
 
-              {/* Phase number in circle */}
-              <text x={x} y="105" textAnchor="middle" fill={color} fontSize="14" fontWeight="bold">
-                {idx + 1}
+              {/* Phase icon */}
+              <text x={pos.x} y={pos.y - 6} textAnchor="middle" fill={color} fontSize="14">
+                {phase.icon === 'code' ? '⟨⟩' : phase.icon === 'zap' ? '⚡' : phase.icon === 'cpu' ? '▣' : phase.icon === 'network' ? '◈' : phase.icon === 'layers' ? '△' : phase.icon === 'cloud' ? '☁' : phase.icon === 'bug' ? '🐛' : phase.icon === 'tools' ? '🔧' : '•'}
               </text>
 
-              {/* Phase title below node */}
+              {/* Phase title */}
               <text
-                x={x} y="148" textAnchor="middle"
-                fill={isSelected ? '#ffffff' : '#c9d1d9'}
-                fontSize="12" fontWeight={isSelected ? 'bold' : 'normal'}
+                x={pos.x} y={pos.y + 10} textAnchor="middle"
+                fill={isHighlighted ? '#ffffff' : '#c9d1d9'}
+                fontSize="11" fontWeight={isHighlighted ? 'bold' : 'normal'}
                 className="cursor-pointer"
                 onClick={() => setSelectedPhase(isSelected ? null : phase.id)}
+                onMouseEnter={() => setHoveredPhase(phase.id)}
+                onMouseLeave={() => setHoveredPhase(null)}
               >
-                {phase.title}
+                {phase.title.length > 12 ? phase.title.substring(0, 12) + '…' : phase.title}
               </text>
 
-              {/* Duration */}
-              <text x={x} y="164" textAnchor="middle" fill="#8b949e" fontSize="10">
+              {/* Duration badge */}
+              <text x={pos.x} y={pos.y + 22} textAnchor="middle" fill="#8b949e" fontSize="9">
                 {phase.duration}
               </text>
 
-              {/* Expanded modules below */}
+              {/* Expanded detail panel */}
               {isSelected && (
                 <g>
-                  {/* Module cards background */}
                   <rect
-                    x={x - 100} y="200" width="200" height={Math.min(phase.modules.length, 4) * 24 + 16}
-                    rx="6" fill="#0d1117" stroke={color} strokeWidth="1" opacity="0.95"
+                    x={pos.x + 70} y={pos.y - 60} width="240" height="130" rx="8"
+                    fill="#161b22" stroke={color} strokeWidth="1.5" opacity="0.97"
                   />
+                  {/* Title in panel */}
+                  <text x={pos.x + 84} y={pos.y - 40} fill={color} fontSize="12" fontWeight="bold">
+                    {phase.title}
+                  </text>
+                  {/* Description */}
+                  <text x={pos.x + 84} y={pos.y - 24} fill="#8b949e" fontSize="10">
+                    {phase.description.length > 35 ? phase.description.substring(0, 35) + '...' : phase.description}
+                  </text>
+                  {/* Prerequisites */}
+                  {phase.prerequisites && phase.prerequisites.length > 0 && (
+                    <text x={pos.x + 84} y={pos.y - 8} fill="#60a5fa" fontSize="9">
+                      前置: {(phase.prerequisites.map(id => phaseMap[id]?.title || id)).join(', ')}
+                    </text>
+                  )}
+                  {/* Module list */}
                   {phase.modules.slice(0, 4).map((mod, mIdx) => (
                     <g
                       key={mod.id}
                       className="cursor-pointer"
-                      onClick={() => onSelectModule(mod)}
+                      onClick={(e) => { e.stopPropagation(); onSelectModule(mod); }}
+                      onMouseEnter={(e) => {
+                        (e.target as SVGElement).setAttribute('fill', 'rgba(255,255,255,0.05)');
+                      }}
+                      onMouseLeave={(e) => {
+                        (e.target as SVGElement).setAttribute('fill', 'transparent');
+                      }}
                     >
                       <rect
-                        x={x - 94} y={208 + mIdx * 24} width="188" height="22"
-                        rx="3" fill="transparent"
-                        className="hover:fill-white/5"
+                        x={pos.x + 80} y={pos.y + 4 + mIdx * 22} width="232" height="20"
+                        rx="4" fill="transparent" stroke="none"
                       />
                       <text
-                        x={x - 86} y={223 + mIdx * 24}
+                        x={pos.x + 90} y={pos.y + 18 + mIdx * 22}
                         fill="#c9d1d9" fontSize="10"
-                        className="hover:fill-white"
                       >
-                        {mod.title.length > 22 ? mod.title.substring(0, 22) + '...' : mod.title}
+                        {mod.title.length > 24 ? mod.title.substring(0, 24) + '…' : mod.title}
                       </text>
                     </g>
                   ))}
                   {phase.modules.length > 4 && (
-                    <text x={x - 86} y={223 + 4 * 24} fill="#8b949e" fontSize="10">
-                      +{phase.modules.length - 4} more...
+                    <text x={pos.x + 90} y={pos.y + 18 + 4 * 22} fill="#8b949e" fontSize="9">
+                      +{phase.modules.length - 4} 更多模块...
                     </text>
                   )}
                 </g>
@@ -428,9 +532,9 @@ function RoadmapView({ phases, onSelectModule }: { phases: typeof roadmapPhases;
           );
         })}
 
-        {/* Bottom legend */}
-        <text x="1050" y="490" textAnchor="middle" fill="#484f58" fontSize="10">
-          总资源: {phases.reduce((sum, p) => sum + p.modules.reduce((s, m) => s + m.resources.length, 0), 0)} 个 · 覆盖 {phases.length} 个学习阶段
+        {/* Bottom stats */}
+        <text x="800" y="560" textAnchor="middle" fill="#484f58" fontSize="10">
+          总资源: {totalResources} 个 · 覆盖 {phases.length} 个学习阶段 · 树状依赖图
         </text>
       </svg>
     </div>
