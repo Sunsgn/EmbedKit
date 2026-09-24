@@ -63,7 +63,7 @@ export interface RoadmapModule {
   topics: (string | RoadmapTopic)[];
   resources: ExternalResource[];
   codeExample?: string;
-  codeLang?: 'c' | 'cpp' | 'python' | 'makefile' | 'text';
+  codeLang?: 'c' | 'cpp' | 'python' | 'makefile' | 'text' | 'verilog' | 'bash' | 'cmake';
 }
 
 export interface RoadmapPhase {

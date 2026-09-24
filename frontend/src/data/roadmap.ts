@@ -844,6 +844,172 @@ void W25Q_PageProgram(uint32_t addr, uint8_t* data, uint16_t len) {
     ],
   },
   {
+    id: 'stm32-advanced-peripherals',
+    title: 'DMA、NVIC与看门狗',
+    icon: 'cpu',
+    color: '#0ea5e9',
+    description: '深入学习DMA直接存储器访问、NVIC中断管理和看门狗定时器',
+    duration: '1-2周',
+    modules: [
+      {
+        id: 'dma-nvic-watchdog',
+        title: 'DMA、NVIC与看门狗',
+        description: '深入学习DMA直接存储器访问、NVIC中断管理和看门狗定时器',
+        topics: [
+      {
+        name: 'DMA原理与应用',
+        content: `DMA(Direct Memory Access)允许外设与内存之间直接传输数据而无需CPU干预，极大提高了数据吞吐效率。
+
+核心概念：
+• DMA通道与请求线：每个外设对应特定DMA通道，STM32F1有2个DMA控制器共12个通道。
+• 传输方向：外设到内存、内存到外设、内存到内存、外设到外设。
+• 数据宽度：支持字节(8bit)、半字(16bit)、字(32bit)传输。
+• 循环模式：使能后传输自动重新加载NDTR寄存器，适用于ADC连续采样、UART循环接收。
+• 中断与DMA请求优先级：当多个外设同时请求DMA时，由硬件优先级和软件优先级共同决定。
+
+典型应用场景：
+• ADC连续采样到内存缓冲区
+• UART循环接收（双缓冲乒乓操作）
+• SPI/I2C高速数据传输
+• DAC波形输出
+• SDIO/USB大容量数据传输`,
+      },
+      {
+        name: 'NVIC中断管理',
+        content: `NVIC(Nested Vectored Interrupt Controller)是Cortex-M内核的中断管理核心。
+
+核心概念：
+• 中断优先级分组：将4位优先级分为抢占优先级和子优先级。STM32 HAL库使用HAL_NVIC_SetPriorityGrouping()配置。
+• 抢占优先级：高抢占优先级可以打断低抢占优先级的正在执行的中断。
+• 子优先级：当抢占优先级相同时，先发生的子优先级高的中断先响应。
+• 中断嵌套：Cortex-M支持中断嵌套，进入中断时自动保存上下文到栈。
+• PendSV与SysTick：PendSV用于低优先级上下文切换，SysTick用于系统定时。
+
+配置步骤：
+1. HAL_NVIC_SetPriority()设置中断优先级
+2. HAL_NVIC_EnableIRQ()使能中断
+3. 重写IRQHandler处理函数
+4. 在中断中调用HAL_xxx_IRQHandler处理具体事件`,
+      },
+      {
+        name: '看门狗定时器',
+        content: `看门狗用于检测程序跑飞并自动复位系统，分为独立看门狗(IWDG)和窗口看门狗(WWDG)。
+
+独立看门狗(IWDG)：
+• 使用独立LSI时钟(约40kHz)，主时钟故障时仍能工作。
+• 配置预分频器和重装载值设定超时时间：Timeout = (prescaler × reload) / LSI_freq。
+• 必须定期喂狗（写入重装载值），否则计数器溢出触发复位。
+• 适用于长时间运行的关键任务，如飞行控制器、医疗设备。
+
+窗口看门狗(WWDG)：
+• 使用主时钟，精度更高。
+• 计数器必须在窗口期内喂狗：过早或过晚都会触发复位。
+• 适用于对任务周期有严格要求的系统。
+• 窗口上限=0x7F，下限由配置寄存器W[5:0]设定。
+
+最佳实践：
+• 在main循环或定时中断中喂狗
+• 关键外设任务完成后喂狗
+• 调试期间可暂时关闭看门狗
+• 生产环境务必启用`,
+      },
+    ],
+    resources: [
+      { title: 'STM32 DMA详解 - STM32参考手册', url: 'https://www.st.com/resource/en/reference_manual/dm00031020.pdf', lang: 'en', type: 'doc' },
+      { title: 'DMA教程 - 野火', url: 'https://blog.csdn.net/morixinguan/article/details/120438936', lang: 'zh', type: 'doc' },
+      { title: 'NVIC中断优先级详解', url: 'https://www.bilibili.com/video/BV1Yh411K7Lb', lang: 'zh', type: 'video' },
+      { title: '看门狗定时器教程', url: 'https://www.st.com/resource/en/application_note/an2603-how-to-avoid-latent-faults-in-your-embedded-system-with-the-watchdog-timers-stmicroelectronics.pdf', lang: 'en', type: 'doc' },
+    ],
+    codeExample: `// ============================================
+// DMA + ADC 连续采样示例
+// ============================================
+#include "stm32f1xx_hal.h"
+
+DMA_HandleTypeDef hdma_adc1;
+ADC_HandleTypeDef hadc1;
+uint16_t adcBuffer[16];  // 采样缓冲区
+
+void DMA_ADC_Init(void) {
+    // DMA配置
+    hdma_adc1.Instance = DMA1_Channel1;
+    hdma_adc1.Init.Direction = DMA_PERIPH_TO_MEMORY;
+    hdma_adc1.Init.PeriphInc = DMA_PINC_DISABLE;  // 外设地址固定
+    hdma_adc1.Init.MemInc = DMA_MINC_ENABLE;       // 内存地址递增
+    hdma_adc1.Init.PeriphDataAlignment = DMA_PDATAALIGN_HALFWORD;
+    hdma_adc1.Init.MemDataAlignment = DMA_MDATAALIGN_HALFWORD;
+    hdma_adc1.Init.Mode = DMA_CIRCULAR;            // 循环模式
+    hdma_adc1.Init.Priority = DMA_PRIORITY_HIGH;
+    HAL_DMA_Init(&hdma_adc1);
+    __HAL_LINKDMA(&hadc1, DMA_Handle, hdma_adc1);
+
+    // ADC配置
+    hadc1.Instance = ADC1;
+    hadc1.Init.ScanConvMode = ENABLE;              // 扫描多通道
+    hadc1.Init.ContinuousConvMode = ENABLE;         // 连续转换
+    hadc1.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+    hadc1.Init.NbrOfChannel = 4;                   // 4个通道
+    HAL_ADC_Init(&hadc1);
+
+    // 配置通道
+    ADC_ChannelConfTypeDef sConfig = {0};
+    sConfig.Rank = ADC_REGULAR_RANK_1;
+    sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
+    sConfig.Channel = ADC_CHANNEL_0;
+    HAL_ADC_ConfigChannel(&hadc1, &sConfig);
+
+    // 启动DMA传输
+    HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adcBuffer, 16);
+}
+
+// ============================================
+// NVIC中断优先级配置
+// ============================================
+void NVIC_Config(void) {
+    // 设置优先级分组: 2位抢占 + 2位子优先级
+    HAL_NVIC_SetPriorityGrouping(NVIC_PRIORITYGROUP_2);
+
+    // 配置各个中断优先级
+    HAL_NVIC_SetPriority(USART1_IRQn, 0, 0);    // 最高抢占优先级
+    HAL_NVIC_SetPriority(TIM2_IRQn, 1, 0);      // 定时器中断
+    HAL_NVIC_SetPriority(ADC1_IRQn, 1, 1);      // ADC转换完成
+    HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 2, 0);
+
+    // 使能中断
+    HAL_NVIC_EnableIRQ(USART1_IRQn);
+    HAL_NVIC_EnableIRQ(TIM2_IRQn);
+    HAL_NVIC_EnableIRQ(ADC1_IRQn);
+    HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+}
+
+// ============================================
+// 独立看门狗(IWDG)配置
+// ============================================
+IWDG_HandleTypeDef hiwdg;
+
+void IWDG_Init(void) {
+    hiwdg.Instance = IWDG;
+    // 超时 = 64 * 1250 / 40000 ≈ 2秒
+    hiwdg.Init.Preload = 1250;
+    hiwdg.Init.ReloadCounter = 1250;
+    hiwdg.Init.Window = IWDG_WINDOW_DISABLE;
+    hiwdg.Init.Prescaler = IWDG_PRESCALER_64;
+    HAL_IWDG_Init(&hiwdg);
+}
+
+// 在主循环或定时任务中喂狗
+void MainLoop(void) {
+    while (1) {
+        HAL_IWDG_Refresh(&hiwdg);  // 喂狗
+        ProcessSensorData();
+        HandleCommunication();
+        HAL_Delay(100);
+    }
+}`,
+    codeLang: 'c',
+  },
+    ],
+  },
+  {
     id: 'esp32-development',
     title: 'ESP32物联网开发',
     icon: 'wifi',
@@ -1158,10 +1324,14 @@ uint8_t I2C_ScanDevices(void) {
           'Modbus RTU协议帧格式',
           'Modbus TCP协议',
           'Modbus寄存器映射',
+        'CAN FD协议与动态波特率',
+        'RS485多机通信与半双工切换',
+        'RS485故障诊断与终端电阻',
         ],
         resources: [
           { title: 'CAN总线协议详解', url: 'https://www.bilibili.com/video/BV1qY411d7XB', lang: 'zh', type: 'video' },
           { title: 'Modbus协议入门', url: 'https://modbus.org/specs.php', lang: 'en', type: 'doc' },
+          { title: 'CAN FD规范', url: 'https://www.bosch.com/en/en/innovation/topics/can-fd.html', lang: 'en', type: 'doc' },
         ],
         codeExample: `// Modbus RTU从站示例 - RS485通信
 #include "stm32f1xx_hal.h"
@@ -1221,6 +1391,947 @@ void FC06_Process(ModbusFrame_t* frame) {
     uint16_t addr = frame->startAddr;
     uint16_t value = (frame->data[0] << 8) | frame->data[1];
     if (addr < 100) HoldingRegs[addr] = value;
+}`,
+        codeLang: 'c',
+      },
+      {
+        id: 'wireless-protocols',
+        title: '无线与低功耗协议',
+        description: 'LoRa、Zigbee、BLE无线通信协议',
+        topics: [
+          {
+            name: 'LoRa长距离通信',
+            content: `LoRa(Long Range)是Semtech开发的扩频调制技术，适用于远距离低功耗通信。
+
+核心概念：
+• 扩频因子(SF)：SF7-SF12，越高距离越远但速率越低。
+• 带宽(BW)：125kHz/250kHz/500kHz，带宽越大抗干扰能力越强。
+• 编码率(CR)：4/5-4/8，冗余越多纠错能力越强。
+• 发射功率：最大20dBm(EU868)/30dBm(US915)。
+• 传输距离：开阔地可达15km，城市环境2-5km。
+
+LoRaWAN协议栈：
+• 终端节点：ABP和OTAA两种激活方式
+• 网关：透明转发，星型拓扑
+• 网络服务器：处理去重、加密、ADR
+• 应用服务器：业务逻辑处理
+
+典型应用：
+• 智慧农业：土壤湿度、气象站监测
+• 智慧城市：智能水表、燃气表
+• 资产追踪：物流追踪、围栏检测`,
+          },
+          {
+            name: 'Zigbee网状网络',
+            content: `Zigbee基于IEEE 802.15.4标准，适用于短距离低功耗网状网络。
+
+网络拓扑：
+• 星型拓扑：协调器为中心，终端设备直接连接。
+• 树状拓扑：路由器转发数据，扩展覆盖范围。
+• 网状拓扑：设备间多跳路由，高可靠性。
+
+设备类型：
+• 协调器(Coordinator)：网络创建者，PAN ID分配
+• 路由器(Router)：数据转发，可扩展网络覆盖
+• 终端设备(End Device)：低功耗，睡眠唤醒机制
+
+Zigbee协议栈：
+• MAC层：CSMA-CA、GTS时隙、ACK确认
+• NWK层：路由算法(AODV)、地址分配
+• 应用层：ZCL簇定义、绑定机制
+
+与BLE对比：
+• Zigbee：多设备组网，低延迟，适合智能家居
+• BLE：手机直连，高带宽，适合穿戴设备`,
+          },
+          {
+            name: 'BLE蓝牙低功耗',
+            content: `Bluetooth Low Energy是蓝牙4.0引入的低功耗无线技术。
+
+连接模式：
+• 广播模式：设备广播数据，无需连接
+• 连接模式：主从设备建立连接，传输数据
+• 广播观察：观察者接收广播数据
+
+GATT协议：
+• Service：功能集合，如心率服务
+• Characteristic：数据单元，包含Value和Properties
+• Descriptor：特性描述，如客户端特征配置
+• UUID：16位短UUID或128位标准UUID
+
+连接参数：
+• 连接间隔：7.5ms-4s，影响功耗和延迟
+• 从机延迟：0-499，从机可跳过的连接事件数
+• 监督超时：100ms-32s，无响应断开时间
+
+典型应用：
+• 健康医疗：心率带、血糖仪
+• 智能家居：门锁、传感器
+• 工业IoT：设备监控、预测性维护`,
+          },
+        ],
+        resources: [
+          { title: 'LoRaWAN官方规范', url: 'https://lora-alliance.org/resource_hub/loraWAN/', lang: 'en', type: 'doc' },
+          { title: 'Zigbee规范文档', url: 'https://csa-iot.org/all-solutions/zigbee/', lang: 'en', type: 'doc' },
+          { title: 'BLE核心规范', url: 'https://www.bluetooth.com/specifications/bluetooth-core-specification/', lang: 'en', type: 'doc' },
+          { title: 'LoRa教程 - 野火', url: 'https://blog.csdn.net/morixinguan/article/details/121322598', lang: 'zh', type: 'doc' },
+        ],
+        codeExample: `// LoRa发送示例 - 使用RFM95模块
+#include "rfm95.h"
+
+RFM95 lora;
+
+void LoRa_Init(void) {
+    SPI_Init();
+    lora.begin();
+    lora.setFrequency(868.0);        // EU868频段
+    lora.setSpreadingFactor(7);      // SF7, 最高速率
+    lora.setSignalBandwidth(125E3);  // 125kHz带宽
+    lora.setCodingRate4(5);          // CR=4/5
+    lora.setOutputPower(17);         // 17dBm
+    lora.setGain(0);                 // 自动增益
+}
+
+void LoRa_Send(const char* message) {
+    lora.sleep();
+    lora.transmit();
+    lora.write(message);
+    lora.waitPacketSent();
+    lora.readAll();
+}
+
+char* LoRa_Receive() {
+    if (lora.receive()) {
+        char* packet = (char*)malloc(lora.getRSSI());
+        lora.read(packet);
+        return packet;
+    }
+    return NULL;
+}
+
+// BLE GATT服务定义示例 (NRF52)
+#include "ble.h"
+#include "ble_hci.h"
+
+// 自定义服务UUID: 0x00001523-1212-EFDE-1523-785FEABCD123
+#define CUSTOM_SERVICE_UUID     0x1523
+#define CUSTOM_CHAR_UUID        0x1524
+
+// 特征值属性: 可读+可写+通知
+#define CUSTOM_CHAR_PROPERTIES  (BLE_GATT_CHAR_PROPERTIES_READ | \\
+                                 BLE_GATT_CHAR_PROPERTIES_WRITE | \\
+                                 BLE_GATT_CHAR_PROPERTIES_NOTIFY)
+
+static uint8_t custom_char_value = 0;
+
+// GATT属性表
+static ble_gatts_char_md_t char_md = {
+    .char_props = {
+        .read = 1,
+        .write = 1,
+        .notify = 1,
+    },
+};
+
+static ble_gatts_attr_md_t char_attr_md = {
+    .vsd = 0,
+    .rd_auth = 0,
+    .wr_auth = 0,
+};
+
+static ble_gatts_attr_t char_attr = {
+    .uuid = &CUSTOM_CHAR_UUID,
+    .attr_md = &char_attr_md,
+    .init_len = sizeof(uint8_t),
+    .init_offs = 0,
+    .max_len = sizeof(uint8_t),
+    .p_value = &custom_char_value,
+};`,
+        codeLang: 'c',
+      },
+    ],
+  },
+  {
+    id: 'debugging',
+    title: '调试技术与工具',
+    icon: 'bug',
+    color: '#f59e0b',
+    description: '掌握JTAG/SWD调试接口、逻辑分析仪、串口调试和嵌入式调试技巧',
+    duration: '1-2周',
+    modules: [
+      {
+        id: 'debug-interfaces',
+        title: '调试接口与硬件',
+        description: 'JTAG、SWD调试协议与硬件调试器使用',
+        topics: [
+          {
+            name: 'JTAG调试协议',
+            content: `JTAG(JTAG Test Action Group)是IEEE 1149.1标准边界扫描测试接口，也被广泛用于嵌入式调试。
+
+引脚定义：
+• TCK(Test Clock)：测试时钟信号
+• TMS(Test Mode Select)：状态机控制信号
+• TDI(Test Data In)：数据输入
+• TDO(Test Data Out)：数据输出
+• TRST(Test Reset)：测试复位(可选)
+
+JTAG状态机：
+• Test-Logic-Reset -> Run-Test/Idle -> Select-DR-Scan -> Capture-DR -> Shift-DR -> Exit1-DR -> Update-DR
+• 通过TMS信号序列控制状态转移
+
+调试功能：
+• 内存读写：通过DMI/DAP访问内部SRAM和Flash
+• 寄存器读写：访问CPU核心寄存器和外设寄存器
+• 断点设置：硬件断点(FlashPatch)和软件断点(BKPT指令)
+• 单步执行：Step模式逐条指令执行`,
+          },
+          {
+            name: 'SWD调试协议',
+            content: `SWD(Serial Wire Debug)是ARM Cortex-M的串行调试接口，仅需2根信号线。
+
+引脚定义：
+• SWCLK：串行时钟
+• SWDIO：双向数据线
+• SWDIO、SWDIO和GND
+
+优势：
+• 引脚更少：相比JTAG的4根线，SWD只需2根信号线。
+• 兼容ARM CoreSight：支持相同调试功能，包括断点、数据观察点、追溯等。
+• 更低的引脚开销：适合引脚受限MCU
+
+调试器选择：
+• ST-Link V2/V3：STM32官方调试器，支持SWD/JTAG
+• J-Link：Segger出品，性能最强，支持虚拟串口
+• DAPLink：开源调试器，支持Mass Storage模式
+• CMSIS-DAP：ARM官方开源方案，兼容性好`,
+          },
+          {
+            name: '逻辑分析仪使用',
+            content: `逻辑分析仪用于捕获数字信号时序，是嵌入式调试必备工具。
+
+推荐工具：
+• Saleae Logic 2：专业级，8-16通道，支持协议解码
+• DSLogic Plus：开源方案，配合PulseView使用
+• NanoVNA：入门级，支持基础协议解码
+
+常见用途：
+• 验证I2C/SPI/UART通信时序
+• 分析PWM信号占空比和频率
+• 调试自定义协议时序
+• 测量中断响应延迟
+• 分析电源时序和启动过程
+
+PulseView使用技巧：
+• 添加协议解码器：I2C、SPI、UART、CAN、1-Wire等
+• 设置采样率：至少10倍于信号频率
+• 使用标记功能标注关键事件
+• 导出CSV数据用于进一步分析`,
+          },
+        ],
+        resources: [
+          { title: 'Cortex-M3 Technical Reference Manual', url: 'https://developer.arm.com/documentation/ddi0337/e/', lang: 'en', type: 'doc' },
+          { title: 'JTAG协议详解', url: 'https://www.bilibili.com/video/BV1cY411d7XB', lang: 'zh', type: 'video' },
+          { title: 'Saleae Logic分析教程', url: 'https://support.saleae.com/getting-started', lang: 'en', type: 'doc' },
+          { title: 'PulseView逻辑分析仪', url: 'https://sigrok.org/', lang: 'en', type: 'project' },
+        ],
+        codeExample: `// ============================================
+// SWD调试示例 - OpenOCD配置脚本
+// ============================================
+# 文件: stm32f1.cfg (OpenOCD配置)
+
+# 选择调试器
+interface stlink
+transport select hla_swd
+
+# 选择目标芯片
+set CHIPNAME stm32f103xc
+source [find target/stm32f1x.cfg]
+
+# 工作区域大小
+adapter speed 1000  ;# SWD时钟1MHz
+
+# 复位配置
+reset_config srst_only srst_nogate
+
+# ============================================
+# GDB调试命令示例
+# ============================================
+# 连接目标
+target extended-remote :3333
+
+# 加载符号表
+symbol-file firmware.elf
+
+# 设置断点
+break main
+break HAL_UART_Receive_Callback
+hardware break 0x08001234  ;# 硬件断点
+
+# 继续/单步
+continue
+step
+next
+
+# 查看内存
+x/16xw 0x20000000          ;# 查看SRAM起始
+x/32xb 0x40013800          ;# 查看USART寄存器
+
+# 查看寄存器
+info registers
+print/h USART1->SR
+
+# 监视变量
+watch adcBuffer[0]
+
+# ============================================
+# ST-Link Utility命令行烧录
+# ============================================
+# st-flash write firmware.bin 0x08000000
+# st-info --probe              ;# 探测连接设备
+# st-info --uid                ;# 读取设备UID`,
+        codeLang: 'bash',
+      },
+      {
+        id: 'debug-techniques',
+        title: '调试技巧与实践',
+        description: '串口调试、LED状态指示、断言使用和故障排查方法',
+        topics: [
+          'printf重定向与格式化输出',
+          'LED状态机指示系统状态',
+          'HAL断言使用与自定义处理',
+          'HardFault异常分析与堆栈回溯',
+          '内存泄漏检测方法',
+          '性能分析与基准测试',
+          '远程调试与无线调试',
+        ],
+        resources: [
+          { title: 'HardFault调试指南 - ARM', url: 'https://www.arm.com/support/answers/hardfault.php', lang: 'en', type: 'doc' },
+          { title: '嵌入式调试技巧汇总', url: 'https://www.bilibili.com/video/BV1Yh411K7Lb', lang: 'zh', type: 'video' },
+        ],
+        codeExample: `// ============================================
+// printf重定向到USART1
+// ============================================
+#include <stdio.h>
+#include "stm32f1xx_hal.h"
+
+extern UART_HandleTypeDef huart1;
+
+// 方法1: 重写fputc (C标准库)
+int fputc(int ch, FILE *f) {
+    HAL_UART_Transmit(&huart1, (uint8_t*)&ch, 1, 10);
+    return ch;
+}
+
+// 方法2: 重写_putchar (ARM Compiler)
+int _ttywrch(int ch) {
+    HAL_UART_Transmit(&huart1, (uint8_t*)&ch, 1, 10);
+    return ch;
+}
+
+// ============================================
+// HardFault异常处理 - 分析故障原因
+// ============================================
+void HardFault_Handler(void) {
+    while(1) {
+        // 进入HardFault后读取关键寄存器
+        uint32_t stacked_csr = *(volatile uint32_t*)(((uint32_t)SCB->HFSR & SCB_HFSR_VECTACTIVE_Msk) ? \
+            ((uint32_t)SP) : ((uint32_t)MSP));
+
+        // 提取堆栈中的寄存器值
+        volatile uint32_t* r0 = (volatile uint32_t*)stacked_csr;
+        volatile uint32_t* r1 = r0 + 1;
+        volatile uint32_t* r2 = r0 + 2;
+        volatile uint32_t* r3 = r0 + 3;
+        volatile uint32_t* r12 = r0 + 4;
+        volatile uint32_t* lr = r0 + 5;
+        volatile uint32_t* pc = r0 + 6;
+        volatile uint32_t* psr = r0 + 7;
+
+        // 通过串口输出故障信息
+        printf("HardFault!\\n");
+        printf("PC: 0x%08lx\\n", (unsigned long)*pc);
+        printf("LR: 0x%08lx\\n", (unsigned long)*lr);
+        printf("CFSR: 0x%08lx\\n", (unsigned long)SCB->CFSR);
+        printf("HFSR: 0x%08lx\\n", (unsigned long)SCB->HFSR);
+        printf("BFAR: 0x%08lx\\n", (unsigned long)SCB->BFAR);
+    }
+}
+
+// ============================================
+// HardFault分析宏
+// ============================================
+#define HardFault_Analyze() do { \\
+    if (SCB->CFSR & SCB_CFSR_IACCVIOL_Msk) \\
+        printf("Instruction Access Violation\\n"); \\
+    if (SCB->CFSR & SCB_CFSR_DACCVIOL_Msk) \\
+        printf("Data Access Violation\\n"); \\
+    if (SCB->CFSR & SCB_CFSR_MEMFAULTAR_Msk) \\
+        printf("BusFault\\n"); \\
+    if (SCB->CFSR & SCB_CFSR_DIVBYZERO_Msk) \\
+        printf("Division by Zero\\n"); \\
+} while(0)`,
+        codeLang: 'c',
+      },
+    ],
+  },
+  {
+    id: 'build-tools',
+    title: '构建工具与版本控制',
+    icon: 'tools',
+    color: '#64748b',
+    description: '掌握CMake构建系统、Git版本控制和CI/CD流水线',
+    duration: '1-2周',
+    modules: [
+      {
+        id: 'cmake-build',
+        title: 'CMake构建系统',
+        description: 'CMake跨平台构建、工具链配置、依赖管理和编译优化',
+        topics: [
+          {
+            name: 'CMake基础',
+            content: `CMake是跨平台构建系统生成器，通过CMakeLists.txt描述构建规则。
+
+核心概念：
+• add_executable()：定义可执行目标
+• add_library()：定义库目标(STATIC/SHARED/OBJECT)
+• target_include_directories()：设置头文件搜索路径
+• target_link_libraries()：链接库依赖
+• target_compile_options()：设置编译器选项
+• target_compile_definitions()：定义预处理宏
+
+嵌入式常用配置：
+• 工具链文件：通过CMAKE_TOOLCHAIN_FILE指定ARM交叉编译器
+• Flash地址：链接脚本设置程序起始地址
+• 优化级别：-O2/Os平衡性能和代码大小
+• 符号保留：-fdiagnostics-show-option保留调试符号`,
+          },
+          {
+            name: 'Git版本控制',
+            content: `Git是分布式版本控制系统，嵌入式项目必备技能。
+
+核心操作：
+• git init/clone：初始化/克隆仓库
+• git add/commit：暂存和提交更改
+• git branch/merge：分支管理和合并
+• git rebase：变基操作保持线性历史
+• git tag：版本标记
+• git submodule：管理外部依赖
+
+嵌入式项目最佳实践：
+• .gitignore排除构建产物、IDE配置和二进制文件
+• 使用.gitmodules管理CMSIS、HAL库等外部依赖
+• 提交信息遵循Conventional Commits规范
+• 使用CI/CD自动运行编译检查和单元测试
+• 定期备份重要分支`,
+          },
+        ],
+        resources: [
+          { title: 'CMake官方文档', url: 'https://cmake.org/cmake/help/latest/', lang: 'en', type: 'doc' },
+          { title: 'CMake嵌入式教程', url: 'https://github.com/nathanchance/cmake-ide/blob/main/CMakeLists.txt', lang: 'en', type: 'project' },
+          { title: 'Git Pro中文版', url: 'https://git-scm.com/book/zh/v2', lang: 'zh', type: 'doc' },
+        ],
+        codeExample: `# CMakeLists.txt - STM32项目构建配置
+cmake_minimum_required(VERSION 3.20)
+project(stm32_firmware C CXX ASM)
+
+# 设置C标准
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
+
+# 包含CMake函数库
+include(\$CMAKE_CURRENT_LIST_DIR/cmake/STM32.cmake)
+
+# 定义固件版本
+set(FIRMWARE_VERSION "1.0.0")
+
+# 添加可执行目标
+add_executable(firmware
+    src/main.c
+    src/system.c
+    src/usart.c
+    src/timer.c
+    src/adc.c
+    src/dma.c
+)
+
+# 设置包含目录
+target_include_directories(firmware PRIVATE
+    \${CMAKE_CURRENT_SOURCE_DIR}/Inc
+    \${CMAKE_CURRENT_SOURCE_DIR}/Drivers/STM32F1xx_HAL_Driver/Inc
+    \${CMAKE_CURRENT_SOURCE_DIR}/Drivers/CMSIS/Include
+)
+
+# 编译定义
+target_compile_definitions(firmware PRIVATE
+    USE_HAL_DRIVER
+    STM32F103xB
+    FIRMWARE_VERSION=\${FIRMWARE_VERSION}
+)
+
+# 编译器优化选项
+target_compile_options(firmware PRIVATE
+    -Os                  ;# 大小优化
+    -ffunction-sections  ;# 函数分段
+    -fdata-sections      ;# 数据分段
+    -Wall                ;# 开启所有警告
+    -Wextra
+)
+
+# 链接器选项
+target_link_options(firmware PRIVATE
+    -Wl,--gc-sections    ;# 丢弃未引用段
+    -T \${CMAKE_CURRENT_SOURCE_DIR}/STM32F103RCTx_FLASH.ld
+)
+
+# 链接HAL库
+add_subdirectory(Drivers/STM32F1xx_HAL_Driver)
+target_link_libraries(firmware PRIVATE stm32cube_hal)
+
+# 构建后生成.bin和.hex
+add_custom_command(TARGET firmware POST_BUILD
+    COMMAND \${CMAKE_OBJCOPY} -O binary \$<TARGET_FILE:firmware> \${CMAKE_BINARY_DIR}/firmware.bin
+    COMMAND \${CMAKE_OBJCOPY} -O ihex \$<TARGET_FILE:firmware> \${CMAKE_BINARY_DIR}/firmware.hex
+    COMMAND \${CMAKE_SIZEUTYPE} \$<TARGET_FILE:firmware>
+    COMMENT "Generating binary and hex files"
+)
+
+# ============================================
+# 工具链文件: toolchain-arm-gcc.cmake
+# ============================================
+set(CMAKE_SYSTEM_NAME Generic)
+set(CMAKE_SYSTEM_PROCESSOR ARM)
+
+# 交叉编译工具路径
+set(TOOLCHAIN_PREFIX arm-none-eabi)
+set(CMAKE_C_COMPILER \${TOOLCHAIN_PREFIX}-gcc)
+set(CMAKE_CXX_COMPILER \${TOOLCHAIN_PREFIX}-g++)
+set(CMAKE_ASM_COMPILER \${TOOLCHAIN_PREFIX}-gcc)
+set(CMAKE_OBJCOPY \${TOOLCHAIN_PREFIX}-objcopy)
+set(CMAKE_SIZEUTYPE \${TOOLCHAIN_PREFIX}-size)
+
+# ============================================
+# .gitignore 嵌入式项目推荐配置
+# ============================================
+# 构建产物
+build/
+*.o
+*.bin
+*.hex
+*.elf
+
+# IDE配置
+.vscode/
+*.swp
+*.swo
+.idea/
+*.o/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 保留重要文件
+!CMakeLists.txt
+!toolchain-arm-gcc.cmake`,
+        codeLang: 'cmake',
+      },
+    ],
+  },
+  {
+    id: 'security',
+    title: '嵌入式安全',
+    icon: 'shield',
+    color: '#dc2626',
+    description: '固件安全、加密算法、安全启动和攻击防护',
+    duration: '2-3周',
+    modules: [
+      {
+        id: 'security-fundamentals',
+        title: '安全基础与威胁模型',
+        description: '嵌入式安全威胁、攻击面和防护策略',
+        topics: [
+          {
+            name: '安全威胁模型',
+            content: `嵌入式系统面临的安全威胁包括：
+
+物理攻击：
+• 侧信道分析：功耗分析(SPA/DPA)、电磁分析(EMA)、时序分析
+• 故障注入：电压毛刺、时钟 glitch、激光注入
+• 探针攻击：直接连接调试接口、总线探针
+
+软件攻击：
+• 固件提取：通过SPI/UART/JTAG读取Flash内容
+• 缓冲区溢出：栈溢出、堆溢出、格式化字符串漏洞
+• 重放攻击：捕获并重放通信数据
+• 中间人攻击：篡改通信数据
+
+供应链攻击：
+• 恶意组件：第三方库漏洞、硬件木马
+• 固件篡改：分发渠道被劫持
+• 依赖污染：npm/cargo/pip依赖注入
+
+防护策略：
+• 纵深防御：多层安全机制
+• 最小权限原则：仅开放必要功能
+• 安全开发生命周期：威胁建模、代码审查、渗透测试`,
+          },
+          {
+            name: '加密算法应用',
+            content: `嵌入式系统常用加密算法：
+
+对称加密：
+• AES-128/256：最常用，支持硬件加速
+• ChaCha20：软件实现高效，无S盒侧信道风险
+• DES/3DES：已不推荐使用
+
+非对称加密：
+• RSA-2048/4096：密钥交换、数字签名
+• ECC-256：椭圆曲线，密钥更短性能更好
+• Ed25519：EdDSA签名算法，快速安全
+
+哈希算法：
+• SHA-256：消息摘要、密钥派生
+• SHA-3：Keccak算法，抗碰撞
+• CRC32：错误检测，非加密用途
+
+密钥管理：
+• 密钥存储：OTP区域、安全元件、TrustZone
+• 密钥派生：PBKDF2、HKDF、Argon2
+• 密钥轮换：定期更换密钥`,
+          },
+          {
+            name: '安全启动与固件更新',
+            content: `安全启动(Secure Boot)确保只有可信固件才能运行。
+
+启动链验证：
+• Bootrom：ROM中固化，验证Bootloader签名
+• Bootloader：验证应用固件签名
+• Application：验证关键数据完整性
+
+数字签名方案：
+• RSA-PSS：概率签名方案
+• ECDSA：椭圆曲线签名
+• Ed25519：快速签名验证
+
+安全固件更新(OTA)：
+• A/B分区：双分区无缝更新
+• 签名验证：更新前验证固件签名
+• 回滚保护：防止降级到旧版本固件
+• 原子更新：更新失败自动回滚
+
+STM32安全特性：
+• RDP(Readout Protection)：Flash读取保护
+• BKR(Bit Key Register)：用户密钥存储
+• UID：唯一设备标识符
+• True RNG：硬件真随机数生成器`,
+          },
+        ],
+        resources: [
+          { title: 'ARM TrustZone安全架构', url: 'https://developer.arm.com/technologies/trustzone', lang: 'en', type: 'doc' },
+          { title: '嵌入式安全最佳实践 - NXP', url: 'https://www.nxp.com/doc/APPNOTE/APN2065', lang: 'en', type: 'doc' },
+          { title: 'STM32安全功能参考', url: 'https://www.st.com/content/st_com/en/products/ecosystems/stm32-ecoscene/stm32-security.html', lang: 'en', type: 'doc' },
+        ],
+        codeExample: `// ============================================
+// AES-128-CBC加密示例 (使用STM32硬件加密)
+// ============================================
+#include "stm32f4xx_hal.h"
+
+CRYP_HandleTypeDef hcryp;
+
+void AES_Init(void) {
+    hcryp.Instance = CRYP;
+    hcryp.Init.DataType = CRYP_DATATYPE_32B;
+    hcryp.Init.KeySize = CRYP_KEYSIZE_128B;
+    hcryp.Init.Algorithm = CRYP_AES_CBC;
+    hcryp.Init.DataWidth = CRYP_DATAW_32B;
+    HAL_CRYP_Init(&hcryp);
+
+    // 设置AES密钥 (16字节 = 128位)
+    uint32_t key[4] = {
+        0x2B7E1516, 0x28AED2A6,
+        0xABF71588, 0x09CF4F3C
+    };
+    HAL_CRYPEx_SetKey(&hcryp, CRYP_KEYSIZE_128B, key);
+
+    // 设置初始向量IV
+    uint32_t iv[4] = {
+        0x00010203, 0x04050607,
+        0x08090A0B, 0x0C0D0E0F
+    };
+    HAL_CRYPEx_SetIV(&hcryp, iv);
+}
+
+// 加密数据
+uint8_t encrypted[16];
+uint8_t plaintext[16] = "Hello EmbedKit!";
+
+void AES_Encrypt(void) {
+    HAL_CRYP_Encrypt(&hcryp,
+                     (uint32_t*)plaintext,
+                     (uint32_t*)encrypted,
+                     16,
+                     1000);  // 超时1秒
+}
+
+// ============================================
+// 固件签名验证 (使用CRC和简单校验)
+// ============================================
+#define FIRMWARE_SIGNATURE_ADDR  0x08000000
+#define FIRMWARE_CRC_ADDR        0x0807FFFC
+
+uint32_t CalcCRC32(const uint8_t* data, uint32_t len) {
+    uint32_t crc = 0xFFFFFFFF;
+    for (uint32_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (int j = 0; j < 8; j++) {
+            crc = (crc >> 1) ^ ((crc & 1) ? 0xEDB88320 : 0);
+        }
+    }
+    return ~crc;
+}
+
+// 验证固件完整性
+bool VerifyFirmware(void) {
+    uint32_t storedCRC = *(volatile uint32_t*)FIRMWARE_CRC_ADDR;
+    // 计算除CRC区域外的固件CRC
+    uint32_t calcCRC = CalcCRC32(
+        (const uint8_t*)FIRMWARE_SIGNATURE_ADDR,
+        0x7FFFC  // Flash大小 - CRC偏移
+    );
+    return (storedCRC == calcCRC);
+}
+
+// ============================================
+// STM32 Flash读取保护配置
+// ============================================
+void EnableFlashProtection(void) {
+    HAL_FLASH_Unlock();
+
+    // 设置RDP Level 1: 禁止Flash和SRAM读取
+    HAL_FLASH_OB_Unlock();
+    HAL_FLASHEx_OBGetConfig();
+
+    // 注意: RDP降级后无法恢复，需谨慎操作
+    // HAL_FLASH_OB_Launch();
+}`,
+        codeLang: 'c',
+      },
+    ],
+  },
+  {
+    id: 'low-power',
+    title: '低功耗设计',
+    icon: 'battery',
+    color: '#16a34a',
+    description: '休眠模式、时钟树优化、动态电压频率调节和功耗测量',
+    duration: '1-2周',
+    modules: [
+      {
+        id: 'power-management',
+        title: '电源管理与功耗优化',
+        description: 'MCU低功耗模式、时钟优化和功耗测量技术',
+        topics: [
+          {
+            name: 'STM32低功耗模式',
+            content: `STM32系列MCU提供多种低功耗模式：
+
+Sleep模式：
+• CPU内核停止，外设继续运行
+• 进入：WFI(Wait For Interrupt)或WFE(Wait For Event)
+• 唤醒：任何中断
+• 典型电流：约20-30mA(取决于运行外设)
+
+Stop模式：
+• 1.8V域全部关闭(HSI/HSE振荡器停止)
+• 备份区域(RTC、LSI、LSE、后备SRAM)保持供电
+• Stop 0：保留电压调节器，唤醒快
+• Stop 1：降低电压调节器，功耗更低
+• 唤醒：EXTI中断、RTC闹钟
+• 典型电流：Stop0约150uA，Stop1约20uA
+
+Standby模式：
+• 最低功耗模式，仅保留备份区域
+• SRAM内容丢失，寄存器复位
+• 唤醒：Wakeup引脚、RTC闹钟、IWDG
+• 典型电流：约2-5uA
+
+Low Run模式：
+• 内核降频运行，降低动态功耗
+• 适合间歇性任务处理`,
+          },
+          {
+            name: '时钟树优化',
+            content: `时钟是嵌入式系统功耗的主要来源。
+
+时钟优化策略：
+• 使用最低必要频率：任务完成后降低时钟频率
+• 关闭未用外设时钟：通过RCC_APBxENR寄存器控制
+• 选择合适时钟源：低频任务使用LSI/LSE
+• 时钟树分域控制：不同外设域独立时钟管理
+
+STM32时钟源选择：
+• HSE：外部高速晶振，高精度
+• HSI：内部RC振荡器，启动快
+• LSE：外部低速晶振(32.768kHz)，RTC用
+• LSI：内部低速RC，IWDG用
+• PLL：倍频器，生成高速时钟
+
+动态时钟调节：
+• 根据负载动态调整PLL倍频系数
+• Flash等待周期随频率变化
+• 电压调节器模式随频率调整`,
+          },
+          {
+            name: '功耗测量与优化实战',
+            content: `功耗测量方法：
+
+硬件测量：
+• 串联电流表：简单但影响电路
+• 电流探头+示波器：非侵入式测量
+• 专用功耗分析仪：Nordic Power Profiler Kit 2
+
+软件估算：
+• 基于模式时间占比估算总功耗
+• 电池寿命 = 电池容量 / 平均电流
+
+电池寿命计算示例：
+• 工作模式：20mA × 10ms = 0.2mAs
+• 休眠模式：20uA × 10s = 200mAs
+• 平均电流 = (0.2 + 200) / 10.01 ≈ 20uA
+• 使用CR2032(220mAh)：220mAh / 20uA = 11000小时 ≈ 1.25年
+
+优化技巧：
+• 外设使用后及时关闭
+• DMA传输减少CPU参与
+• 使用低功耗定时器唤醒
+• 优化唤醒频率和数据处理时间
+• 选择合适电池类型和容量`,
+          },
+        ],
+        resources: [
+          { title: 'STM32低功耗参考手册', url: 'https://www.st.com/resource/en/reference_manual/dm00031020.pdf', lang: 'en', type: 'doc' },
+          { title: 'Nordic功耗优化指南', url: 'https://devzone.nordicsemi.com/f/nordic-q-a/48215/power-profiling-and-optimization', lang: 'en', type: 'doc' },
+          { title: '低功耗设计教程', url: 'https://www.bilibili.com/video/BV1cY411d7XB', lang: 'zh', type: 'video' },
+        ],
+        codeExample: `// ============================================
+// STM32低功耗模式配置示例
+// ============================================
+#include "stm32f1xx_hal.h"
+
+// ============================================
+// Stop模式 - 最低功耗待机
+// ============================================
+void Enter_Stop_Mode(void) {
+    // 1. 关闭所有不需要的时钟
+    __HAL_RCC_GPIOA_CLK_DISABLE();
+    __HAL_RCC_GPIOB_CLK_DISABLE();
+    __HAL_RCC_GPIOC_CLK_DISABLE();
+    __HAL_RCC_ADC1_CLK_DISABLE();
+    __HAL_RCC_TIM2_CLK_DISABLE();
+
+    // 2. 配置唤醒引脚 (PA0上升沿唤醒)
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    GPIO_InitStruct.Pin = GPIO_PIN_0;
+    GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    HAL_NVIC_SetPriority(GPIOA0_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(GPIOA0_IRQn);
+
+    // 3. 关闭未用外设
+    HAL_SuspendTick();  // 暂停SysTick
+
+    // 4. 使能电源时钟
+    __HAL_RCC_PWR_CLK_ENABLE();
+
+    // 5. 进入Stop模式 (WFI)
+    HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+
+    // === 唤醒后从这里继续执行 ===
+
+    // 6. 重新配置系统时钟
+    SystemClock_Config();
+
+    // 7. 恢复SysTick
+    HAL_ResumeTick();
+}
+
+// ============================================
+// Standby模式 - 最低功耗
+// ============================================
+void Enter_Standby_Mode(void) {
+    // 配置唤醒源
+    __HAL_RCC_PWR_CLK_ENABLE();
+    HAL_PWR_EnableWakeUpPin(PWR_WAKEUP_PIN1);  // PA0
+
+    // 清除唤醒标志
+    __HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
+
+    // 进入Standby模式
+    HAL_PWR_EnterSTANDBYMode();
+    // 此函数不会返回，唤醒后系统复位
+}
+
+// ============================================
+// RTC唤醒定时唤醒
+// ============================================
+RTC_HandleTypeDef hrtc;
+
+void RTC_Wakeup_Init(void) {
+    hrtc.Instance = RTC;
+    hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
+    hrtc.Init.AsynchPrediv = 127;
+    hrtc.Init.SynchPrediv = 255;
+    HAL_RTC_Init(&hrtc);
+
+    // 配置WakeUp定时器: 每1秒唤醒
+    HAL_RTCEx_SetWakeUpTimer(&hrtc, 0x7FF, RTC_WAKEUPCLOCK_CK_SPRE_16BITS);
+    HAL_RTCEx_SetWakeUpTimer_IT(&hrtc, 0x7FF, RTC_WAKEUPCLOCK_CK_SPRE_16BITS);
+    HAL_NVIC_SetPriority(RTC_WKUP_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(RTC_WKUP_IRQn);
+}
+
+// RTC唤醒中断处理
+void RTC_WKUP_IRQHandler(void) {
+    HAL_RTCEx_WakeUpTimerIRQHandler(&hrtc);
+}
+
+void HAL_RTCEx_WakeUpTimerEventCallback(RTC_HandleTypeDef *hrtc) {
+    // 清除唤醒标志
+    __HAL_RTC_WAKEUPTIMER_CLEAR_FLAG(hrtc, RTC_FLAG_WUTF);
+
+    // 执行唤醒后任务
+    ReadSensorData();
+    SendDataViaLoRa();
+
+    // 再次进入低功耗模式
+    Enter_Stop_Mode();
+}
+
+// ============================================
+// 功耗估算工具函数
+// ============================================
+typedef struct {
+    float current_mA;   // 模式电流(mA)
+    float duration_ms;  // 持续时间(ms)
+    char name[32];
+} PowerMode_t;
+
+float CalculateAvgCurrent(PowerMode_t* modes, uint8_t numModes) {
+    float totalCharge = 0;  // 总电荷量(mAs)
+    float totalDuration = 0;
+
+    for (uint8_t i = 0; i < numModes; i++) {
+        totalCharge += modes[i].current_mA * modes[i].duration_ms;
+        totalDuration += modes[i].duration_ms;
+    }
+
+    return totalCharge / totalDuration;  // 平均电流(mA)
+}
+
+float CalculateBatteryLife(float batteryCapacity_mAh, float avgCurrent_mA) {
+    return (batteryCapacity_mAh * 1000.0f) / avgCurrent_mA;  // 小时数
 }`,
         codeLang: 'c',
       },
