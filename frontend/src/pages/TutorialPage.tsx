@@ -130,6 +130,7 @@ function ResourceCard({ resource }: { resource: ExternalResource }) {
 /* ── module detail panel ── */
 function ModuleDetail({ module, onClose }: { module: RoadmapModule; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
+  const [expandedTopic, setExpandedTopic] = useState<number | null>(null);
 
   const handleCopy = () => {
     if (module.codeExample) {
@@ -138,6 +139,12 @@ function ModuleDetail({ module, onClose }: { module: RoadmapModule; onClose: () 
       setTimeout(() => setCopied(false), 2000);
     }
   };
+
+  const getTopicName = (t: string | { name: string; content?: string }) =>
+    typeof t === 'string' ? t : t.name;
+
+  const getTopicContent = (t: string | { name: string; content?: string }) =>
+    typeof t === 'string' ? undefined : t.content;
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -171,13 +178,41 @@ function ModuleDetail({ module, onClose }: { module: RoadmapModule; onClose: () 
               </svg>
               知识点
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {module.topics.map((topic, i) => (
-                <div key={i} className="flex items-center gap-2 text-sm text-gray-300 px-3 py-2 rounded-lg bg-[#0d1117]">
-                  <ChevronRight size={14} className="text-gray-500 flex-shrink-0" />
-                  {topic}
-                </div>
-              ))}
+            <div className="space-y-2">
+              {module.topics.map((topic, i) => {
+                const name = getTopicName(topic);
+                const content = getTopicContent(topic);
+                const hasContent = !!content;
+                const isExpanded = expandedTopic === i;
+                return (
+                  <div key={i} className="rounded-lg bg-[#0d1117] border border-[#30363d] overflow-hidden">
+                    <button
+                      onClick={() => hasContent ? setExpandedTopic(isExpanded ? null : i) : null}
+                      className={`w-full flex items-center gap-2 text-sm px-3 py-2.5 text-left transition-colors ${
+                        hasContent ? 'hover:bg-[#1c2128] cursor-pointer' : 'cursor-default'
+                      }`}
+                    >
+                      {isExpanded ? (
+                        <ChevronDown size={14} className="text-blue-400 flex-shrink-0" />
+                      ) : (
+                        <ChevronRight size={14} className={`${hasContent ? 'text-gray-500' : 'text-gray-600'} flex-shrink-0`} />
+                      )}
+                      <span className="text-gray-300 flex-1">{name}</span>
+                      {hasContent && (
+                        <span className="text-xs text-blue-400/60 flex-shrink-0">展开</span>
+                      )}
+                    </button>
+                    {isExpanded && content && (
+                      <div className="px-3 pb-3 pt-1 border-t border-[#30363d]/50">
+                        <div
+                          className="text-xs text-gray-400 leading-relaxed whitespace-pre-wrap"
+                          dangerouslySetInnerHTML={{ __html: content }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -404,11 +439,19 @@ export default function TutorialPage() {
       .map((phase) => ({
         ...phase,
         modules: phase.modules.filter(
-          (m) =>
-            m.title.toLowerCase().includes(q) ||
-            m.description.toLowerCase().includes(q) ||
-            m.topics.some((t) => t.toLowerCase().includes(q)) ||
-            m.resources.some((r) => r.title.toLowerCase().includes(q))
+          (m) => {
+            const topicMatch = m.topics.some((t) => {
+              const name = typeof t === 'string' ? t : t.name;
+              const content = typeof t === 'string' ? '' : (t.content || '');
+              return name.toLowerCase().includes(q) || content.toLowerCase().includes(q);
+            });
+            return (
+              m.title.toLowerCase().includes(q) ||
+              m.description.toLowerCase().includes(q) ||
+              topicMatch ||
+              m.resources.some((r) => r.title.toLowerCase().includes(q))
+            );
+          }
         ),
       }))
       .filter((p) => p.modules.length > 0 || p.title.toLowerCase().includes(q));
@@ -570,7 +613,7 @@ export default function TutorialPage() {
                           <div className="mt-2 flex flex-wrap gap-1">
                             {module.topics.slice(0, 3).map((topic, i) => (
                               <span key={i} className="text-xs text-gray-500 bg-[#161b22] px-2 py-0.5 rounded">
-                                {topic}
+                                {typeof topic === 'string' ? topic : topic.name}
                               </span>
                             ))}
                             {module.topics.length > 3 && (

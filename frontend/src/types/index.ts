@@ -51,11 +51,16 @@ export interface ExternalResource {
   type: 'video' | 'doc' | 'course' | 'book' | 'project';
 }
 
+export interface RoadmapTopic {
+  name: string;
+  content?: string;
+}
+
 export interface RoadmapModule {
   id: string;
   title: string;
   description: string;
-  topics: string[];
+  topics: (string | RoadmapTopic)[];
   resources: ExternalResource[];
   codeExample?: string;
   codeLang?: 'c' | 'cpp' | 'python' | 'makefile' | 'text';
