@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
-import { Search, Cpu, Filter, ExternalLink, BookOpen, Globe, FileText, ReplaceAll, ShoppingCart, Layers, Loader2, CheckCircle, XCircle, Info } from 'lucide-react';
+import { useState, useMemo, useEffect } from 'react';
+import { Search, Cpu, Filter, ExternalLink, BookOpen, FileText, ReplaceAll, ShoppingCart, Layers, Loader2, CheckCircle, XCircle, Info } from 'lucide-react';
 import { chips, manufacturers } from '../data/chips';
 import type { Chip } from '../types';
 
