@@ -282,21 +282,28 @@ function RoadmapView({ phases, onSelectModule }: { phases: typeof roadmapPhases;
 
   const phaseColors: Record<string, string> = {
     'c-fundamentals': '#60a5fa',
-    'c-syntax': '#f472b4',
-    'tools': '#a78bfa',
-    'mcu-arch': '#fbbf24',
+    'electronics-basics': '#34d399',
+    'stm32-development': '#fbbf24',
+    'stm32-advanced-peripherals': '#f87171',
+    'protocols': '#a78bfa',
+    'debugging': '#f59e0b',
+    'build-tools': '#a78bfa',
     'rtos': '#34d399',
-    'protocols': '#f87171',
-    'advanced': '#60a5fa',
-    'projects': '#fbbf24',
+    'embedded-linux': '#06b6d4',
+    'esp32-development': '#f97316',
+    'iot-cloud': '#06b6d4',
+    'low-power': '#84cc16',
+    'security': '#f87171',
+    'pcb-design': '#f59e0b',
+    'edge-ai': '#d946ef',
   };
 
   return (
     <div className="overflow-x-auto overflow-y-visible scrollbar-thin py-6">
       <svg
         className="w-full"
-        style={{ minWidth: '900px', height: '520px' }}
-        viewBox="0 0 1200 520"
+        style={{ minWidth: '1600px', height: '520px' }}
+        viewBox="0 0 2100 520"
         preserveAspectRatio="xMidYMid meet"
       >
         <defs>
@@ -317,18 +324,18 @@ function RoadmapView({ phases, onSelectModule }: { phases: typeof roadmapPhases;
         </defs>
 
         {/* Title */}
-        <text x="600" y="36" textAnchor="middle" fill="#ffffff" fontSize="18" fontWeight="bold">
+        <text x="1050" y="36" textAnchor="middle" fill="#ffffff" fontSize="18" fontWeight="bold">
           嵌入式开发学习路线图
         </text>
-        <text x="600" y="58" textAnchor="middle" fill="#8b949e" fontSize="12">
+        <text x="1050" y="58" textAnchor="middle" fill="#8b949e" fontSize="12">
           点击节点查看详情
         </text>
 
         {/* Horizontal timeline line */}
-        <line x1="100" y1="100" x2="1100" y2="100" stroke="url(#lineGrad)" strokeWidth="3" />
+        <line x1="100" y1="100" x2="1950" y2="100" stroke="url(#lineGrad)" strokeWidth="3" />
 
         {phases.map((phase, idx) => {
-          const x = 120 + idx * 130;
+          const x = 100 + idx * 120;
           const color = phaseColors[phase.id] || phase.color;
           const isSelected = selectedPhase === phase.id;
 
@@ -337,7 +344,7 @@ function RoadmapView({ phases, onSelectModule }: { phases: typeof roadmapPhases;
               {/* Connector lines between nodes */}
               {idx > 0 && (
                 <line
-                  x1={x - 130 + 20} y1="100"
+                  x1={x - 120 + 20} y1="100"
                   x2={x - 20} y2="100"
                   stroke={color} strokeWidth="2"
                   opacity="0.4"
@@ -422,7 +429,7 @@ function RoadmapView({ phases, onSelectModule }: { phases: typeof roadmapPhases;
         })}
 
         {/* Bottom legend */}
-        <text x="600" y="490" textAnchor="middle" fill="#484f58" fontSize="10">
+        <text x="1050" y="490" textAnchor="middle" fill="#484f58" fontSize="10">
           总资源: {phases.reduce((sum, p) => sum + p.modules.reduce((s, m) => s + m.resources.length, 0), 0)} 个 · 覆盖 {phases.length} 个学习阶段
         </text>
       </svg>
