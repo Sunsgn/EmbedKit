@@ -1,7 +1,20 @@
-import { useState, useMemo, useCallback } from 'react';
-import { Search, Cpu, Filter, ExternalLink, BookOpen, Globe, FileText, ReplaceAll, ShoppingCart, Layers } from 'lucide-react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { Search, Cpu, Filter, ExternalLink, BookOpen, Globe, FileText, ReplaceAll, ShoppingCart, Layers, Loader2, CheckCircle, XCircle, Info } from 'lucide-react';
 import { chips, manufacturers } from '../data/chips';
 import type { Chip } from '../types';
+
+const PROXY_URL = 'http://localhost:9999';
+
+interface ChipDetails {
+  productName: string;
+  productFamily: string;
+  description: string;
+  specs: Record<string, string>;
+  features: string[];
+  hierarchy: Array<{ name: string; url?: string }>;
+  stUrl?: string;
+  error?: string;
+}
 
 type LinkType = 'datasheet' | 'datasheet-aggregate' | 'reference-design' | 'alternative' | 'distributor';
 
@@ -228,6 +241,9 @@ export default function ChipLibPage() {
 
         {search && search.length >= 2 && (
           <div className="mt-6 space-y-6">
+            {/* Chip Details Panel */}
+            <ChipDetailsPanel chipName={search.trim()} />
+
             {/* Datasheet section */}
             {(() => {
               const ds = onlineResults.filter(r => r.type === 'datasheet' || r.type === 'datasheet-aggregate');
@@ -282,6 +298,141 @@ export default function ChipLibPage() {
       </div>
     </div>
   );
+}
+
+function ChipDetailsPanel({ chipName }: { chipName: string }) {
+  const [details, setDetails] = useState<ChipDetails | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchDetails = async () => {
+      setLoading(true);
+      setError(null);
+      setDetails(null);
+      try {
+        const res = await fetch(`${PROXY_URL}/api/chip-details?chip=${encodeURIComponent(chipName)}`);
+        const data = await res.json();
+        if (!mounted) return;
+        if (data.error) {
+          setError(data.error);
+        } else {
+          setDetails(data);
+        }
+      } catch (e: any) {
+        if (mounted) setError(e.message || 'Failed to fetch chip details');
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+    const timer = setTimeout(fetchDetails, 400);
+    return () => { mounted = false; clearTimeout(timer); };
+  }, [chipName]);
+
+  if (loading) {
+    return (
+      <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-6 text-center">
+        <Loader2 size={24} className="animate-spin mx-auto mb-3 text-blue-400" />
+        <p className="text-sm text-gray-400">正在获取芯片详细信息...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-6">
+        <div className="flex items-center gap-3">
+          <XCircle size={20} className="text-red-400 flex-shrink-0" />
+          <div>
+            <h3 className="text-sm font-semibold text-white">无法获取芯片详情</h3>
+            <p className="text-xs text-gray-400 mt-1">{error}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!details) return null;
+
+  const hasDetails = details.description || Object.keys(details.specs).length > 0 || details.features.length > 0;
+  if (!hasDetails) {
+    return (
+      <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-6">
+        <div className="flex items-center gap-3">
+          <Info size={20} className="text-yellow-400 flex-shrink-0" />
+          <div>
+            <h3 className="text-sm font-semibold text-white">暂无结构化详情</h3>
+            <p className="text-xs text-gray-400 mt-1">该厂商的产品页面尚未支持详情解析</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-[#161b22] border border-[#30363d] rounded-xl overflow-hidden">
+      <div className="p-5 border-b border-[#30363d]">
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-blue-500/20 to-cyan-500/20 flex items-center justify-center flex-shrink-0">
+            <Cpu size={24} className="text-blue-400" />
+          </div>
+          <div className="flex-1">
+            <h2 className="text-lg font-bold text-white">{details.productName || chipName}</h2>
+            {details.productFamily && <p className="text-sm text-gray-400 mt-0.5">{details.productFamily}</p>}
+            {details.description && <p className="text-sm text-gray-300 mt-2 leading-relaxed">{details.description}</p>}
+          </div>
+        </div>
+      </div>
+
+      {/* Key Specs */}
+      {Object.keys(details.specs).length > 0 && (
+        <div className="px-5 py-4 border-b border-[#30363d]">
+          <h3 className="text-xs font-semibold text-gray-400 mb-3 uppercase tracking-wider">关键参数</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {Object.entries(details.specs).map(([key, value]) => (
+              <div key={key} className="bg-[#0d1117] rounded-lg p-3">
+                <div className="text-xs text-gray-500 mb-1">{formatSpecKey(key)}</div>
+                <div className="text-sm font-medium text-white">{value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Features */}
+      {details.features.length > 0 && (
+        <div className="px-5 py-4">
+          <h3 className="text-xs font-semibold text-gray-400 mb-3 uppercase tracking-wider">产品特性</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {details.features.map((feature, i) => (
+              <div key={i} className="flex items-start gap-2">
+                <CheckCircle size={14} className="text-green-400 flex-shrink-0 mt-0.5" />
+                <span className="text-sm text-gray-300">{feature}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const SPEC_KEY_MAP: Record<string, string> = {
+  maxClock: '主频',
+  flashMemory: 'Flash',
+  sram: 'SRAM',
+  voltageRange: '工作电压',
+  adc: 'ADC',
+  productName: '产品名称',
+  productFamily: '产品系列',
+  tree: '产品树',
+  core: '内核',
+  operatingVoltage: '工作电压',
+};
+
+function formatSpecKey(key: string): string {
+  return SPEC_KEY_MAP[key] || key.replace(/([A-Z])/g, ' $1').trim();
 }
 
 const LINK_STYLES: Record<string, { bg: string; color: string }> = {
