@@ -12,6 +12,8 @@ import {
   Copy,
   Check,
   Search,
+  LayoutGrid,
+  GitBranch,
 } from 'lucide-react';
 import { roadmapPhases } from '../data/roadmap';
 import type { RoadmapModule, ExternalResource } from '../types';
@@ -234,11 +236,166 @@ function ModuleDetail({ module, onClose }: { module: RoadmapModule; onClose: () 
   );
 }
 
+/* ── roadmap view component ── */
+function RoadmapView({ phases, onSelectModule }: { phases: typeof roadmapPhases; onSelectModule: (m: RoadmapModule) => void }) {
+  const [selectedPhase, setSelectedPhase] = useState<string | null>(null);
+
+  const phaseColors: Record<string, string> = {
+    'c-fundamentals': '#60a5fa',
+    'c-syntax': '#f472b4',
+    'tools': '#a78bfa',
+    'mcu-arch': '#fbbf24',
+    'rtos': '#34d399',
+    'protocols': '#f87171',
+    'advanced': '#60a5fa',
+    'projects': '#fbbf24',
+  };
+
+  return (
+    <div className="overflow-x-auto overflow-y-visible scrollbar-thin py-6">
+      <svg
+        className="w-full"
+        style={{ minWidth: '900px', height: '520px' }}
+        viewBox="0 0 1200 520"
+        preserveAspectRatio="xMidYMid meet"
+      >
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#484f58" />
+          </marker>
+          <filter id="glow">
+            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+            <feMerge>
+              <feMergeNode in="coloredBlur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+          <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#30363d" />
+            <stop offset="100%" stopColor="#484f58" />
+          </linearGradient>
+        </defs>
+
+        {/* Title */}
+        <text x="600" y="36" textAnchor="middle" fill="#ffffff" fontSize="18" fontWeight="bold">
+          嵌入式开发学习路线图
+        </text>
+        <text x="600" y="58" textAnchor="middle" fill="#8b949e" fontSize="12">
+          点击节点查看详情
+        </text>
+
+        {/* Horizontal timeline line */}
+        <line x1="100" y1="100" x2="1100" y2="100" stroke="url(#lineGrad)" strokeWidth="3" />
+
+        {phases.map((phase, idx) => {
+          const x = 120 + idx * 130;
+          const color = phaseColors[phase.id] || phase.color;
+          const isSelected = selectedPhase === phase.id;
+
+          return (
+            <g key={phase.id}>
+              {/* Connector lines between nodes */}
+              {idx > 0 && (
+                <line
+                  x1={x - 130 + 20} y1="100"
+                  x2={x - 20} y2="100"
+                  stroke={color} strokeWidth="2"
+                  opacity="0.4"
+                  markerEnd="url(#arrowhead)"
+                />
+              )}
+
+              {/* Vertical connector to details */}
+              {isSelected && (
+                <line x1={x} y1="130" x2={x} y2="200" stroke={color} strokeWidth="2" strokeDasharray="4 2" opacity="0.6" />
+              )}
+
+              {/* Node circle */}
+              <circle
+                cx={x} cy="100" r={isSelected ? 28 : 22}
+                fill={isSelected ? `${color}30` : '#161b22'}
+                stroke={color}
+                strokeWidth={isSelected ? 3 : 2}
+                className="cursor-pointer transition-all duration-200"
+                filter={isSelected ? 'url(#glow)' : undefined}
+                onClick={() => setSelectedPhase(isSelected ? null : phase.id)}
+              />
+
+              {/* Phase number in circle */}
+              <text x={x} y="105" textAnchor="middle" fill={color} fontSize="14" fontWeight="bold">
+                {idx + 1}
+              </text>
+
+              {/* Phase title below node */}
+              <text
+                x={x} y="148" textAnchor="middle"
+                fill={isSelected ? '#ffffff' : '#c9d1d9'}
+                fontSize="12" fontWeight={isSelected ? 'bold' : 'normal'}
+                className="cursor-pointer"
+                onClick={() => setSelectedPhase(isSelected ? null : phase.id)}
+              >
+                {phase.title}
+              </text>
+
+              {/* Duration */}
+              <text x={x} y="164" textAnchor="middle" fill="#8b949e" fontSize="10">
+                {phase.duration}
+              </text>
+
+              {/* Expanded modules below */}
+              {isSelected && (
+                <g>
+                  {/* Module cards background */}
+                  <rect
+                    x={x - 100} y="200" width="200" height={Math.min(phase.modules.length, 4) * 24 + 16}
+                    rx="6" fill="#0d1117" stroke={color} strokeWidth="1" opacity="0.95"
+                  />
+                  {phase.modules.slice(0, 4).map((mod, mIdx) => (
+                    <g
+                      key={mod.id}
+                      className="cursor-pointer"
+                      onClick={() => onSelectModule(mod)}
+                    >
+                      <rect
+                        x={x - 94} y={208 + mIdx * 24} width="188" height="22"
+                        rx="3" fill="transparent"
+                        className="hover:fill-white/5"
+                      />
+                      <text
+                        x={x - 86} y={223 + mIdx * 24}
+                        fill="#c9d1d9" fontSize="10"
+                        className="hover:fill-white"
+                      >
+                        {mod.title.length > 22 ? mod.title.substring(0, 22) + '...' : mod.title}
+                      </text>
+                    </g>
+                  ))}
+                  {phase.modules.length > 4 && (
+                    <text x={x - 86} y={223 + 4 * 24} fill="#8b949e" fontSize="10">
+                      +{phase.modules.length - 4} more...
+                    </text>
+                  )}
+                </g>
+              )}
+            </g>
+          );
+        })}
+
+        {/* Bottom legend */}
+        <text x="600" y="490" textAnchor="middle" fill="#484f58" fontSize="10">
+          总资源: {phases.reduce((sum, p) => sum + p.modules.reduce((s, m) => s + m.resources.length, 0), 0)} 个 · 覆盖 {phases.length} 个学习阶段
+        </text>
+      </svg>
+    </div>
+  );
+}
+
 /* ── main page ── */
 export default function TutorialPage() {
-  const [expandedPhase, setExpandedPhase] = useState<string | null>('c-fundamentals');
+  const [expandedPhase, setExpandedPhase] = useState<string | null>(null);
   const [selectedModule, setSelectedModule] = useState<RoadmapModule | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [viewMode, setViewMode] = useState<'cards' | 'roadmap'>('cards');
 
   const filteredPhases = useMemo(() => {
     if (!searchQuery.trim()) return roadmapPhases;
@@ -279,24 +436,54 @@ export default function TutorialPage() {
               </p>
             </div>
           </div>
-          {/* Search */}
-          <div className="relative">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-            <input
-              type="text"
-              placeholder="搜索知识点、资源..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-64 pl-9 pr-3 py-2 bg-[#0d1117] border border-[#30363d] rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500/50 transition-colors"
-            />
+          <div className="flex items-center gap-3">
+            {/* View toggle */}
+            <div className="flex items-center bg-[#0d1117] border border-[#30363d] rounded-lg p-0.5">
+              <button
+                onClick={() => setViewMode('roadmap')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                  viewMode === 'roadmap'
+                    ? 'bg-blue-500/20 text-blue-400'
+                    : 'text-gray-400 hover:text-gray-300'
+                }`}
+              >
+                <GitBranch size={14} />
+                路线图
+              </button>
+              <button
+                onClick={() => setViewMode('cards')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                  viewMode === 'cards'
+                    ? 'bg-blue-500/20 text-blue-400'
+                    : 'text-gray-400 hover:text-gray-300'
+                }`}
+              >
+                <LayoutGrid size={14} />
+                卡片
+              </button>
+            </div>
+            {/* Search */}
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+              <input
+                type="text"
+                placeholder="搜索知识点、资源..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-64 pl-9 pr-3 py-2 bg-[#0d1117] border border-[#30363d] rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500/50 transition-colors"
+              />
+            </div>
           </div>
         </div>
       </div>
 
       {/* Roadmap Content */}
       <div className="flex-1 overflow-y-auto scrollbar-thin p-4">
-        <div className="max-w-5xl mx-auto space-y-4">
-          {filteredPhases.map((phase, phaseIdx) => {
+        {viewMode === 'roadmap' ? (
+          <RoadmapView phases={filteredPhases} onSelectModule={setSelectedModule} />
+        ) : (
+          <div className="max-w-5xl mx-auto space-y-4">
+            {filteredPhases.map((phase, phaseIdx) => {
             const isExpanded = expandedPhase === phase.id;
 
             return (
@@ -413,6 +600,7 @@ export default function TutorialPage() {
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* Module Detail Modal */}
