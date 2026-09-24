@@ -1010,237 +1010,6 @@ void MainLoop(void) {
     ],
   },
   {
-    id: 'esp32-development',
-    title: 'ESP32物联网开发',
-    icon: 'wifi',
-    color: '#8b5cf6',
-    description: '学习ESP32双核架构、WiFi/BLE通信、OTA升级和物联网协议',
-    duration: '3-4周',
-    modules: [
-      {
-        id: 'esp32-basics',
-        title: 'ESP32基础与FreeRTOS',
-        description: 'ESP32硬件架构、Arduino/ESP-IDF开发环境、FreeRTOS任务管理',
-        topics: [
-          'ESP32芯片型号与引脚定义',
-          'ESP32双核架构与内存',
-          'Arduino框架快速入门',
-          'ESP-IDF开发环境搭建',
-          'FreeRTOS任务创建与调度',
-          '信号量/互斥量/队列',
-          '任务间通信机制',
-        ],
-        resources: [
-          { title: 'ESP-IDF官方文档', url: 'https://docs.espressif.com/projects/esp-idf/zh_CN/latest/esp32/', lang: 'zh', type: 'doc' },
-          { title: 'ESP32 Technical Reference Manual', url: 'https://www.espressif.com.cn/sites/default/files/documentation/esp32_technical_reference_manual_cn.pdf', lang: 'zh', type: 'doc' },
-          { title: 'ESP32开发教程 - 乐鑫官方', url: 'https://www.bilibili.com/video/BV1pP411W7Jy', lang: 'zh', type: 'video' },
-        ],
-        codeExample: `#include <Arduino.h>
-#include <WiFi.h>
-#include <WebServer.h>
-
-#define LED_PIN 2
-
-const char* ssid = "YourWiFi";
-const char* password = "YourPassword";
-
-WebServer server(80);
-
-void handleRoot() {
-    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-    server.send(200, "text/plain", 
-        "LED toggled! State: " + String(digitalRead(LED_PIN)));
-}
-
-void handleNotFound() {
-    server.send(404, "text/plain", "Not found");
-}
-
-void setup() {
-    pinMode(LED_PIN, OUTPUT);
-    Serial.begin(115200);
-    
-    WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
-    Serial.println("\\nConnected! IP: " + WiFi.localIP().toString());
-    
-    server.on("/", handleRoot);
-    server.onNotFound(handleNotFound);
-    server.begin();
-}
-
-void loop() {
-    server.handleClient();
-}`,
-        codeLang: 'cpp',
-      },
-      {
-        id: 'esp32-wifi-mqtt',
-        title: 'WiFi与MQTT通信',
-        description: 'TCP/UDP socket编程、HTTP请求、MQTT协议与云平台对接',
-        topics: [
-          'STA/AP模式配置',
-          'TCP Client/Server编程',
-          'HTTP GET/POST请求',
-          'HTTPS与证书验证',
-          'MQTT协议原理(PUBLISH/SUBSCRIBE)',
-          'MQTT连接阿里云IoT平台',
-          'MQTT连接EMQX服务器',
-          'MQTT QoS与Retain消息',
-        ],
-        resources: [
-          { title: 'MQTT协议入门', url: 'https://www.runoob.com/w3cnote/mqtt.html', lang: 'zh', type: 'doc' },
-          { title: 'MQTT Essentials - HiveMQ', url: 'https://www.hivemq.com/blog/mqtt-essentials/', lang: 'en', type: 'doc' },
-          { title: 'ESP32 MQTT教程', url: 'https://randomnerdtutorials.com/?s=esp32+mqtt', lang: 'en', type: 'doc' },
-        ],
-        codeExample: `#include <WiFi.h>
-#include <PubSubClient.h>
-
-WiFiClient espClient;
-PubSubClient mqtt(espClient);
-
-const char* ssid = "YourWiFi";
-const char* password = "YourPassword";
-const char* mqtt_server = "broker.emqx.io";
-const char* mqtt_user = "esp32_sensor";
-const char* topic_pub = "home/sensor/data";
-const char* topic_sub = "home/control/led";
-
-// MQTT回调: 接收订阅消息
-void callback(const char* topic, byte* payload, unsigned int length) {
-    String msg = "";
-    for (int i = 0; i < length; i++) msg += (char)payload[i];
-    Serial.printf("[%s] %s\\n", topic, msg.c_str());
-    if (String(topic) == topic_sub) {
-        digitalWrite(LED_BUILTIN, msg == "ON" ? HIGH : LOW);
-    }
-}
-
-void setup() {
-    Serial.begin(115200);
-    pinMode(LED_BUILTIN, OUTPUT);
-    
-    WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED) delay(500);
-    
-    mqtt.setServer(mqtt_server, 1883);
-    mqtt.setCallback(callback);
-    
-    while (!mqtt.connected()) {
-        if (mqtt.connect("ESP32-Client", mqtt_user, "", "home/lastwill", 1, true))
-            Serial.println("MQTT Connected!");
-        else delay(1000);
-    }
-    mqtt.subscribe(topic_sub);
-}
-
-void loop() {
-    mqtt.loop();
-    // 每5秒发布传感器数据 (JSON格式)
-    static unsigned long last = 0;
-    if (millis() - last > 5000) {
-        last = millis();
-        char buf[128];
-        snprintf(buf, sizeof(buf),
-            "{\"temp\":%.1f,\"humid\":%.1f,\"light\":%d}",
-            25.6f, 60.2f, analogRead(A0));
-        mqtt.publish(topic_pub, buf);
-        Serial.println(buf);
-    }
-}`,
-        codeLang: 'cpp',
-      },
-      {
-        id: 'esp32-ble-ota',
-        title: 'BLE与OTA升级',
-        description: '蓝牙低功耗通信、GATT服务、固件OTA远程升级',
-        topics: [
-          'BLE广播与连接',
-          'GATT服务与特征值',
-          'BLE Server/Client角色',
-          'NVS非易失性存储',
-          'Deep-sleep低功耗模式',
-          'OTA固件升级原理',
-          'Arduino OTA实现',
-          'ESP-IDF OTA实现',
-        ],
-        resources: [
-          { title: 'ESP32 BLE教程', url: 'https://randomnerdtutorials.com/?s=esp32+bluetooth', lang: 'en', type: 'doc' },
-          { title: 'ESP32 OTA升级 - 乐鑫文档', url: 'https://docs.espressif.com/projects/esp-idf/zh_CN/latest/esp32/api-reference/system/ota.html', lang: 'zh', type: 'doc' },
-        ],
-        codeExample: `#include <Arduino.h>
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <Update.h>
-#include <ESPmDNS.h>
-#include <WiFiUdp.h>
-
-// ============================================================
-// BLE Service - 温湿度传感器模拟
-// ============================================================
-#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
-
-BLEServer* pServer = NULL;
-BLECharacteristic* pTxChar;
-
-class BLEServerCallbacks: public BLEServerCallbacks {
-    void onConnect(BLEServer* pServer) {
-        Serial.println("BLE Client connected");
-    }
-    void onDisconnect(BLEServer* pServer) {
-        Serial.println("BLE Client disconnected");
-    }
-};
-
-void setupBLE() {
-    BLEDevice::init("ESP32-Sensor");
-    pServer = BLEDevice::createServer();
-    pServer->setCallbacks(new BLEServerCallbacks());
-    
-    BLEService* pService = pServer->createService(SERVICE_UUID);
-    pTxChar = pService->createCharacteristic(
-        CHARACTERISTIC_UUID,
-        BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ
-    );
-    pService->start();
-    BLEDevice::startAdvertising();
-}
-
-void sendSensorData() {
-    char data[32];
-    snprintf(data, sizeof(data), "%.1fC %.1f%%", 25.6f, 60.2f);
-    pTxChar->setValue(data);
-    pTxChar->notify();
-}
-
-// ============================================================
-// OTA固件升级 (mDNS + HTTP Update)
-// ============================================================
-void setupOTA() {
-    if (MDNS.begin("esp32-ota")) {
-        MDNS.addService("http", "tcp", 80);
-        Serial.println("mDNS: http://esp32-ota.local");
-    }
-}
-
-void handleFirmwareUpdate() {
-    // HTTP POST /update 接收.bin固件
-    if (Update.hasError()) {
-        Serial.println("Update FAILED");
-    } else {
-        Serial.println("Update OK, rebooting...");
-        ESP.restart();
-    }
-}`,
-        codeLang: 'cpp',
-      },
-    ],
-  },
-  {
     id: 'protocols',
     title: '通信协议深入',
     icon: 'network',
@@ -1938,406 +1707,6 @@ Thumbs.db
     ],
   },
   {
-    id: 'security',
-    title: '嵌入式安全',
-    icon: 'shield',
-    color: '#dc2626',
-    description: '固件安全、加密算法、安全启动和攻击防护',
-    duration: '2-3周',
-    modules: [
-      {
-        id: 'security-fundamentals',
-        title: '安全基础与威胁模型',
-        description: '嵌入式安全威胁、攻击面和防护策略',
-        topics: [
-          {
-            name: '安全威胁模型',
-            content: `嵌入式系统面临的安全威胁包括：
-
-物理攻击：
-• 侧信道分析：功耗分析(SPA/DPA)、电磁分析(EMA)、时序分析
-• 故障注入：电压毛刺、时钟 glitch、激光注入
-• 探针攻击：直接连接调试接口、总线探针
-
-软件攻击：
-• 固件提取：通过SPI/UART/JTAG读取Flash内容
-• 缓冲区溢出：栈溢出、堆溢出、格式化字符串漏洞
-• 重放攻击：捕获并重放通信数据
-• 中间人攻击：篡改通信数据
-
-供应链攻击：
-• 恶意组件：第三方库漏洞、硬件木马
-• 固件篡改：分发渠道被劫持
-• 依赖污染：npm/cargo/pip依赖注入
-
-防护策略：
-• 纵深防御：多层安全机制
-• 最小权限原则：仅开放必要功能
-• 安全开发生命周期：威胁建模、代码审查、渗透测试`,
-          },
-          {
-            name: '加密算法应用',
-            content: `嵌入式系统常用加密算法：
-
-对称加密：
-• AES-128/256：最常用，支持硬件加速
-• ChaCha20：软件实现高效，无S盒侧信道风险
-• DES/3DES：已不推荐使用
-
-非对称加密：
-• RSA-2048/4096：密钥交换、数字签名
-• ECC-256：椭圆曲线，密钥更短性能更好
-• Ed25519：EdDSA签名算法，快速安全
-
-哈希算法：
-• SHA-256：消息摘要、密钥派生
-• SHA-3：Keccak算法，抗碰撞
-• CRC32：错误检测，非加密用途
-
-密钥管理：
-• 密钥存储：OTP区域、安全元件、TrustZone
-• 密钥派生：PBKDF2、HKDF、Argon2
-• 密钥轮换：定期更换密钥`,
-          },
-          {
-            name: '安全启动与固件更新',
-            content: `安全启动(Secure Boot)确保只有可信固件才能运行。
-
-启动链验证：
-• Bootrom：ROM中固化，验证Bootloader签名
-• Bootloader：验证应用固件签名
-• Application：验证关键数据完整性
-
-数字签名方案：
-• RSA-PSS：概率签名方案
-• ECDSA：椭圆曲线签名
-• Ed25519：快速签名验证
-
-安全固件更新(OTA)：
-• A/B分区：双分区无缝更新
-• 签名验证：更新前验证固件签名
-• 回滚保护：防止降级到旧版本固件
-• 原子更新：更新失败自动回滚
-
-STM32安全特性：
-• RDP(Readout Protection)：Flash读取保护
-• BKR(Bit Key Register)：用户密钥存储
-• UID：唯一设备标识符
-• True RNG：硬件真随机数生成器`,
-          },
-        ],
-        resources: [
-          { title: 'ARM TrustZone安全架构', url: 'https://developer.arm.com/technologies/trustzone', lang: 'en', type: 'doc' },
-          { title: '嵌入式安全最佳实践 - NXP', url: 'https://www.nxp.com/doc/APPNOTE/APN2065', lang: 'en', type: 'doc' },
-          { title: 'STM32安全功能参考', url: 'https://www.st.com/content/st_com/en/products/ecosystems/stm32-ecoscene/stm32-security.html', lang: 'en', type: 'doc' },
-        ],
-        codeExample: `// ============================================
-// AES-128-CBC加密示例 (使用STM32硬件加密)
-// ============================================
-#include "stm32f4xx_hal.h"
-
-CRYP_HandleTypeDef hcryp;
-
-void AES_Init(void) {
-    hcryp.Instance = CRYP;
-    hcryp.Init.DataType = CRYP_DATATYPE_32B;
-    hcryp.Init.KeySize = CRYP_KEYSIZE_128B;
-    hcryp.Init.Algorithm = CRYP_AES_CBC;
-    hcryp.Init.DataWidth = CRYP_DATAW_32B;
-    HAL_CRYP_Init(&hcryp);
-
-    // 设置AES密钥 (16字节 = 128位)
-    uint32_t key[4] = {
-        0x2B7E1516, 0x28AED2A6,
-        0xABF71588, 0x09CF4F3C
-    };
-    HAL_CRYPEx_SetKey(&hcryp, CRYP_KEYSIZE_128B, key);
-
-    // 设置初始向量IV
-    uint32_t iv[4] = {
-        0x00010203, 0x04050607,
-        0x08090A0B, 0x0C0D0E0F
-    };
-    HAL_CRYPEx_SetIV(&hcryp, iv);
-}
-
-// 加密数据
-uint8_t encrypted[16];
-uint8_t plaintext[16] = "Hello EmbedKit!";
-
-void AES_Encrypt(void) {
-    HAL_CRYP_Encrypt(&hcryp,
-                     (uint32_t*)plaintext,
-                     (uint32_t*)encrypted,
-                     16,
-                     1000);  // 超时1秒
-}
-
-// ============================================
-// 固件签名验证 (使用CRC和简单校验)
-// ============================================
-#define FIRMWARE_SIGNATURE_ADDR  0x08000000
-#define FIRMWARE_CRC_ADDR        0x0807FFFC
-
-uint32_t CalcCRC32(const uint8_t* data, uint32_t len) {
-    uint32_t crc = 0xFFFFFFFF;
-    for (uint32_t i = 0; i < len; i++) {
-        crc ^= data[i];
-        for (int j = 0; j < 8; j++) {
-            crc = (crc >> 1) ^ ((crc & 1) ? 0xEDB88320 : 0);
-        }
-    }
-    return ~crc;
-}
-
-// 验证固件完整性
-bool VerifyFirmware(void) {
-    uint32_t storedCRC = *(volatile uint32_t*)FIRMWARE_CRC_ADDR;
-    // 计算除CRC区域外的固件CRC
-    uint32_t calcCRC = CalcCRC32(
-        (const uint8_t*)FIRMWARE_SIGNATURE_ADDR,
-        0x7FFFC  // Flash大小 - CRC偏移
-    );
-    return (storedCRC == calcCRC);
-}
-
-// ============================================
-// STM32 Flash读取保护配置
-// ============================================
-void EnableFlashProtection(void) {
-    HAL_FLASH_Unlock();
-
-    // 设置RDP Level 1: 禁止Flash和SRAM读取
-    HAL_FLASH_OB_Unlock();
-    HAL_FLASHEx_OBGetConfig();
-
-    // 注意: RDP降级后无法恢复，需谨慎操作
-    // HAL_FLASH_OB_Launch();
-}`,
-        codeLang: 'c',
-      },
-    ],
-  },
-  {
-    id: 'low-power',
-    title: '低功耗设计',
-    icon: 'battery',
-    color: '#16a34a',
-    description: '休眠模式、时钟树优化、动态电压频率调节和功耗测量',
-    duration: '1-2周',
-    modules: [
-      {
-        id: 'power-management',
-        title: '电源管理与功耗优化',
-        description: 'MCU低功耗模式、时钟优化和功耗测量技术',
-        topics: [
-          {
-            name: 'STM32低功耗模式',
-            content: `STM32系列MCU提供多种低功耗模式：
-
-Sleep模式：
-• CPU内核停止，外设继续运行
-• 进入：WFI(Wait For Interrupt)或WFE(Wait For Event)
-• 唤醒：任何中断
-• 典型电流：约20-30mA(取决于运行外设)
-
-Stop模式：
-• 1.8V域全部关闭(HSI/HSE振荡器停止)
-• 备份区域(RTC、LSI、LSE、后备SRAM)保持供电
-• Stop 0：保留电压调节器，唤醒快
-• Stop 1：降低电压调节器，功耗更低
-• 唤醒：EXTI中断、RTC闹钟
-• 典型电流：Stop0约150uA，Stop1约20uA
-
-Standby模式：
-• 最低功耗模式，仅保留备份区域
-• SRAM内容丢失，寄存器复位
-• 唤醒：Wakeup引脚、RTC闹钟、IWDG
-• 典型电流：约2-5uA
-
-Low Run模式：
-• 内核降频运行，降低动态功耗
-• 适合间歇性任务处理`,
-          },
-          {
-            name: '时钟树优化',
-            content: `时钟是嵌入式系统功耗的主要来源。
-
-时钟优化策略：
-• 使用最低必要频率：任务完成后降低时钟频率
-• 关闭未用外设时钟：通过RCC_APBxENR寄存器控制
-• 选择合适时钟源：低频任务使用LSI/LSE
-• 时钟树分域控制：不同外设域独立时钟管理
-
-STM32时钟源选择：
-• HSE：外部高速晶振，高精度
-• HSI：内部RC振荡器，启动快
-• LSE：外部低速晶振(32.768kHz)，RTC用
-• LSI：内部低速RC，IWDG用
-• PLL：倍频器，生成高速时钟
-
-动态时钟调节：
-• 根据负载动态调整PLL倍频系数
-• Flash等待周期随频率变化
-• 电压调节器模式随频率调整`,
-          },
-          {
-            name: '功耗测量与优化实战',
-            content: `功耗测量方法：
-
-硬件测量：
-• 串联电流表：简单但影响电路
-• 电流探头+示波器：非侵入式测量
-• 专用功耗分析仪：Nordic Power Profiler Kit 2
-
-软件估算：
-• 基于模式时间占比估算总功耗
-• 电池寿命 = 电池容量 / 平均电流
-
-电池寿命计算示例：
-• 工作模式：20mA × 10ms = 0.2mAs
-• 休眠模式：20uA × 10s = 200mAs
-• 平均电流 = (0.2 + 200) / 10.01 ≈ 20uA
-• 使用CR2032(220mAh)：220mAh / 20uA = 11000小时 ≈ 1.25年
-
-优化技巧：
-• 外设使用后及时关闭
-• DMA传输减少CPU参与
-• 使用低功耗定时器唤醒
-• 优化唤醒频率和数据处理时间
-• 选择合适电池类型和容量`,
-          },
-        ],
-        resources: [
-          { title: 'STM32低功耗参考手册', url: 'https://www.st.com/resource/en/reference_manual/dm00031020.pdf', lang: 'en', type: 'doc' },
-          { title: 'Nordic功耗优化指南', url: 'https://devzone.nordicsemi.com/f/nordic-q-a/48215/power-profiling-and-optimization', lang: 'en', type: 'doc' },
-          { title: '低功耗设计教程', url: 'https://www.bilibili.com/video/BV1cY411d7XB', lang: 'zh', type: 'video' },
-        ],
-        codeExample: `// ============================================
-// STM32低功耗模式配置示例
-// ============================================
-#include "stm32f1xx_hal.h"
-
-// ============================================
-// Stop模式 - 最低功耗待机
-// ============================================
-void Enter_Stop_Mode(void) {
-    // 1. 关闭所有不需要的时钟
-    __HAL_RCC_GPIOA_CLK_DISABLE();
-    __HAL_RCC_GPIOB_CLK_DISABLE();
-    __HAL_RCC_GPIOC_CLK_DISABLE();
-    __HAL_RCC_ADC1_CLK_DISABLE();
-    __HAL_RCC_TIM2_CLK_DISABLE();
-
-    // 2. 配置唤醒引脚 (PA0上升沿唤醒)
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-    __HAL_RCC_GPIOA_CLK_ENABLE();
-    GPIO_InitStruct.Pin = GPIO_PIN_0;
-    GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-    HAL_NVIC_SetPriority(GPIOA0_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(GPIOA0_IRQn);
-
-    // 3. 关闭未用外设
-    HAL_SuspendTick();  // 暂停SysTick
-
-    // 4. 使能电源时钟
-    __HAL_RCC_PWR_CLK_ENABLE();
-
-    // 5. 进入Stop模式 (WFI)
-    HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
-
-    // === 唤醒后从这里继续执行 ===
-
-    // 6. 重新配置系统时钟
-    SystemClock_Config();
-
-    // 7. 恢复SysTick
-    HAL_ResumeTick();
-}
-
-// ============================================
-// Standby模式 - 最低功耗
-// ============================================
-void Enter_Standby_Mode(void) {
-    // 配置唤醒源
-    __HAL_RCC_PWR_CLK_ENABLE();
-    HAL_PWR_EnableWakeUpPin(PWR_WAKEUP_PIN1);  // PA0
-
-    // 清除唤醒标志
-    __HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
-
-    // 进入Standby模式
-    HAL_PWR_EnterSTANDBYMode();
-    // 此函数不会返回，唤醒后系统复位
-}
-
-// ============================================
-// RTC唤醒定时唤醒
-// ============================================
-RTC_HandleTypeDef hrtc;
-
-void RTC_Wakeup_Init(void) {
-    hrtc.Instance = RTC;
-    hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
-    hrtc.Init.AsynchPrediv = 127;
-    hrtc.Init.SynchPrediv = 255;
-    HAL_RTC_Init(&hrtc);
-
-    // 配置WakeUp定时器: 每1秒唤醒
-    HAL_RTCEx_SetWakeUpTimer(&hrtc, 0x7FF, RTC_WAKEUPCLOCK_CK_SPRE_16BITS);
-    HAL_RTCEx_SetWakeUpTimer_IT(&hrtc, 0x7FF, RTC_WAKEUPCLOCK_CK_SPRE_16BITS);
-    HAL_NVIC_SetPriority(RTC_WKUP_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(RTC_WKUP_IRQn);
-}
-
-// RTC唤醒中断处理
-void RTC_WKUP_IRQHandler(void) {
-    HAL_RTCEx_WakeUpTimerIRQHandler(&hrtc);
-}
-
-void HAL_RTCEx_WakeUpTimerEventCallback(RTC_HandleTypeDef *hrtc) {
-    // 清除唤醒标志
-    __HAL_RTC_WAKEUPTIMER_CLEAR_FLAG(hrtc, RTC_FLAG_WUTF);
-
-    // 执行唤醒后任务
-    ReadSensorData();
-    SendDataViaLoRa();
-
-    // 再次进入低功耗模式
-    Enter_Stop_Mode();
-}
-
-// ============================================
-// 功耗估算工具函数
-// ============================================
-typedef struct {
-    float current_mA;   // 模式电流(mA)
-    float duration_ms;  // 持续时间(ms)
-    char name[32];
-} PowerMode_t;
-
-float CalculateAvgCurrent(PowerMode_t* modes, uint8_t numModes) {
-    float totalCharge = 0;  // 总电荷量(mAs)
-    float totalDuration = 0;
-
-    for (uint8_t i = 0; i < numModes; i++) {
-        totalCharge += modes[i].current_mA * modes[i].duration_ms;
-        totalDuration += modes[i].duration_ms;
-    }
-
-    return totalCharge / totalDuration;  // 平均电流(mA)
-}
-
-float CalculateBatteryLife(float batteryCapacity_mAh, float avgCurrent_mA) {
-    return (batteryCapacity_mAh * 1000.0f) / avgCurrent_mA;  // 小时数
-}`,
-        codeLang: 'c',
-      },
-    ],
-  },
-  {
     id: 'rtos',
     title: 'RTOS实时操作系统',
     icon: 'layers',
@@ -2502,6 +1871,401 @@ int application_init(void) {
 }
 INIT_APP_EXPORT(application_init);`,
         codeLang: 'c',
+      },
+    ],
+  },
+  {
+    id: 'embedded-linux',
+    title: '嵌入式Linux',
+    icon: 'server',
+    color: '#10b981',
+    description: '学习Linux内核基础、U-Boot启动流程、Device Tree、Buildroot/Yocto构建系统',
+    duration: '4-8周',
+    modules: [
+      {
+        id: 'linux-kernel-basics',
+        title: 'Linux内核基础',
+        description: '内核架构、进程管理、内存管理、设备驱动模型',
+        topics: [
+          { name: '内核架构与模块化', content: 'Linux是模块化 monolithic 内核。核心部分 monolithic，但通过可加载内核模块(LKM)提供扩展性。嵌入式中常用模块方式加载驱动，节省内存。' },
+          { name: '进程管理与调度', content: 'Linux使用CFS(完全公平调度器)处理普通任务，SCHED_FIFO/SCHED_RR处理实时任务。PREEMPT_RT补丁可将Linux改造为硬实时系统。' },
+          { name: '内存管理', content: '虚拟内存、分页、DMA映射、SLAB分配器。嵌入式中常用CONFIG_DEVTMPFS自动创建设备节点，CONFIG_TMPFS提供RAM磁盘。' },
+          { name: '设备驱动模型', content: '字符设备、块设备、网络接口、Platform设备。驱动通过platform_bus与设备树匹配。' },
+          { name: '内核编译与配置', content: 'make menuconfig配置内核选项，make zImage dtbs编译内核和设备树。关键选项：CONFIG_PREEMPT_RT、CONFIG_SQUASHFS、CONFIG_TMPFS。' },
+        ],
+        resources: [
+          { title: 'Linux设备驱动开发详解', url: 'https://www.bilibili.com/video/BV1qJ411d7Pb', lang: 'zh', type: 'video' },
+          { title: 'Linux Device Drivers, 3rd Edition', url: 'https://lwn.net/Kernel/LDD3/', lang: 'en', type: 'doc' },
+        ],
+        codeExample: `#include <linux/module.h>
+#include <linux/init.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/cdev.h>
+
+static int major_num = 0;
+static struct cdev my_cdev;
+static struct class *my_class;
+
+static int my_open(struct inode *inode, struct file *filp) {
+    printk(KERN_INFO "Device opened\\n");
+    return 0;
+}
+
+static ssize_t my_read(struct file *filp, char __user *buf,
+                       size_t count, loff_t *ppos) {
+    char msg[] = "Hello from embedded Linux!\\n";
+    if (copy_to_user(buf, msg, min(count, sizeof(msg))))
+        return -EFAULT;
+    return sizeof(msg);
+}
+
+static struct file_operations fops = {
+    .owner = THIS_MODULE,
+    .open = my_open,
+    .read = my_read,
+};
+
+static int __init mydriver_init(void) {
+    dev_t dev = MKDEV(major_num, 0);
+    alloc_chrdev_region(&dev, 0, 1, "mydev");
+    major_num = MAJOR(dev);
+
+    cdev_init(&my_cdev, &fops);
+    cdev_add(&my_cdev, dev, 1);
+
+    my_class = class_create(THIS_MODULE, "mydev_class");
+    device_create(my_class, NULL, dev, NULL, "mydev0");
+
+    printk(KERN_INFO "My driver loaded, major=%d\\n", major_num);
+    return 0;
+}
+
+static void __exit mydriver_exit(void) {
+    device_destroy(my_class, MKDEV(major_num, 0));
+    class_destroy(my_class);
+    cdev_del(&my_cdev);
+    unregister_chrdev_region(MKDEV(major_num, 0), 1);
+    printk(KERN_INFO "My driver unloaded\\n");
+}
+
+module_init(mydriver_init);
+module_exit(mydriver_exit);
+MODULE_LICENSE("GPL");`,
+        codeLang: 'c',
+      },
+      {
+        id: 'boot-process',
+        title: '启动流程 (U-Boot, DTB)',
+        description: 'U-Boot bootloader、设备树(DTB)、内核启动参数、根文件系统挂载',
+        topics: [
+          { name: 'U-Boot Bootloader', content: 'U-Boot是最广泛使用的嵌入式Linux bootloader。启动链：ROM code -> U-Boot -> Kernel -> initramfs -> rootfs -> systemd/SysVinit。' },
+          { name: '设备树(DTB)', content: 'Device Tree Blob描述硬件信息给内核，使内核硬件无关。用.dts源码编译为.dtb二进制。' },
+          { name: '内核启动参数(bootargs)', content: 'console=ttyS0,115200设置串口控制台，root=/dev/mmcblk0p2指定根文件系统，rootwait等待设备就绪。' },
+          { name: '根文件系统构建', content: 'BusyBox提供最小化Shell和工具集。SquashFS提供压缩只读文件系统，OverlayFS提供读写层。' },
+        ],
+        resources: [
+          { title: 'U-Boot使用教程', url: 'https://www.bilibili.com/video/BV1qJ411d7Pb', lang: 'zh', type: 'video' },
+          { title: 'Device Tree Specification', url: 'https://www.devicetree.org/specifications/', lang: 'en', type: 'doc' },
+        ],
+        codeExample: `# U-Boot environment variables
+setenv bootcmd 'fatload mmc 0:1 0x42000000 zImage; fatload mmc 0:1 0x43000000 myboard.dtb; bootz 0x42000000 - 0x43000000'
+setenv bootargs 'console=ttyS0,115200 root=/dev/mmcblk0p2 rw rootwait'
+saveenv
+
+# Device Tree example (.dts)
+/ {
+    model = "My Embedded Board";
+    compatible = "myvendor,myboard";
+
+    chosen {
+        bootargs = "console=ttyS0,115200 root=/dev/mmcblk0p2 rw";
+    };
+
+    uart0: serial@4000c000 {
+        compatible = "snps,dw-apb-uart";
+        reg = <0x4000c000 0x100>;
+        interrupts = <GIC_SPI 24 IRQ_TYPE_LEVEL_HIGH>;
+        status = "okay";
+    };
+
+    leds {
+        compatible = "gpio-leds";
+        status_led {
+            label = "status";
+            gpios = <&gpio0 28 GPIO_ACTIVE_HIGH>;
+            linux,default-trigger = "heartbeat";
+        };
+    };
+};
+
+# Compile device tree
+dtc -I dts -O dtb -o myboard.dtb myboard.dts`,
+        codeLang: 'bash',
+      },
+      {
+        id: 'buildroot-yocto',
+        title: 'Buildroot与Yocto构建系统',
+        description: 'Buildroot简单构建完整嵌入式Linux，Yocto高度定制化发行版构建',
+        topics: [
+          { name: 'Buildroot入门', content: 'Buildroot是简单高效的嵌入式Linux构建工具，一次构建生成toolchain、kernel、bootloader和rootfs。适合简单确定性的构建。' },
+          { name: 'Buildroot配置', content: 'make menuconfig配置目标架构、内核版本、包选择。make -j$(nproc)构建全部。输出在output/images/目录。' },
+          { name: 'Yocto Project', content: 'Yocto使用BitBake构建引擎，支持复杂依赖解析和包管理。通过layer机制组织recipe，适合大规模定制化。' },
+          { name: '交叉编译工具链', content: 'Buildroot和Yocto都生成完整的交叉编译工具链，包含gcc、binutils、glibc/musl等。' },
+        ],
+        resources: [
+          { title: 'Buildroot官方文档', url: 'https://buildroot.org/downloads/manual/manual.html', lang: 'en', type: 'doc' },
+          { title: 'Yocto Project快速入门', url: 'https://www.yoctoproject.org/docs/latest/mega-manual/mega-manual.html', lang: 'en', type: 'doc' },
+        ],
+        codeExample: `# Buildroot
+make qemu_arm_vexpress_defconfig
+make menuconfig
+make -j$(nproc)
+# Output: output/images/zImage, rootfs.tar.gz, sdcard.img
+
+# Yocto
+source oe-init-build-env
+bitbake-layers create-layer meta-mycompany
+echo 'MACHINE = "raspberrypi4-64"' > conf/local.conf
+echo 'DISTRO = "poky"' >> conf/local.conf
+bitbake core-image-minimal
+
+# BusyBox configuration (in Buildroot)
+# Toolchain -> External toolchain
+# Target packages -> Shell and utilities -> BusyBox
+# Filesystem images -> tar the root filesystem`,
+        codeLang: 'bash',
+      },
+    ],
+  },
+  {
+    id: 'esp32-development',
+    title: 'ESP32物联网开发',
+    icon: 'wifi',
+    color: '#8b5cf6',
+    description: '学习ESP32双核架构、WiFi/BLE通信、OTA升级和物联网协议',
+    duration: '3-4周',
+    modules: [
+      {
+        id: 'esp32-basics',
+        title: 'ESP32基础与FreeRTOS',
+        description: 'ESP32硬件架构、Arduino/ESP-IDF开发环境、FreeRTOS任务管理',
+        topics: [
+          'ESP32芯片型号与引脚定义',
+          'ESP32双核架构与内存',
+          'Arduino框架快速入门',
+          'ESP-IDF开发环境搭建',
+          'FreeRTOS任务创建与调度',
+          '信号量/互斥量/队列',
+          '任务间通信机制',
+        ],
+        resources: [
+          { title: 'ESP-IDF官方文档', url: 'https://docs.espressif.com/projects/esp-idf/zh_CN/latest/esp32/', lang: 'zh', type: 'doc' },
+          { title: 'ESP32 Technical Reference Manual', url: 'https://www.espressif.com.cn/sites/default/files/documentation/esp32_technical_reference_manual_cn.pdf', lang: 'zh', type: 'doc' },
+          { title: 'ESP32开发教程 - 乐鑫官方', url: 'https://www.bilibili.com/video/BV1pP411W7Jy', lang: 'zh', type: 'video' },
+        ],
+        codeExample: `#include <Arduino.h>
+#include <WiFi.h>
+#include <WebServer.h>
+
+#define LED_PIN 2
+
+const char* ssid = "YourWiFi";
+const char* password = "YourPassword";
+
+WebServer server(80);
+
+void handleRoot() {
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+    server.send(200, "text/plain", 
+        "LED toggled! State: " + String(digitalRead(LED_PIN)));
+}
+
+void handleNotFound() {
+    server.send(404, "text/plain", "Not found");
+}
+
+void setup() {
+    pinMode(LED_PIN, OUTPUT);
+    Serial.begin(115200);
+    
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print(".");
+    }
+    Serial.println("\\nConnected! IP: " + WiFi.localIP().toString());
+    
+    server.on("/", handleRoot);
+    server.onNotFound(handleNotFound);
+    server.begin();
+}
+
+void loop() {
+    server.handleClient();
+}`,
+        codeLang: 'cpp',
+      },
+      {
+        id: 'esp32-wifi-mqtt',
+        title: 'WiFi与MQTT通信',
+        description: 'TCP/UDP socket编程、HTTP请求、MQTT协议与云平台对接',
+        topics: [
+          'STA/AP模式配置',
+          'TCP Client/Server编程',
+          'HTTP GET/POST请求',
+          'HTTPS与证书验证',
+          'MQTT协议原理(PUBLISH/SUBSCRIBE)',
+          'MQTT连接阿里云IoT平台',
+          'MQTT连接EMQX服务器',
+          'MQTT QoS与Retain消息',
+        ],
+        resources: [
+          { title: 'MQTT协议入门', url: 'https://www.runoob.com/w3cnote/mqtt.html', lang: 'zh', type: 'doc' },
+          { title: 'MQTT Essentials - HiveMQ', url: 'https://www.hivemq.com/blog/mqtt-essentials/', lang: 'en', type: 'doc' },
+          { title: 'ESP32 MQTT教程', url: 'https://randomnerdtutorials.com/?s=esp32+mqtt', lang: 'en', type: 'doc' },
+        ],
+        codeExample: `#include <WiFi.h>
+#include <PubSubClient.h>
+
+WiFiClient espClient;
+PubSubClient mqtt(espClient);
+
+const char* ssid = "YourWiFi";
+const char* password = "YourPassword";
+const char* mqtt_server = "broker.emqx.io";
+const char* mqtt_user = "esp32_sensor";
+const char* topic_pub = "home/sensor/data";
+const char* topic_sub = "home/control/led";
+
+// MQTT回调: 接收订阅消息
+void callback(const char* topic, byte* payload, unsigned int length) {
+    String msg = "";
+    for (int i = 0; i < length; i++) msg += (char)payload[i];
+    Serial.printf("[%s] %s\\n", topic, msg.c_str());
+    if (String(topic) == topic_sub) {
+        digitalWrite(LED_BUILTIN, msg == "ON" ? HIGH : LOW);
+    }
+}
+
+void setup() {
+    Serial.begin(115200);
+    pinMode(LED_BUILTIN, OUTPUT);
+    
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) delay(500);
+    
+    mqtt.setServer(mqtt_server, 1883);
+    mqtt.setCallback(callback);
+    
+    while (!mqtt.connected()) {
+        if (mqtt.connect("ESP32-Client", mqtt_user, "", "home/lastwill", 1, true))
+            Serial.println("MQTT Connected!");
+        else delay(1000);
+    }
+    mqtt.subscribe(topic_sub);
+}
+
+void loop() {
+    mqtt.loop();
+    // 每5秒发布传感器数据 (JSON格式)
+    static unsigned long last = 0;
+    if (millis() - last > 5000) {
+        last = millis();
+        char buf[128];
+        snprintf(buf, sizeof(buf),
+            "{\"temp\":%.1f,\"humid\":%.1f,\"light\":%d}",
+            25.6f, 60.2f, analogRead(A0));
+        mqtt.publish(topic_pub, buf);
+        Serial.println(buf);
+    }
+}`,
+        codeLang: 'cpp',
+      },
+      {
+        id: 'esp32-ble-ota',
+        title: 'BLE与OTA升级',
+        description: '蓝牙低功耗通信、GATT服务、固件OTA远程升级',
+        topics: [
+          'BLE广播与连接',
+          'GATT服务与特征值',
+          'BLE Server/Client角色',
+          'NVS非易失性存储',
+          'Deep-sleep低功耗模式',
+          'OTA固件升级原理',
+          'Arduino OTA实现',
+          'ESP-IDF OTA实现',
+        ],
+        resources: [
+          { title: 'ESP32 BLE教程', url: 'https://randomnerdtutorials.com/?s=esp32+bluetooth', lang: 'en', type: 'doc' },
+          { title: 'ESP32 OTA升级 - 乐鑫文档', url: 'https://docs.espressif.com/projects/esp-idf/zh_CN/latest/esp32/api-reference/system/ota.html', lang: 'zh', type: 'doc' },
+        ],
+        codeExample: `#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <Update.h>
+#include <ESPmDNS.h>
+#include <WiFiUdp.h>
+
+// ============================================================
+// BLE Service - 温湿度传感器模拟
+// ============================================================
+#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+
+BLEServer* pServer = NULL;
+BLECharacteristic* pTxChar;
+
+class BLEServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+        Serial.println("BLE Client connected");
+    }
+    void onDisconnect(BLEServer* pServer) {
+        Serial.println("BLE Client disconnected");
+    }
+};
+
+void setupBLE() {
+    BLEDevice::init("ESP32-Sensor");
+    pServer = BLEDevice::createServer();
+    pServer->setCallbacks(new BLEServerCallbacks());
+    
+    BLEService* pService = pServer->createService(SERVICE_UUID);
+    pTxChar = pService->createCharacteristic(
+        CHARACTERISTIC_UUID,
+        BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_READ
+    );
+    pService->start();
+    BLEDevice::startAdvertising();
+}
+
+void sendSensorData() {
+    char data[32];
+    snprintf(data, sizeof(data), "%.1fC %.1f%%", 25.6f, 60.2f);
+    pTxChar->setValue(data);
+    pTxChar->notify();
+}
+
+// ============================================================
+// OTA固件升级 (mDNS + HTTP Update)
+// ============================================================
+void setupOTA() {
+    if (MDNS.begin("esp32-ota")) {
+        MDNS.addService("http", "tcp", 80);
+        Serial.println("mDNS: http://esp32-ota.local");
+    }
+}
+
+void handleFirmwareUpdate() {
+    // HTTP POST /update 接收.bin固件
+    if (Update.hasError()) {
+        Serial.println("Update FAILED");
+    } else {
+        Serial.println("Update OK, rebooting...");
+        ESP.restart();
+    }
+}`,
+        codeLang: 'cpp',
       },
     ],
   },
@@ -2758,6 +2522,406 @@ void loop() {
     ],
   },
   {
+    id: 'low-power',
+    title: '低功耗设计',
+    icon: 'battery',
+    color: '#16a34a',
+    description: '休眠模式、时钟树优化、动态电压频率调节和功耗测量',
+    duration: '1-2周',
+    modules: [
+      {
+        id: 'power-management',
+        title: '电源管理与功耗优化',
+        description: 'MCU低功耗模式、时钟优化和功耗测量技术',
+        topics: [
+          {
+            name: 'STM32低功耗模式',
+            content: `STM32系列MCU提供多种低功耗模式：
+
+Sleep模式：
+• CPU内核停止，外设继续运行
+• 进入：WFI(Wait For Interrupt)或WFE(Wait For Event)
+• 唤醒：任何中断
+• 典型电流：约20-30mA(取决于运行外设)
+
+Stop模式：
+• 1.8V域全部关闭(HSI/HSE振荡器停止)
+• 备份区域(RTC、LSI、LSE、后备SRAM)保持供电
+• Stop 0：保留电压调节器，唤醒快
+• Stop 1：降低电压调节器，功耗更低
+• 唤醒：EXTI中断、RTC闹钟
+• 典型电流：Stop0约150uA，Stop1约20uA
+
+Standby模式：
+• 最低功耗模式，仅保留备份区域
+• SRAM内容丢失，寄存器复位
+• 唤醒：Wakeup引脚、RTC闹钟、IWDG
+• 典型电流：约2-5uA
+
+Low Run模式：
+• 内核降频运行，降低动态功耗
+• 适合间歇性任务处理`,
+          },
+          {
+            name: '时钟树优化',
+            content: `时钟是嵌入式系统功耗的主要来源。
+
+时钟优化策略：
+• 使用最低必要频率：任务完成后降低时钟频率
+• 关闭未用外设时钟：通过RCC_APBxENR寄存器控制
+• 选择合适时钟源：低频任务使用LSI/LSE
+• 时钟树分域控制：不同外设域独立时钟管理
+
+STM32时钟源选择：
+• HSE：外部高速晶振，高精度
+• HSI：内部RC振荡器，启动快
+• LSE：外部低速晶振(32.768kHz)，RTC用
+• LSI：内部低速RC，IWDG用
+• PLL：倍频器，生成高速时钟
+
+动态时钟调节：
+• 根据负载动态调整PLL倍频系数
+• Flash等待周期随频率变化
+• 电压调节器模式随频率调整`,
+          },
+          {
+            name: '功耗测量与优化实战',
+            content: `功耗测量方法：
+
+硬件测量：
+• 串联电流表：简单但影响电路
+• 电流探头+示波器：非侵入式测量
+• 专用功耗分析仪：Nordic Power Profiler Kit 2
+
+软件估算：
+• 基于模式时间占比估算总功耗
+• 电池寿命 = 电池容量 / 平均电流
+
+电池寿命计算示例：
+• 工作模式：20mA × 10ms = 0.2mAs
+• 休眠模式：20uA × 10s = 200mAs
+• 平均电流 = (0.2 + 200) / 10.01 ≈ 20uA
+• 使用CR2032(220mAh)：220mAh / 20uA = 11000小时 ≈ 1.25年
+
+优化技巧：
+• 外设使用后及时关闭
+• DMA传输减少CPU参与
+• 使用低功耗定时器唤醒
+• 优化唤醒频率和数据处理时间
+• 选择合适电池类型和容量`,
+          },
+        ],
+        resources: [
+          { title: 'STM32低功耗参考手册', url: 'https://www.st.com/resource/en/reference_manual/dm00031020.pdf', lang: 'en', type: 'doc' },
+          { title: 'Nordic功耗优化指南', url: 'https://devzone.nordicsemi.com/f/nordic-q-a/48215/power-profiling-and-optimization', lang: 'en', type: 'doc' },
+          { title: '低功耗设计教程', url: 'https://www.bilibili.com/video/BV1cY411d7XB', lang: 'zh', type: 'video' },
+        ],
+        codeExample: `// ============================================
+// STM32低功耗模式配置示例
+// ============================================
+#include "stm32f1xx_hal.h"
+
+// ============================================
+// Stop模式 - 最低功耗待机
+// ============================================
+void Enter_Stop_Mode(void) {
+    // 1. 关闭所有不需要的时钟
+    __HAL_RCC_GPIOA_CLK_DISABLE();
+    __HAL_RCC_GPIOB_CLK_DISABLE();
+    __HAL_RCC_GPIOC_CLK_DISABLE();
+    __HAL_RCC_ADC1_CLK_DISABLE();
+    __HAL_RCC_TIM2_CLK_DISABLE();
+
+    // 2. 配置唤醒引脚 (PA0上升沿唤醒)
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    GPIO_InitStruct.Pin = GPIO_PIN_0;
+    GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+    GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+    HAL_NVIC_SetPriority(GPIOA0_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(GPIOA0_IRQn);
+
+    // 3. 关闭未用外设
+    HAL_SuspendTick();  // 暂停SysTick
+
+    // 4. 使能电源时钟
+    __HAL_RCC_PWR_CLK_ENABLE();
+
+    // 5. 进入Stop模式 (WFI)
+    HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+
+    // === 唤醒后从这里继续执行 ===
+
+    // 6. 重新配置系统时钟
+    SystemClock_Config();
+
+    // 7. 恢复SysTick
+    HAL_ResumeTick();
+}
+
+// ============================================
+// Standby模式 - 最低功耗
+// ============================================
+void Enter_Standby_Mode(void) {
+    // 配置唤醒源
+    __HAL_RCC_PWR_CLK_ENABLE();
+    HAL_PWR_EnableWakeUpPin(PWR_WAKEUP_PIN1);  // PA0
+
+    // 清除唤醒标志
+    __HAL_PWR_CLEAR_FLAG(PWR_FLAG_WU);
+
+    // 进入Standby模式
+    HAL_PWR_EnterSTANDBYMode();
+    // 此函数不会返回，唤醒后系统复位
+}
+
+// ============================================
+// RTC唤醒定时唤醒
+// ============================================
+RTC_HandleTypeDef hrtc;
+
+void RTC_Wakeup_Init(void) {
+    hrtc.Instance = RTC;
+    hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
+    hrtc.Init.AsynchPrediv = 127;
+    hrtc.Init.SynchPrediv = 255;
+    HAL_RTC_Init(&hrtc);
+
+    // 配置WakeUp定时器: 每1秒唤醒
+    HAL_RTCEx_SetWakeUpTimer(&hrtc, 0x7FF, RTC_WAKEUPCLOCK_CK_SPRE_16BITS);
+    HAL_RTCEx_SetWakeUpTimer_IT(&hrtc, 0x7FF, RTC_WAKEUPCLOCK_CK_SPRE_16BITS);
+    HAL_NVIC_SetPriority(RTC_WKUP_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(RTC_WKUP_IRQn);
+}
+
+// RTC唤醒中断处理
+void RTC_WKUP_IRQHandler(void) {
+    HAL_RTCEx_WakeUpTimerIRQHandler(&hrtc);
+}
+
+void HAL_RTCEx_WakeUpTimerEventCallback(RTC_HandleTypeDef *hrtc) {
+    // 清除唤醒标志
+    __HAL_RTC_WAKEUPTIMER_CLEAR_FLAG(hrtc, RTC_FLAG_WUTF);
+
+    // 执行唤醒后任务
+    ReadSensorData();
+    SendDataViaLoRa();
+
+    // 再次进入低功耗模式
+    Enter_Stop_Mode();
+}
+
+// ============================================
+// 功耗估算工具函数
+// ============================================
+typedef struct {
+    float current_mA;   // 模式电流(mA)
+    float duration_ms;  // 持续时间(ms)
+    char name[32];
+} PowerMode_t;
+
+float CalculateAvgCurrent(PowerMode_t* modes, uint8_t numModes) {
+    float totalCharge = 0;  // 总电荷量(mAs)
+    float totalDuration = 0;
+
+    for (uint8_t i = 0; i < numModes; i++) {
+        totalCharge += modes[i].current_mA * modes[i].duration_ms;
+        totalDuration += modes[i].duration_ms;
+    }
+
+    return totalCharge / totalDuration;  // 平均电流(mA)
+}
+
+float CalculateBatteryLife(float batteryCapacity_mAh, float avgCurrent_mA) {
+    return (batteryCapacity_mAh * 1000.0f) / avgCurrent_mA;  // 小时数
+}`,
+        codeLang: 'c',
+      },
+    ],
+  },
+  {
+    id: 'security',
+    title: '嵌入式安全',
+    icon: 'shield',
+    color: '#dc2626',
+    description: '固件安全、加密算法、安全启动和攻击防护',
+    duration: '2-3周',
+    modules: [
+      {
+        id: 'security-fundamentals',
+        title: '安全基础与威胁模型',
+        description: '嵌入式安全威胁、攻击面和防护策略',
+        topics: [
+          {
+            name: '安全威胁模型',
+            content: `嵌入式系统面临的安全威胁包括：
+
+物理攻击：
+• 侧信道分析：功耗分析(SPA/DPA)、电磁分析(EMA)、时序分析
+• 故障注入：电压毛刺、时钟 glitch、激光注入
+• 探针攻击：直接连接调试接口、总线探针
+
+软件攻击：
+• 固件提取：通过SPI/UART/JTAG读取Flash内容
+• 缓冲区溢出：栈溢出、堆溢出、格式化字符串漏洞
+• 重放攻击：捕获并重放通信数据
+• 中间人攻击：篡改通信数据
+
+供应链攻击：
+• 恶意组件：第三方库漏洞、硬件木马
+• 固件篡改：分发渠道被劫持
+• 依赖污染：npm/cargo/pip依赖注入
+
+防护策略：
+• 纵深防御：多层安全机制
+• 最小权限原则：仅开放必要功能
+• 安全开发生命周期：威胁建模、代码审查、渗透测试`,
+          },
+          {
+            name: '加密算法应用',
+            content: `嵌入式系统常用加密算法：
+
+对称加密：
+• AES-128/256：最常用，支持硬件加速
+• ChaCha20：软件实现高效，无S盒侧信道风险
+• DES/3DES：已不推荐使用
+
+非对称加密：
+• RSA-2048/4096：密钥交换、数字签名
+• ECC-256：椭圆曲线，密钥更短性能更好
+• Ed25519：EdDSA签名算法，快速安全
+
+哈希算法：
+• SHA-256：消息摘要、密钥派生
+• SHA-3：Keccak算法，抗碰撞
+• CRC32：错误检测，非加密用途
+
+密钥管理：
+• 密钥存储：OTP区域、安全元件、TrustZone
+• 密钥派生：PBKDF2、HKDF、Argon2
+• 密钥轮换：定期更换密钥`,
+          },
+          {
+            name: '安全启动与固件更新',
+            content: `安全启动(Secure Boot)确保只有可信固件才能运行。
+
+启动链验证：
+• Bootrom：ROM中固化，验证Bootloader签名
+• Bootloader：验证应用固件签名
+• Application：验证关键数据完整性
+
+数字签名方案：
+• RSA-PSS：概率签名方案
+• ECDSA：椭圆曲线签名
+• Ed25519：快速签名验证
+
+安全固件更新(OTA)：
+• A/B分区：双分区无缝更新
+• 签名验证：更新前验证固件签名
+• 回滚保护：防止降级到旧版本固件
+• 原子更新：更新失败自动回滚
+
+STM32安全特性：
+• RDP(Readout Protection)：Flash读取保护
+• BKR(Bit Key Register)：用户密钥存储
+• UID：唯一设备标识符
+• True RNG：硬件真随机数生成器`,
+          },
+        ],
+        resources: [
+          { title: 'ARM TrustZone安全架构', url: 'https://developer.arm.com/technologies/trustzone', lang: 'en', type: 'doc' },
+          { title: '嵌入式安全最佳实践 - NXP', url: 'https://www.nxp.com/doc/APPNOTE/APN2065', lang: 'en', type: 'doc' },
+          { title: 'STM32安全功能参考', url: 'https://www.st.com/content/st_com/en/products/ecosystems/stm32-ecoscene/stm32-security.html', lang: 'en', type: 'doc' },
+        ],
+        codeExample: `// ============================================
+// AES-128-CBC加密示例 (使用STM32硬件加密)
+// ============================================
+#include "stm32f4xx_hal.h"
+
+CRYP_HandleTypeDef hcryp;
+
+void AES_Init(void) {
+    hcryp.Instance = CRYP;
+    hcryp.Init.DataType = CRYP_DATATYPE_32B;
+    hcryp.Init.KeySize = CRYP_KEYSIZE_128B;
+    hcryp.Init.Algorithm = CRYP_AES_CBC;
+    hcryp.Init.DataWidth = CRYP_DATAW_32B;
+    HAL_CRYP_Init(&hcryp);
+
+    // 设置AES密钥 (16字节 = 128位)
+    uint32_t key[4] = {
+        0x2B7E1516, 0x28AED2A6,
+        0xABF71588, 0x09CF4F3C
+    };
+    HAL_CRYPEx_SetKey(&hcryp, CRYP_KEYSIZE_128B, key);
+
+    // 设置初始向量IV
+    uint32_t iv[4] = {
+        0x00010203, 0x04050607,
+        0x08090A0B, 0x0C0D0E0F
+    };
+    HAL_CRYPEx_SetIV(&hcryp, iv);
+}
+
+// 加密数据
+uint8_t encrypted[16];
+uint8_t plaintext[16] = "Hello EmbedKit!";
+
+void AES_Encrypt(void) {
+    HAL_CRYP_Encrypt(&hcryp,
+                     (uint32_t*)plaintext,
+                     (uint32_t*)encrypted,
+                     16,
+                     1000);  // 超时1秒
+}
+
+// ============================================
+// 固件签名验证 (使用CRC和简单校验)
+// ============================================
+#define FIRMWARE_SIGNATURE_ADDR  0x08000000
+#define FIRMWARE_CRC_ADDR        0x0807FFFC
+
+uint32_t CalcCRC32(const uint8_t* data, uint32_t len) {
+    uint32_t crc = 0xFFFFFFFF;
+    for (uint32_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (int j = 0; j < 8; j++) {
+            crc = (crc >> 1) ^ ((crc & 1) ? 0xEDB88320 : 0);
+        }
+    }
+    return ~crc;
+}
+
+// 验证固件完整性
+bool VerifyFirmware(void) {
+    uint32_t storedCRC = *(volatile uint32_t*)FIRMWARE_CRC_ADDR;
+    // 计算除CRC区域外的固件CRC
+    uint32_t calcCRC = CalcCRC32(
+        (const uint8_t*)FIRMWARE_SIGNATURE_ADDR,
+        0x7FFFC  // Flash大小 - CRC偏移
+    );
+    return (storedCRC == calcCRC);
+}
+
+// ============================================
+// STM32 Flash读取保护配置
+// ============================================
+void EnableFlashProtection(void) {
+    HAL_FLASH_Unlock();
+
+    // 设置RDP Level 1: 禁止Flash和SRAM读取
+    HAL_FLASH_OB_Unlock();
+    HAL_FLASHEx_OBGetConfig();
+
+    // 注意: RDP降级后无法恢复，需谨慎操作
+    // HAL_FLASH_OB_Launch();
+}`,
+        codeLang: 'c',
+      },
+    ],
+  },
+  {
     id: 'pcb-design',
     title: 'PCB设计与硬件',
     icon: 'layers',
@@ -2918,6 +3082,148 @@ drillfile.CreateDrillandMapFilesSet(plot_dir + "drill.drl")
 
 print(f"Production files generated in {plot_dir}")`,
         codeLang: 'python',
+      },
+    ],
+ },
+  {
+    id: 'edge-ai',
+    title: '边缘AI / TinyML',
+    icon: 'brain',
+    color: '#8b5cf6',
+    description: 'TensorFlow Lite Micro、模型量化、传感器ML流水线、MCU端推理部署',
+    duration: '4-6周',
+    modules: [
+      {
+        id: 'tflite-micro',
+        title: 'TensorFlow Lite Micro',
+        description: '将ML推理带到KB级内存的微控制器，支持ARM Cortex-M、RISC-V等平台',
+        topics: [
+          { name: 'TFLite Micro简介', content: 'TensorFlow Lite Micro是TFLite的微控制器版本，能在KB级SRAM上运行模型推理。支持ARM Cortex-M3/M4/M7/M55、RISC-V ESP32-C3等。' },
+          { name: '模型量化', content: '量化用低精度表示减少模型体积并提升推理速度。后训练量化无需重新训练，全整数量化(int8)无需浮点硬件。' },
+          { name: 'Tensor Arena内存管理', content: 'TFLite Micro使用预先分配的stack内存(tensor arena)来存储所有tensor，避免动态内存分配，适合嵌入式环境。' },
+        ],
+        resources: [
+          { title: 'TensorFlow Lite Micro官方文档', url: 'https://www.tensorflow.org/lite/microcontrollers', lang: 'en', type: 'doc' },
+          { title: 'TinyML书籍', url: 'https://tinyml.org/', lang: 'en', type: 'doc' },
+        ],
+        codeExample: `#include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
+#include "tensorflow/lite/micro/micro_interpreter.h"
+
+// Register operations
+tflite::MicroMutableOpResolver<2> micro_op_resolver;
+micro_op_resolver.AddConv2D();
+micro_op_resolver.AddAveragePool2D();
+
+// Allocate tensor arena (stack memory for TFLite)
+constexpr int tensor_arena_size = 2 * 1024;
+uint8_t tensor_arena[tensor_arena_size];
+
+// Create interpreter
+tflite::MicroInterpreter interpreter(
+    g_model, micro_op_resolver, tensor_arena,
+    tensor_arena_size, error_reporter);
+interpreter.AllocateTensors();
+
+// Run inference
+TfLiteStatus status = interpreter.Invoke();
+if (status != kTfLiteOk) {
+    ErrorReporter::Report("Inference failed!");
+}
+
+// Get output
+TfLiteTensor* output = interpreter.output(0);
+float result = output->data.f[0];`,
+        codeLang: 'c',
+      },
+      {
+        id: 'model-quantization',
+        title: '模型量化与转换',
+        description: '后训练量化、量化感知训练、全整数量化，将模型转换为MCU可用的格式',
+        topics: [
+          { name: '后训练量化', content: '无需重新训练，直接将float32模型转换为int8，约4倍体积缩减。精度损失通常可接受。' },
+          { name: '量化感知训练(QAT)', content: '训练时模拟量化过程，得到更好的量化后精度。适合对精度要求高的场景。' },
+          { name: '全整数量化', content: '所有运算使用int8，输入输出也量化。MCU无需FPU即可运行，速度和功耗最优。' },
+        ],
+        resources: [
+          { title: 'TensorFlow量化指南', url: 'https://www.tensorflow.org/lite/performance/post_training_quantization', lang: 'en', type: 'doc' },
+        ],
+        codeExample: `import tensorflow as tf
+
+# Load trained model
+model = tf.keras.models.load_model('my_model.h5')
+
+# Convert to TFLite with quantization
+converter = tf.lite.TFLiteConverter.from_keras_model(model)
+converter.optimizations = [tf.lite.Optimize.DEFAULT]
+
+# Full integer quantization for MCUs
+def repr_dataset_gen():
+    for _ in range(100):
+        yield [np.random.randn(1, 32).astype(np.float32)]
+
+converter.representative_dataset = repr_dataset_gen
+converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILT_INT8]
+converter.inference_input_type = tf.int8
+converter.inference_output_type = tf.int8
+
+tflite_model = converter.convert()
+
+with open('model_int8.tflite', 'wb') as f:
+    f.write(tflite_model)`,
+        codeLang: 'python',
+      },
+      {
+        id: 'sensor-ml-pipeline',
+        title: '传感器ML流水线',
+        description: '传感器数据采集、特征提取、MCU端推理、异常检测完整流水线',
+        topics: [
+          { name: '端侧特征提取', content: '在MCU上直接从传感器数据提取特征：时域特征(均值、RMS、方差)、频域特征(FFT幅度带、频谱质心)。' },
+          { name: '端侧推理流水线', content: '完整流水线：传感器采集 -> 特征提取 -> 模型推理 -> 阈值判决。保持推理延迟小于采样周期。' },
+          { name: '功耗优化', content: '在推理周期之间使用MCU休眠模式，降低平均功耗。选择适合电池供电的应用场景。' },
+        ],
+        resources: [
+          { title: 'Edge Impulse教程', url: 'https://docs.edgeimpulse.com/', lang: 'en', type: 'doc' },
+        ],
+        codeExample: `// Complete inference pipeline for anomaly detection
+typedef struct {
+    float raw_accel[128];
+    float features[32];
+    float model_output;
+    bool anomaly_detected;
+} InferenceResult;
+
+InferenceResult run_inference_cycle(void) {
+    InferenceResult result;
+
+    // 1. Acquire sensor data
+    read_accel_frame(result.raw_accel, 128);
+
+    // 2. Extract features (FFT magnitude bands)
+    extract_features(result.raw_accel, result.features);
+
+    // 3. Run TFLite Micro model
+    interpreter.Invoke();
+
+    // 4. Get prediction
+    TfLiteTensor* output = interpreter.output(0);
+    result.model_output = output->data.f[0];
+
+    // 5. Threshold decision
+    result.anomaly_detected = (result.model_output > 0.5f);
+    return result;
+}
+
+// Main loop - 50 Hz inference
+int main(void) {
+    while (1) {
+        InferenceResult result = run_inference_cycle();
+        if (result.anomaly_detected) {
+            trigger_alert();  // LED, buzzer, or transmit
+        }
+        delay_ms(20);  // 50 Hz cycle
+    }
+}`,
+        codeLang: 'c',
       },
     ],
   },
