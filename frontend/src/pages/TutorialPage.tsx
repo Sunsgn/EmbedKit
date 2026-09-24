@@ -182,32 +182,37 @@ function ModuleDetail({ module, onClose }: { module: RoadmapModule; onClose: () 
               {module.topics.map((topic, i) => {
                 const name = getTopicName(topic);
                 const content = getTopicContent(topic);
-                const hasContent = !!content;
+                const hasContent = !!content || !!module.codeExample;
                 const isExpanded = expandedTopic === i;
                 return (
-                  <div key={i} className="rounded-lg bg-[#0d1117] border border-[#30363d] overflow-hidden">
+                  <div key={i} className={`rounded-lg bg-[#0d1117] border overflow-hidden transition-colors ${isExpanded ? 'border-blue-500/30' : 'border-[#30363d]'}`}>
                     <button
-                      onClick={() => hasContent ? setExpandedTopic(isExpanded ? null : i) : null}
-                      className={`w-full flex items-center gap-2 text-sm px-3 py-2.5 text-left transition-colors ${
-                        hasContent ? 'hover:bg-[#1c2128] cursor-pointer' : 'cursor-default'
-                      }`}
+                      onClick={() => hasContent && setExpandedTopic(isExpanded ? null : i)}
+                      className={`w-full flex items-center gap-2 text-sm px-3 py-2.5 text-left transition-colors hover:bg-[#1c2128] cursor-pointer`}
                     >
                       {isExpanded ? (
                         <ChevronDown size={14} className="text-blue-400 flex-shrink-0" />
                       ) : (
-                        <ChevronRight size={14} className={`${hasContent ? 'text-gray-500' : 'text-gray-600'} flex-shrink-0`} />
+                        <ChevronRight size={14} className="text-gray-500 flex-shrink-0" />
                       )}
                       <span className="text-gray-300 flex-1">{name}</span>
                       {hasContent && (
-                        <span className="text-xs text-blue-400/60 flex-shrink-0">展开</span>
+                        <span className="text-xs text-blue-400/60 flex-shrink-0">{isExpanded ? '收起' : '展开'}</span>
                       )}
                     </button>
-                    {isExpanded && content && (
-                      <div className="px-3 pb-3 pt-1 border-t border-[#30363d]/50">
-                        <div
-                          className="text-xs text-gray-400 leading-relaxed whitespace-pre-wrap"
-                          dangerouslySetInnerHTML={{ __html: content }}
-                        />
+                    {isExpanded && hasContent && (
+                      <div className="px-3 pb-3 pt-1 border-t border-[#30363d]/50 space-y-2">
+                        {content && (
+                          <div
+                            className="text-xs text-gray-400 leading-relaxed whitespace-pre-wrap"
+                            dangerouslySetInnerHTML={{ __html: content }}
+                          />
+                        )}
+                        {module.codeExample && (
+                          <div className="rounded-md bg-[#0d1117] border border-[#30363d] p-2.5 font-mono text-xs text-green-400 overflow-x-auto whitespace-pre leading-relaxed">
+                            {module.codeExample}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
