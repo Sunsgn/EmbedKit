@@ -44,6 +44,33 @@ export interface SerialPort {
   parity: string;
 }
 
+export interface ExternalResource {
+  title: string;
+  url: string;
+  lang: 'zh' | 'en';
+  type: 'video' | 'doc' | 'course' | 'book' | 'project';
+}
+
+export interface RoadmapModule {
+  id: string;
+  title: string;
+  description: string;
+  topics: string[];
+  resources: ExternalResource[];
+  codeExample?: string;
+  codeLang?: 'c' | 'cpp' | 'python' | 'makefile' | 'text';
+}
+
+export interface RoadmapPhase {
+  id: string;
+  title: string;
+  icon: string;
+  color: string;
+  description: string;
+  duration: string;
+  modules: RoadmapModule[];
+}
+
 export interface Tutorial {
   id: string;
   title: string;
@@ -52,3 +79,5 @@ export interface Tutorial {
   content: string;
   codeExample?: string;
 }
+
+export type ResourceFilter = 'all' | 'zh' | 'en' | 'video' | 'doc' | 'course';
