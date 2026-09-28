@@ -276,15 +276,18 @@ function ModuleDetail({ module, onClose }: { module: RoadmapModule; onClose: () 
   );
 }
 
-/* ── tree roadmap view ── */
+/* ── DAG roadmap view ── */
 function RoadmapView({ phases, onSelectModule }: { phases: typeof roadmapPhases; onSelectModule: (m: RoadmapModule) => void }) {
   const [selectedPhase, setSelectedPhase] = useState<string | null>(null);
   const [hoveredPhase, setHoveredPhase] = useState<string | null>(null);
 
-  // Find the single root (phase with no prerequisites)
-  const rootPhase = phases.find(p => !p.prerequisites || p.prerequisites.length === 0);
+  const phaseMap = useMemo(() => {
+    const map: Record<string, (typeof phases)[0]> = {};
+    phases.forEach(p => { map[p.id] = p; });
+    return map;
+  }, [phases]);
 
-  // Build children map: parentId -> childId[]
+  // Build adjacency: parentId -> childId[] and reverse: childId -> parentId[]
   const childrenMap = useMemo(() => {
     const map = new Map<string, string[]>();
     phases.forEach(p => map.set(p.id, []));
@@ -298,60 +301,140 @@ function RoadmapView({ phases, onSelectModule }: { phases: typeof roadmapPhases;
     return map;
   }, [phases]);
 
-  // Recursive tree layout: left-to-right positioning
+  const parentsMap = useMemo(() => {
+    const map = new Map<string, string[]>();
+    phases.forEach(p => map.set(p.id, []));
+    phases.forEach(p => {
+      (p.prerequisites || []).forEach(depId => {
+        if (map.has(depId)) {
+          map.get(p.id)!.push(depId);
+        }
+      });
+    });
+    return map;
+  }, [phases]);
+
+  // All DAG edges (parent -> child via prerequisites)
+  const edges = useMemo(() => {
+    const result: Array<{ from: string; to: string }> = [];
+    phases.forEach(p => {
+      (p.prerequisites || []).forEach(depId => {
+        result.push({ from: depId, to: p.id });
+      });
+    });
+    return result;
+  }, [phases]);
+
+  // Layered DAG layout (longest-path layering + barycentric ordering)
   const nodePositions = useMemo(() => {
     const positions: Record<string, { x: number; y: number }> = {};
-    if (!rootPhase) return positions;
+    const phaseIds = phases.map(p => p.id);
 
-    const V_SPACING = 80;
-    const H_SPACING = 200;
+    // Step 1: Assign layers via longest-path layering (topological)
+    const layers = new Map<string, number>();
+    const inDegree = new Map<string, number>();
+    phaseIds.forEach(id => {
+      inDegree.set(id, (parentsMap.get(id) || []).filter(p => phaseIds.includes(p)).length);
+    });
 
-    const layoutTree = (nodeId: string, depth: number, startY: number): number => {
-      const children = childrenMap.get(nodeId) || [];
-      const x = 80 + depth * H_SPACING;
-
-      if (children.length === 0) {
-        positions[nodeId] = { x, y: startY };
-        return V_SPACING;
+    // Initialize roots at layer 0
+    const queue: string[] = [];
+    phaseIds.forEach(id => {
+      if (inDegree.get(id) === 0) {
+        layers.set(id, 0);
+        queue.push(id);
       }
+    });
 
-      let childY = startY;
+    // BFS topological layering (longest path)
+    const q: string[] = [...queue];
+    while (q.length > 0) {
+      const nodeId = q.shift()!;
+      const nodeLayer = layers.get(nodeId)!;
+      const children = childrenMap.get(nodeId) || [];
       children.forEach(childId => {
-        childY += layoutTree(childId, depth + 1, childY);
+        const childLayer = layers.get(childId) ?? 0;
+        layers.set(childId, Math.max(childLayer, nodeLayer + 1));
+        inDegree.set(childId, (inDegree.get(childId) || 0) - 1);
+        if (inDegree.get(childId) === 0) {
+          q.push(childId);
+        }
       });
+    }
 
-      const totalChildrenHeight = childY - startY;
-      positions[nodeId] = { x, y: startY + totalChildrenHeight / 2 - 28 };
+    // Handle any nodes not reached (cycles or disconnected)
+    phaseIds.forEach(id => {
+      if (!layers.has(id)) layers.set(id, 0);
+    });
 
-      children.forEach(() => { });
-      return totalChildrenHeight;
-    };
+    // Step 2: Group nodes by layer
+    const layerGroups: Record<number, string[]> = {};
+    phaseIds.forEach(id => {
+      const l = layers.get(id)!;
+      if (!layerGroups[l]) layerGroups[l] = [];
+      layerGroups[l].push(id);
+    });
 
-    layoutTree(rootPhase.id, 0, 60);
+    // Step 3: Barycentric ordering to minimize edge crossings
+    const maxLayer = Math.max(...Object.keys(layerGroups).map(Number), 0);
+    for (let iteration = 0; iteration < 5; iteration++) {
+      // Top-down pass
+      for (let l = 1; l <= maxLayer; l++) {
+        const group = layerGroups[l];
+        if (!group) continue;
+        group.sort((a, b) => {
+          const aParents = parentsMap.get(a) || [];
+          const bParents = parentsMap.get(b) || [];
+          const aAvg = aParents.length > 0
+            ? aParents.reduce((s, p) => s + (group.indexOf(p) >= 0 ? group.indexOf(p) : phaseIds.indexOf(p)), 0) / aParents.length
+            : phaseIds.indexOf(a);
+          const bAvg = bParents.length > 0
+            ? bParents.reduce((s, p) => s + (group.indexOf(p) >= 0 ? group.indexOf(p) : phaseIds.indexOf(p)), 0) / bParents.length
+            : phaseIds.indexOf(b);
+          return aAvg - bAvg;
+        });
+      }
+      // Bottom-up pass
+      for (let l = maxLayer - 1; l >= 0; l--) {
+        const group = layerGroups[l];
+        if (!group) continue;
+        group.sort((a, b) => {
+          const aChildren = childrenMap.get(a) || [];
+          const bChildren = childrenMap.get(b) || [];
+          const nextLayer = layerGroups[l + 1] || [];
+          const aAvg = aChildren.length > 0
+            ? aChildren.reduce((s, c) => s + nextLayer.indexOf(c), 0) / aChildren.length
+            : phaseIds.indexOf(a);
+          const bAvg = bChildren.length > 0
+            ? bChildren.reduce((s, c) => s + nextLayer.indexOf(c), 0) / bChildren.length
+            : phaseIds.indexOf(b);
+          return aAvg - bAvg;
+        });
+      }
+    }
+
+    // Step 4: Assign coordinates (top-to-bottom layout)
+    const H_SPACING = 140;
+    const V_SPACING = 110;
+    const startX = 100;
+    const startY = 60;
+
+    for (let l = 0; l <= maxLayer; l++) {
+      const group = layerGroups[l] || [];
+      const y = startY + l * H_SPACING;
+      group.forEach((nodeId, i) => {
+        const x = startX + i * V_SPACING;
+        positions[nodeId] = { x, y };
+      });
+    }
+
     return positions;
-  }, [rootPhase, childrenMap]);
+  }, [phases, childrenMap, parentsMap]);
 
   const phaseColor = (id: string) => {
     const phase = phases.find(p => p.id === id);
     return phase?.color || '#60a5fa';
   };
-
-  const phaseMap = useMemo(() => {
-    const map: Record<string, (typeof phases)[0]> = {};
-    phases.forEach(p => { map[p.id] = p; });
-    return map;
-  }, [phases]);
-
-  // Build tree edges from children map (left-to-right tree)
-  const edges = useMemo(() => {
-    const result: Array<{ from: string; to: string }> = [];
-    childrenMap.forEach((children, parentId) => {
-      children.forEach(childId => {
-        result.push({ from: parentId, to: childId });
-      });
-    });
-    return result;
-  }, [childrenMap]);
 
   const totalResources = phases.reduce(
     (sum, p) => sum + p.modules.reduce((s, m) => s + m.resources.length, 0), 0
@@ -361,8 +444,8 @@ function RoadmapView({ phases, onSelectModule }: { phases: typeof roadmapPhases;
     <div className="overflow-x-auto overflow-y-visible scrollbar-thin py-6">
       <svg
         className="w-full"
-        style={{ minWidth: '1400px', height: '580px' }}
-        viewBox="0 0 1600 580"
+        style={{ minWidth: '1500px', height: '900px' }}
+        viewBox="0 0 1500 880"
         preserveAspectRatio="xMidYMid meet"
       >
         <defs>
@@ -379,30 +462,30 @@ function RoadmapView({ phases, onSelectModule }: { phases: typeof roadmapPhases;
         </defs>
 
         {/* Title */}
-        <text x="800" y="30" textAnchor="middle" fill="#ffffff" fontSize="18" fontWeight="bold">
+        <text x="750" y="30" textAnchor="middle" fill="#ffffff" fontSize="18" fontWeight="bold">
           嵌入式开发学习路线图
         </text>
-        <text x="800" y="50" textAnchor="middle" fill="#8b949e" fontSize="12">
-          点击节点查看详情 · 箭头表示依赖关系
+        <text x="750" y="50" textAnchor="middle" fill="#8b949e" fontSize="12">
+          点击节点查看详情 · 箭头表示先修依赖
         </text>
 
 
-        {/* Edges - smooth left-to-right curves */}
+        {/* Edges - smooth top-to-bottom curves */}
         {edges.map((edge, idx) => {
           const from = nodePositions[edge.from];
           const to = nodePositions[edge.to];
           if (!from || !to) return null;
           const isHighlighted = hoveredPhase === edge.from || hoveredPhase === edge.to || selectedPhase === edge.from || selectedPhase === edge.to;
           const toColor = phaseColor(edge.to);
-          const x1 = from.x + 60;
-          const y1 = from.y;
-          const x2 = to.x - 60;
+          const x1 = from.x + 30;
+          const y1 = from.y + 56;
+          const x2 = to.x + 30;
           const y2 = to.y;
-          const cpx = (x1 + x2) / 2;
+          const cpy = (y1 + y2) / 2;
           return (
             <g key={`${edge.from}-${edge.to}-${idx}`}>
               <path
-                d={`M ${x1} ${y1} C ${cpx} ${y1}, ${cpx} ${y2}, ${x2} ${y2}`}
+                d={`M ${x1} ${y1} C ${x1} ${cpy}, ${x2} ${cpy}, ${x2} ${y2}`}
                 fill="none"
                 stroke={isHighlighted ? toColor : '#30363d'}
                 strokeWidth={isHighlighted ? 2.5 : 1.5}
