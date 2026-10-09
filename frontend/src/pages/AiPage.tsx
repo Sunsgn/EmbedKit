@@ -22,7 +22,7 @@ import {
 import Editor from '@monaco-editor/react';
 import { chips } from '../data/chips';
 import { AI_PROVIDERS, type ProviderKey, type AiConfig } from '../types/ai';
-import { streamAiResponse, detectLocalServers, type LocalServer } from '../services/aiService';
+import { clearStoredAiConfig, detectLocalServers, loadStoredAiConfig, localProxyUrl, persistAiConfig, streamAiResponse, type LocalServer } from '../services/aiService';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -38,8 +38,10 @@ const quickPrompts = [
   { icon: GitPullRequest, label: '重构 I2C 代码', prompt: '帮我重构 I2C 驱动，使其更加模块化。' },
 ];
 
-const DEFAULT_PROVIDER: ProviderKey = 'huggingface';
-const DEFAULT_MODEL = 'meta-llama/Llama-3.3-70B-Instruct';
+// 默认使用本地 Ollama，避免把第三方 API Key 写入前端；未安装时可在设置中切换云端模型。
+const DEFAULT_PROVIDER: ProviderKey = 'local';
+const DEFAULT_MODEL = 'qwen2.5:7b';
+const DEFAULT_ENDPOINT = localProxyUrl('http://localhost:11434/v1/chat/completions');
 
 function extractCode(content: string): string | undefined {
   const match = content.match(/```(\w+)?\n([\s\S]*?)```/);
@@ -61,7 +63,7 @@ export default function AiPage() {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
-      content: '你好！我是你的嵌入式开发 AI 助手。我可以帮你生成代码、调试问题、架构设计等。\n\n请先点击右上角的设置图标配置 API Key，或直接使用模拟模式体验。',
+      content: '你好！我是嵌入式开发 AI 助手。我可以结合目标芯片帮你理解代码、分析日志和排查通信问题。\n\n默认使用本地模型，请在设置中连接 Ollama、LM Studio 或选择云端服务。',
       timestamp: new Date(),
     },
   ]);
@@ -73,39 +75,42 @@ export default function AiPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detectedServers, setDetectedServers] = useState<LocalServer[]>([]);
-  const [serverLoading, setServerLoading] = useState(false);
+  const [serverLoading, setServerLoading] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // AI Config (persisted to localStorage)
   const [config, setConfig] = useState<AiConfig>(() => {
     try {
-      const saved = localStorage.getItem('embedkit-ai-config');
-      if (saved) return JSON.parse(saved);
+      const parsed = loadStoredAiConfig();
+      if (parsed) {
+        // 兼容旧版本默认的 Hugging Face 配置；无密钥时自动迁移到本地模型。
+        if (parsed.provider === 'huggingface' && !parsed.apiKey) return { provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL, apiKey: '', customEndpoint: DEFAULT_ENDPOINT };
+        return parsed;
+      }
     } catch { /* ignore */ }
-    return { provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL, apiKey: '' };
+    return { provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL, apiKey: '', customEndpoint: DEFAULT_ENDPOINT };
   });
 
   useEffect(() => {
-    localStorage.setItem('embedkit-ai-config', JSON.stringify(config));
+    persistAiConfig(config);
   }, [config]);
 
   // Detect local servers when local provider is selected
   useEffect(() => {
     if (config.provider === 'local') {
-      setServerLoading(true);
       detectLocalServers().then(servers => {
         setDetectedServers(servers);
         setServerLoading(false);
-        // Auto-select first model if no model configured
-        if (servers.length > 0 && (!config.model || config.model === providerInfo.defaultModel)) {
-          const firstModel = servers[0].models[0];
-          if (firstModel) {
-            setConfig(prev => ({
+        const firstModel = servers[0]?.models[0];
+        if (firstModel) {
+          setConfig(prev => {
+            if (prev.model && prev.model !== AI_PROVIDERS[prev.provider].defaultModel) return prev;
+            return {
               ...prev,
               model: firstModel.id,
-              customEndpoint: `/proxy/${servers[0].chatUrl}`,
-            }));
-          }
+              customEndpoint: localProxyUrl(servers[0].chatUrl),
+            };
+          });
         }
       }).catch(() => setServerLoading(false));
     }
@@ -344,8 +349,8 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
   };
 
   const handleClearConfig = () => {
-    setConfig({ provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL, apiKey: '' });
-    localStorage.removeItem('embedkit-ai-config');
+    setConfig({ provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL, apiKey: '', customEndpoint: DEFAULT_ENDPOINT });
+    clearStoredAiConfig();
   };
 
   const currentModels = config.provider === 'local'
@@ -584,6 +589,7 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
                       key={key}
                       type="button"
                       onClick={() => {
+                        if (key === 'local') setServerLoading(true);
                         setConfig(prev => ({ ...prev, provider: key, model: p.defaultModel }));
                       }}
                       className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all ${isActive ? 'bg-blue-500/20 border-blue-500 text-blue-300' : 'bg-[#0d1117] border-[#30363d] text-gray-400 hover:border-gray-600'}`}
@@ -699,7 +705,7 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
                               setConfig(prev => ({
                                 ...prev,
                                 model: firstModel.id,
-                                customEndpoint: `/proxy/${server.chatUrl}`,
+                                customEndpoint: localProxyUrl(server.chatUrl),
                               }));
                             }
                           }}
@@ -726,9 +732,10 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
                   ) : (
                     <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-3 py-2.5">
                       <p className="text-xs text-yellow-400 font-medium mb-1">未检测到本地 AI 服务</p>
-                      <p className="text-xs text-gray-400">请先启动以下任一服务：</p>
+                      <p className="text-xs text-gray-400">请先启动以下任一 OpenAI 兼容本地服务：</p>
                       <p className="text-xs text-gray-500 mt-0.5">• Ollama: 运行 <code className="bg-yellow-500/20 px-1 rounded">ollama serve</code></p>
                       <p className="text-xs text-gray-500">• LM Studio: 启动并开启 Local Server</p>
+                      <p className="text-xs text-gray-500">• 其他：LocalAI、llama.cpp、vLLM、Jan、GPT4All、KoboldCpp</p>
                     </div>
                   )}
                 </div>

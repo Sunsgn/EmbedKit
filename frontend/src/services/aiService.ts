@@ -1,13 +1,43 @@
 import { AI_PROVIDERS, type AiConfig } from '../types/ai';
 
-const SYSTEM_PROMPT = `你是一个嵌入式开发AI助手。你精通嵌入式C语言开发、STM32、ESP32等芯片的HAL库和寄存器操作。
+const SYSTEM_PROMPT = `你是一个通用嵌入式工程分析助手。你必须依据用户提供的真实工程文件、编译配置、SDK信息和官方资料进行判断，不得把未知平台臆测成STM32或ESP32。
 请用中文回答用户的问题。回答时注意：
 1. 代码示例使用C语言，配合HAL库或标准库
 2. 解释要简洁明了，重点突出
 3. 如果涉及硬件操作，说明引脚配置和注意事项
 4. 代码中不要添加注释，保持简洁`;
 
-const PROXY_BASE = 'http://localhost:9999';
+export const LOCAL_PROXY_BASE = (import.meta.env.VITE_LOCAL_PROXY_URL || 'http://127.0.0.1:9999').replace(/\/+$/, '');
+
+export function localProxyUrl(target: string): string {
+  return `${LOCAL_PROXY_BASE}/proxy/${target}`;
+}
+
+const AI_CONFIG_KEY = 'embedkit-ai-config';
+const AI_SECRETS_KEY = 'embedkit-ai-secrets';
+
+export function loadStoredAiConfig(): AiConfig | null {
+  try {
+    const saved = localStorage.getItem(AI_CONFIG_KEY);
+    if (!saved) return null;
+    const config = JSON.parse(saved) as AiConfig;
+    const secrets = JSON.parse(sessionStorage.getItem(AI_SECRETS_KEY) || '{}') as Partial<AiConfig>;
+    return { ...config, apiKey: secrets.apiKey || config.apiKey || '', customApiKey: secrets.customApiKey || config.customApiKey || '' };
+  } catch {
+    return null;
+  }
+}
+
+export function persistAiConfig(config: AiConfig): void {
+  const { apiKey, customApiKey, ...persistentConfig } = config;
+  localStorage.setItem(AI_CONFIG_KEY, JSON.stringify({ ...persistentConfig, apiKey: '', customApiKey: '' }));
+  sessionStorage.setItem(AI_SECRETS_KEY, JSON.stringify({ apiKey, customApiKey }));
+}
+
+export function clearStoredAiConfig(): void {
+  localStorage.removeItem(AI_CONFIG_KEY);
+  sessionStorage.removeItem(AI_SECRETS_KEY);
+}
 
 export interface LocalServer {
   name: string;
@@ -18,7 +48,7 @@ export interface LocalServer {
 
 export async function detectLocalServers(): Promise<LocalServer[]> {
   try {
-    const res = await fetch(`${PROXY_BASE}/api/servers`);
+    const res = await fetch(`${LOCAL_PROXY_BASE}/api/servers`);
     if (!res.ok) return [];
     const data = await res.json();
     return data.servers || [];
@@ -29,7 +59,7 @@ export async function detectLocalServers(): Promise<LocalServer[]> {
 
 export async function fetchLocalModels(serverName: string): Promise<Array<{ id: string; name: string; size?: string }>> {
   try {
-    const res = await fetch(`${PROXY_BASE}/api/models?server=${encodeURIComponent(serverName)}`);
+    const res = await fetch(`${LOCAL_PROXY_BASE}/api/models?server=${encodeURIComponent(serverName)}`);
     if (!res.ok) return [];
     const data = await res.json();
     return data.models || [];
@@ -83,7 +113,7 @@ export async function streamAiResponse(
     const msg = e.message || e.toString() || '请求失败';
     if ((msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('CORS'))) {
       if (config.provider === 'local') {
-        onError('本地请求被浏览器 CORS 策略阻止。\n\n解决方法（任选其一）：\n1. 使用 EmbedKit 代理：\n   cd EmbedKit/proxy && npm start\n   然后端点填：http://localhost:9999/?target=http://localhost:11434/v1/chat/completions\n2. Ollama 设置环境变量 OLLAMA_ORIGINS=* 后重启\n3. LM Studio 在 Settings → Security 勾选 CORS');
+        onError(`本地请求被浏览器或代理阻止。\n\n请确认已运行：\ncd EmbedKit/proxy && npm start\n\n默认代理地址：${LOCAL_PROXY_BASE}\n如使用其他地址，请在构建时设置 VITE_LOCAL_PROXY_URL。`);
       } else if (config.provider === 'huggingface') {
         onError('Hugging Face 请求被浏览器 CORS 策略阻止。请切换为 OpenRouter 或其他提供商，或切换到模拟模式。');
       } else {

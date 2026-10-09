@@ -1,572 +1,203 @@
-import { useState, useMemo, useEffect } from 'react';
-import { Search, Cpu, Filter, ExternalLink, BookOpen, FileText, ReplaceAll, ShoppingCart, Layers, Loader2, CheckCircle, XCircle, Info } from 'lucide-react';
-import { chips, manufacturers } from '../data/chips';
-import type { Chip } from '../types';
+import { useEffect, useMemo, useState } from 'react';
+import { BookOpen, Boxes, CheckCircle, Cpu, ExternalLink, FileText, Filter, Info, Layers, Loader2, PackageSearch, ReplaceAll, Search, ShoppingCart, Tag } from 'lucide-react';
+import { chips } from '../data/chips';
+import { components } from '../data/components';
+import { LOCAL_PROXY_BASE } from '../services/aiService';
 
-const PROXY_URL = 'http://localhost:9999';
-
-interface ChipDetails {
-  productName: string;
-  productFamily: string;
-  description: string;
-  specs: Record<string, string>;
-  features: string[];
-  hierarchy: Array<{ name: string; url?: string }>;
-  stUrl?: string;
-  error?: string;
-}
-
-type LinkType = 'datasheet' | 'datasheet-aggregate' | 'reference-design' | 'alternative' | 'distributor';
-
-interface ChipLink {
+interface CatalogItem {
+  id: string;
   name: string;
-  source: string;
+  manufacturer: string;
+  category: string;
+  subcategory: string;
   description: string;
-  link: string;
-  type: LinkType;
+  package: string;
+  parameters: Record<string, string>;
+  tags: string[];
+  datasheetUrl?: string;
+  reference?: string;
+  isChip?: boolean;
 }
 
-const MANUFACTURER_RULES: Array<{ name: string; prefixes: string[]; productUrl: (q: string) => string; datasheetUrl?: (q: string) => string }> = [
-  { name: 'Texas Instruments', prefixes: ['MSP430', 'LM4F', 'TMS570', 'LM3S', 'TM4C', 'TMS320', 'LM', 'TLV', 'TPS', 'SN74', 'SN65', 'UC', 'BQ', 'INA', 'OPA', 'DAC', 'ADC', 'LPM'], productUrl: q => `https://www.ti.com/product/${q}`, datasheetUrl: q => `https://www.ti.com/lit/gpn/${q}` },
-  { name: 'STMicroelectronics', prefixes: ['STM32', 'STM8', 'L476', 'L552', 'SPC5', 'STSPIN', 'STEVAL'], productUrl: q => `https://www.st.com/en/microcontrollers-microprocessors/${q.toLowerCase()}.html`, datasheetUrl: q => `https://www.st.com/resource/en/datasheet/${q.toLowerCase()}.pdf` },
-  { name: 'Microchip', prefixes: ['PIC', 'PIC1', 'PIC2', 'PIC3', 'PIC16', 'PIC18', 'PIC24', 'PIC32', 'ATSAME', 'AT32UC', 'ATMEGA', 'ATTINY', 'ATSAMD', 'AVR', 'DSPIC'], productUrl: q => `https://www.microchip.com/wwwproducts/en/${q}` },
-  { name: 'NXP', prefixes: ['K20', 'K64', 'K1', 'K2', 'K3', 'K4', 'K6', 'K80', 'LPC', 'IMX', 'i.MX', 'MCF', 'S32K', 'TWR', 'MCX', 'RT1', 'RT6'], productUrl: q => `https://www.nxp.com/docs/en/data-sheet/${q.toUpperCase()}.pdf` },
-  { name: 'Espressif', prefixes: ['ESP'], productUrl: q => `https://www.espressif.com/en/products/socs/details/${q.toLowerCase()}` },
-  { name: 'GigaDevice', prefixes: ['GD32'], productUrl: q => `https://www.gd-mcu.com/product.html?id=${q.toUpperCase()}` },
-  { name: 'Raspberry Pi', prefixes: ['RP2'], productUrl: q => `https://www.raspberrypi.com/documentation/microcontrollers/${q.toLowerCase()}.html` },
-  { name: 'Nordic', prefixes: ['NRF52', 'NRF53', 'NRF51', 'NRF54', 'NRF24', 'NRF5'], productUrl: q => `https://www.nordicsemi.com/products/${q.toLowerCase()}` },
-  { name: 'Analog Devices', prefixes: ['AD', 'ADA', 'ADF', 'ADM', 'ADSP', 'MAX', 'MAXIM'], productUrl: q => `https://www.analog.com/en/products/${q.toUpperCase()}.html` },
-  { name: 'Infineon', prefixes: ['XMC', 'CY8C', 'CY8P', 'SAC', 'TC3', 'TC2', 'TLX', 'XEE', 'XMC1', 'XMC2', 'XMC4', 'XMC14', 'XMC47', 'XMC48'], productUrl: q => `https://www.infineon.com/cms/en/product/microcontroller/${q.toLowerCase()}` },
-  { name: 'Renesas', prefixes: ['RL78', 'RX', 'RH850', 'R7F', 'RA', 'RL', 'RZ'], productUrl: q => `https://www.renesas.com/us/en/products/${q.toUpperCase()}` },
-  { name: 'ON Semiconductor', prefixes: ['MC68', 'MC9S', 'Freescale', 'MK', 'KL', 'KW', 'KV', 'KE', 'FR'], productUrl: q => `https://www.onsemi.com/detail/html/${q.toUpperCase()}.html` },
-  { name: 'Dialog Semiconductor', prefixes: ['DA14', 'DA16', 'DA17'], productUrl: q => `https://www.dialog-semiconductor.com/products/${q.toLowerCase()}` },
-  { name: 'Actions', prefixes: ['AT32', 'AT62', 'AT32F', 'AT32V'], productUrl: q => `https://www.action-semi.com/en/products/details.html?mcuId=${q.toUpperCase()}` },
-  { name: 'WCH', prefixes: ['CH32', 'CH57', 'CH58', 'WCH'], productUrl: q => `https://www.wch-ic.com/search/${q.toUpperCase()}` },
-  { name: 'Beken', prefixes: ['BK'], productUrl: q => `https://www.beken.com/search/${q.toUpperCase()}` },
-  { name: 'MindMotion', prefixes: ['MM32'], productUrl: q => `https://www.mindmotion.com/web/search/${q.toUpperCase()}` },
-  { name: 'Holtek', prefixes: ['HT'], productUrl: q => `https://www.htek.com.tw/product.html?m=search&s=${q.toUpperCase()}` },
-  { name: 'YangTze Memory', prefixes: ['TM'], productUrl: q => `https://www.tm-micro.com/product.html?m=search&s=${q.toUpperCase()}` },
-];
+type LinkType = 'datasheet' | 'cad' | 'alternative' | 'distributor';
+interface PartLink { name: string; source: string; description: string; link: string; type: LinkType }
+interface OnlineDetails { productName?: string; productFamily?: string; description?: string; specs?: Record<string, string>; features?: string[]; stUrl?: string; error?: string }
 
-const detectManufacturer = (name: string): typeof MANUFACTURER_RULES[number] | null => {
-  const n = name.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  for (const rule of MANUFACTURER_RULES) {
-    for (const prefix of rule.prefixes) {
-      if (n.startsWith(prefix.toUpperCase())) {
-        return rule;
-      }
-    }
-  }
-  return null;
-};
+const chipItems: CatalogItem[] = chips.map((chip) => ({
+  id: `chip-${chip.id}`,
+  name: chip.name,
+  manufacturer: chip.manufacturer,
+  category: '微控制器与处理器',
+  subcategory: chip.series,
+  description: `${chip.cores} 内核嵌入式处理器，集成 ${chip.peripherals.slice(0, 6).join('、')} 等外设。`,
+  package: chip.package,
+  parameters: { 内核: chip.cores, 主频: chip.frequency, Flash: chip.flash, RAM: chip.ram },
+  tags: [chip.series, chip.cores, ...chip.peripherals],
+  datasheetUrl: chip.datasheetUrl,
+  reference: chip.reference,
+  isChip: true,
+}));
 
-const buildChipLinks = (q: string): ChipLink[] => {
-  const results: ChipLink[] = [];
-  const rule = detectManufacturer(q);
+const catalog: CatalogItem[] = [...chipItems, ...components];
+const categories = [...new Set(catalog.map((item) => item.category))];
+const manufacturers = [...new Set(catalog.map((item) => item.manufacturer))].sort((a, b) => a.localeCompare(b));
 
-  // 1. Manufacturer official links
-  if (rule) {
-    results.push({
-      name: `${q} - ${rule.name} 产品页`,
-      source: rule.name,
-      description: `${rule.name} 官方产品页面`,
-      link: rule.productUrl(q),
-      type: 'datasheet',
-    });
-    if (rule.datasheetUrl) {
-      results.push({
-        name: `${q} - 直接下载 PDF`,
-        source: rule.name,
-        description: '官方 Datasheet PDF 直链',
-        link: rule.datasheetUrl(q),
-        type: 'datasheet',
-      });
-    }
-  }
+function buildLinks(query: string): PartLink[] {
+  const q = encodeURIComponent(query.trim());
+  return [
+    { name: `${query} 数据手册`, source: 'AllDatasheet', description: '按完整型号查询 PDF 数据手册', link: `https://www.alldatasheet.com/view.jsp?Searchword=${q}`, type: 'datasheet' },
+    { name: `${query} 技术资料`, source: 'Datasheet Archive', description: '元器件数据手册与历史型号检索', link: `https://www.datasheetarchive.com/?q=${q}`, type: 'datasheet' },
+    { name: `${query} 符号与封装`, source: 'SnapMagic', description: '查询原理图符号、PCB 封装与 3D 模型', link: `https://www.snapeda.com/search/?q=${q}`, type: 'cad' },
+    { name: `${query} CAD 模型`, source: 'Ultra Librarian', description: '查询封装、符号及 3D 模型', link: `https://www.ultralibrarian.com/search?query=${q}`, type: 'cad' },
+    { name: `${query} 替代型号`, source: '半导小芯', description: '查询参数相近器件与国产替代型号', link: `https://www.semiee.com/search?searchModel=${q}`, type: 'alternative' },
+    { name: `${query} 交叉参考`, source: 'Findchips', description: '比较型号、库存及交叉参考信息', link: `https://www.findchips.com/search/${q}`, type: 'alternative' },
+    { name: `${query} 库存与价格`, source: 'Octopart', description: '聚合多个授权分销商的库存和价格', link: `https://octopart.com/search?q=${q}`, type: 'distributor' },
+    { name: `${query} 国内采购`, source: '立创商城', description: '查询参数、数据手册、库存和价格', link: `https://so.szlcsc.com/global.html?k=${q}`, type: 'distributor' },
+    { name: `${query} 授权采购`, source: 'DigiKey', description: '查询可订购型号、参数和库存', link: `https://www.digikey.cn/zh/products/result?keywords=${q}`, type: 'distributor' },
+    { name: `${query} 授权采购`, source: 'Mouser', description: '查询元器件参数、生命周期和库存', link: `https://www.mouser.cn/c/?q=${q}`, type: 'distributor' },
+  ];
+}
 
-  // 2. Datasheet aggregation sites
-  results.push({
-    name: ` datasheet - ${q}`,
-    source: 'DATASHEET搜索',
-    description: '全球 datasheet PDF 数据库',
-    link: `https://www.datasheet.com/search?q=${encodeURIComponent(q)}`,
-    type: 'datasheet-aggregate',
-  });
-  results.push({
-    name: `alldatasheet - ${q}`,
-    source: 'alldatasheet',
-    description: 'PDF datasheet 查看器和下载',
-    link: `https://www.alldatasheet.com/view.jsp?Searchword=${encodeURIComponent(q)}`,
-    type: 'datasheet-aggregate',
-  });
-  results.push({
-    name: `icpdf - ${q}`,
-    source: 'icpdf',
-    description: 'IC datasheet PDF 在线查看',
-    link: `https://www.icpdf.com/s?q=${encodeURIComponent(q)}`,
-    type: 'datasheet-aggregate',
-  });
+function searchText(item: CatalogItem) {
+  return [item.name, item.manufacturer, item.category, item.subcategory, item.description, item.package, ...item.tags, ...Object.keys(item.parameters), ...Object.values(item.parameters)].join(' ').toLowerCase();
+}
 
-  // 3. Reference design & development board
-  results.push({
-    name: `参考设计 - ${q}`,
-    source: '参考设计',
-    description: '参考电路、评估板和开发套件',
-    link: `https://www.digikey.com/en/products/detail?q=${encodeURIComponent(q)}&k=development+board&k=evaluation+kit`,
-    type: 'reference-design',
-  });
+function normalizedModel(value: string) { return value.toLowerCase().replace(/[^a-z0-9]/g, ''); }
 
-  // 4. Alternative / cross-reference
-  results.push({
-    name: `替代型号 - ${q}`,
-    source: '替代查询',
-    description: '查找引脚兼容替代型号、国产替代',
-    link: `https://www.semiee.com/search?searchModel=${encodeURIComponent(q)}`,
-    type: 'alternative',
-  });
-  results.push({
-    name: `交叉参考 - ${q}`,
-    source: 'Cross Reference',
-    description: '查找等效和兼容型号',
-    link: `https://www.findchips.com/search/${encodeURIComponent(q)}`,
-    type: 'alternative',
-  });
+function typicalUse(item: CatalogItem) {
+  if (!item.isChip) return item.description;
+  const text = `${item.name} ${item.subcategory} ${item.tags.join(' ')}`.toUpperCase();
+  if (/ESP|WIFI|BLUETOOTH|BLE/.test(text)) return '适合物联网终端、无线传感器、智能家居、设备联网和边缘控制。';
+  if (/NRF/.test(text)) return '适合低功耗蓝牙设备、可穿戴设备、无线传感器和遥控器。';
+  if (/IMX|CORTEX-A/.test(text)) return '适合嵌入式 Linux、图形界面、边缘网关和高性能人机交互。';
+  if (/RP2|AVR|ATMEGA|ATTINY/.test(text)) return '适合入门开发、教育实验、简单控制器和低成本原型。';
+  if (/CAN|ETH|STM32|GD32|CH32|CORTEX-M/.test(text)) return '适合工业控制、仪器仪表、电机控制、数据采集和通信网关。';
+  return '适合通用嵌入式控制、外设驱动、数据采集和实时任务处理。';
+}
 
-  // 5. Distributors
-  results.push({
-    name: `购买 - ${q}`,
-    source: 'Octopart',
-    description: '搜索多个分销商的库存和价格',
-    link: `https://octopart.com/search?q=${encodeURIComponent(q)}`,
-    type: 'distributor',
-  });
-  results.push({
-    name: `购买 - ${q}`,
-    source: '立创商城',
-    description: '国产元器件分销，支持 datasheet 预览',
-    link: `https://www.szlcsc.com/product/search.html?k=${encodeURIComponent(q)}`,
-    type: 'distributor',
-  });
-  results.push({
-    name: `购买 - ${q}`,
-    source: 'DigiKey',
-    description: '全球最大元器件分销商',
-    link: `https://www.digikey.com/en/products/results?K=${encodeURIComponent(q)}`,
-    type: 'distributor',
-  });
-  results.push({
-    name: `购买 - ${q}`,
-    source: 'Mouser',
-    description: '新品授权分销商',
-    link: `https://www.mouser.com.cn/Search/Results.aspx?Keyword=${encodeURIComponent(q)}`,
-    type: 'distributor',
-  });
+function officialDomain(manufacturer: string) {
+  const name = manufacturer.toLowerCase();
+  if (name.includes('stmicro')) return 'st.com';
+  if (name.includes('espressif')) return 'espressif.com';
+  if (name.includes('microchip')) return 'microchip.com';
+  if (name.includes('nxp')) return 'nxp.com';
+  if (name.includes('texas')) return 'ti.com';
+  if (name.includes('nordic')) return 'nordicsemi.com';
+  if (name.includes('infineon')) return 'infineon.com';
+  if (name.includes('renesas')) return 'renesas.com';
+  if (name.includes('gigadevice')) return 'gd-mcu.com';
+  if (name.includes('wch')) return 'wch-ic.com';
+  if (name.includes('raspberry')) return 'raspberrypi.com';
+  return '';
+}
 
-  return results;
-};
+function officialDocumentSearch(item: CatalogItem, document: string) {
+  const domain = officialDomain(item.manufacturer);
+  const terms = `${domain ? `site:${domain}` : item.manufacturer} ${item.name} ${document} PDF`;
+  if (domain === 'st.com') return `https://www.st.com/content/st_com/en/search.html#q=${encodeURIComponent(`${item.name} ${document}`)}`;
+  return `https://cn.bing.com/search?q=${encodeURIComponent(terms)}`;
+}
+
+function stm32ManualUrl(item: CatalogItem, document: 'reference' | 'programming') {
+  if (/^STM32F1/i.test(item.name) && document === 'reference') return 'https://www.st.com/resource/en/reference_manual/cd00171190.pdf';
+  if (/^STM32F1/i.test(item.name) && document === 'programming') return 'https://www.st.com/resource/en/programming_manual/cd00228163.pdf';
+  return officialDocumentSearch(item, document === 'reference' ? 'reference manual user manual' : 'programming manual');
+}
+
+function hasChipDocumentation(item: CatalogItem) {
+  return item.isChip || !['无源器件', '连接器'].includes(item.category);
+}
 
 export default function ChipLibPage() {
   const [search, setSearch] = useState('');
-  const [selectedMfg, setSelectedMfg] = useState('');
+  const [category, setCategory] = useState('');
+  const [manufacturer, setManufacturer] = useState('');
+  const query = search.trim();
+  const filtered = useMemo(() => {
+    const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+    return catalog.filter((item) => (!tokens.length || tokens.every((token) => searchText(item).includes(token))) && (!category || item.category === category) && (!manufacturer || item.manufacturer === manufacturer));
+  }, [category, manufacturer, query]);
+  const links = useMemo(() => query.length >= 2 ? buildLinks(query) : [], [query]);
+  const exactMatch = useMemo(() => {
+    if (query.length < 2) return null;
+    const model = normalizedModel(query);
+    return catalog.find((item) => normalizedModel(item.name) === model) ?? (filtered.length === 1 ? filtered[0] : null);
+  }, [filtered, query]);
 
-  const localFiltered = useMemo(() => {
-    if (!search && !selectedMfg) return chips;
-    const q = search.toLowerCase();
-    return chips.filter((c: Chip) => {
-      const matchSearch =
-        !q ||
-        c.name.toLowerCase().includes(q) ||
-        c.cores.toLowerCase().includes(q) ||
-        c.series.toLowerCase().includes(q) ||
-        c.manufacturer.toLowerCase().includes(q) ||
-        c.package.toLowerCase().includes(q) ||
-        c.peripherals.some((p) => p.toLowerCase().includes(q));
-      const matchMfg = !selectedMfg || c.manufacturer === selectedMfg;
-      return matchSearch && matchMfg;
-    });
-  }, [search, selectedMfg]);
+  return <div className="h-full overflow-y-auto p-4 scrollbar-thin lg:p-6"><div className="mx-auto max-w-[1500px]">
+    <header className="mb-6 flex flex-wrap items-end justify-between gap-3"><div><h1 className="flex items-center gap-2 text-2xl font-bold"><Boxes className="text-blue-400" />资料中心</h1><p className="mt-1 text-sm text-gray-400">查询芯片与元器件参数、数据手册、参考手册、CAD 模型和采购资料</p></div><div className="flex gap-2 text-xs text-gray-500"><span className="rounded-full border border-[#30363d] bg-[#161b22] px-3 py-1">{catalog.length} 个本地型号</span><span className="rounded-full border border-[#30363d] bg-[#161b22] px-3 py-1">{categories.length} 个分类</span></div></header>
 
-  // Generate datasheet links based on search query
-  const onlineResults = useMemo(() => {
-    if (!search || search.length < 2) return [];
-    return buildChipLinks(search.trim());
-  }, [search]);
-
-  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setSearch(val);
-  };
-
-  return (
-    <div className="h-full overflow-y-auto scrollbar-thin p-6">
-      <div className="max-w-6xl mx-auto">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">芯片库</h1>
-          <p className="text-gray-400">浏览和搜索嵌入式芯片技术参数</p>
-        </div>
-
-        <div className="flex flex-col sm:flex-row gap-3 mb-6">
-          <div className="flex-1 relative">
-            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-            <input
-              type="text"
-              placeholder="搜索芯片型号、内核..."
-              value={search}
-              onChange={handleSearch}
-              className="w-full bg-[#161b22] border border-[#30363d] rounded-lg pl-10 pr-4 py-2.5
-                text-sm text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-            />
-          </div>
-          <div className="relative">
-            <Filter size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-            <select
-              value={selectedMfg}
-              onChange={(e) => setSelectedMfg(e.target.value)}
-              className="appearance-none bg-[#161b22] border border-[#30363d] rounded-lg pl-10 pr-8 py-2.5
-                text-sm text-white focus:outline-none focus:border-blue-500 cursor-pointer"
-            >
-              <option value="">全部厂商</option>
-              {manufacturers.map((m: string) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {localFiltered.map((chip: Chip) => (
-            <ChipCard key={chip.id} chip={chip} />
-          ))}
-        </div>
-
-        {search && search.length >= 2 && (
-          <div className="mt-6 space-y-6">
-            {/* Chip Details Panel */}
-            <ChipDetailsPanel chipName={search.trim()} />
-
-            {/* Datasheet section */}
-            {(() => {
-              const ds = onlineResults.filter(r => r.type === 'datasheet' || r.type === 'datasheet-aggregate');
-              if (ds.length === 0) return null;
-              return (
-                <LinkSection title="数据手册 & 厂商官网" icon={FileText} color="blue" items={ds} />
-              );
-            })()}
-
-            {/* Reference design section */}
-            {(() => {
-              const rd = onlineResults.filter(r => r.type === 'reference-design');
-              if (rd.length === 0) return null;
-              return (
-                <LinkSection title="参考设计 & 评估板" icon={Layers} color="purple" items={rd} />
-              );
-            })()}
-
-            {/* Alternative section */}
-            {(() => {
-              const alt = onlineResults.filter(r => r.type === 'alternative');
-              if (alt.length === 0) return null;
-              return (
-                <LinkSection title="替代型号 & 交叉参考" icon={ReplaceAll} color="yellow" items={alt} />
-              );
-            })()}
-
-            {/* Distributor section */}
-            {(() => {
-              const dist = onlineResults.filter(r => r.type === 'distributor');
-              if (dist.length === 0) return null;
-              return (
-                <LinkSection title="采购渠道" icon={ShoppingCart} color="green" items={dist} />
-              );
-            })()}
-          </div>
-        )}
-
-        {localFiltered.length === 0 && search.length >= 2 && (
-          <div className="text-center py-16 text-gray-500">
-            <Cpu size={48} className="mx-auto mb-4 opacity-30" />
-            <p>未找到匹配的芯片</p>
-          </div>
-        )}
-
-        {localFiltered.length === 0 && !search && !selectedMfg && (
-          <div className="text-center py-16 text-gray-500">
-            <Cpu size={48} className="mx-auto mb-4 opacity-30" />
-            <p>暂无芯片数据</p>
-          </div>
-        )}
+    <section className="mb-5 rounded-xl border border-[#30363d] bg-[#161b22] p-4">
+      <div className="grid gap-3 md:grid-cols-[minmax(280px,1fr)_220px_220px]">
+        <label className="relative"><Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索型号、参数或用途，例如 BME280、RS485、10k、去耦…" className="w-full rounded-lg border border-[#30363d] bg-[#0d1117] py-2.5 pl-10 pr-4 text-sm outline-none placeholder:text-gray-600 focus:border-blue-500" /></label>
+        <label className="relative"><Filter size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" /><select value={category} onChange={(event) => setCategory(event.target.value)} className="w-full appearance-none rounded-lg border border-[#30363d] bg-[#0d1117] py-2.5 pl-10 pr-4 text-sm outline-none"><option value="">全部类别</option>{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <select value={manufacturer} onChange={(event) => setManufacturer(event.target.value)} className="rounded-lg border border-[#30363d] bg-[#0d1117] px-3 py-2.5 text-sm outline-none"><option value="">全部厂商</option>{manufacturers.map((item) => <option key={item}>{item}</option>)}</select>
       </div>
-    </div>
-  );
+      <div className="mt-3 flex flex-wrap gap-2"><button onClick={() => setCategory('')} className={`rounded-full px-3 py-1 text-xs ${!category ? 'bg-blue-600 text-white' : 'bg-[#0d1117] text-gray-400'}`}>全部</button>{categories.map((item) => <button key={item} onClick={() => setCategory(item)} className={`rounded-full px-3 py-1 text-xs ${category === item ? 'bg-blue-600 text-white' : 'bg-[#0d1117] text-gray-400 hover:text-white'}`}>{item}</button>)}</div>
+    </section>
+
+    <div className="mb-3 flex items-center justify-between text-xs text-gray-500"><span>本地匹配 <b className="text-gray-300">{filtered.length}</b> 项</span>{(query || category || manufacturer) && <button onClick={() => { setSearch(''); setCategory(''); setManufacturer(''); }} className="text-blue-400">清除筛选</button>}</div>
+    {query.length >= 2 && <QueryDetails query={query} localItem={exactMatch} />}
+    {filtered.length ? <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((item) => <ComponentCard key={item.id} item={item} />)}</div> : <div className="mt-4 rounded-xl border border-dashed border-[#30363d] py-12 text-center text-gray-500"><PackageSearch size={42} className="mx-auto mb-3 opacity-40" /><p>本地库没有匹配项</p>{query.length >= 2 && <p className="mt-1 text-xs">正在尝试在线查询，也可使用下方资料入口</p>}</div>}
+
+    {query.length >= 2 && <section className="mt-7 space-y-6 border-t border-[#30363d] pt-6"><div><h2 className="text-lg font-semibold">“{query}”的在线元器件资料</h2><p className="mt-1 text-xs text-gray-500">完整型号能获得更准确的资料和采购结果。</p></div><LinkSection title="数据手册与技术资料" icon={FileText} color="blue" items={links.filter((item) => item.type === 'datasheet')} /><LinkSection title="符号、封装与 3D 模型" icon={Layers} color="purple" items={links.filter((item) => item.type === 'cad')} /><LinkSection title="替代型号与交叉参考" icon={ReplaceAll} color="yellow" items={links.filter((item) => item.type === 'alternative')} /><LinkSection title="库存、价格与采购" icon={ShoppingCart} color="green" items={links.filter((item) => item.type === 'distributor')} /></section>}
+  </div></div>;
 }
 
-function ChipDetailsPanel({ chipName }: { chipName: string }) {
-  const [details, setDetails] = useState<ChipDetails | null>(null);
+function QueryDetails({ query, localItem }: { query: string; localItem: CatalogItem | null }) {
+  const [details, setDetails] = useState<OnlineDetails | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
-    let mounted = true;
-    const fetchDetails = async () => {
-      setLoading(true);
-      setError(null);
-      setDetails(null);
+    if (localItem) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      setLoading(true); setFailed(false); setDetails(null);
       try {
-        const res = await fetch(`${PROXY_URL}/api/chip-details?chip=${encodeURIComponent(chipName)}`);
-        const data = await res.json();
-        if (!mounted) return;
-        if (data.error) {
-          setError(data.error);
-        } else {
-          setDetails(data);
-        }
-      } catch (e: any) {
-        if (mounted) setError(e.message || 'Failed to fetch chip details');
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    };
-    const timer = setTimeout(fetchDetails, 400);
-    return () => { mounted = false; clearTimeout(timer); };
-  }, [chipName]);
+        const response = await fetch(`${LOCAL_PROXY_BASE}/api/component-details?part=${encodeURIComponent(query)}`, { signal: controller.signal });
+        const data = await response.json() as OnlineDetails;
+        if (!response.ok || data.error) setFailed(true); else setDetails(data);
+      } catch { if (!controller.signal.aborted) setFailed(true); }
+      finally { if (!controller.signal.aborted) setLoading(false); }
+    }, 450);
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [localItem, query]);
 
-  if (loading) {
-    return (
-      <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-6 text-center">
-        <Loader2 size={24} className="animate-spin mx-auto mb-3 text-blue-400" />
-        <p className="text-sm text-gray-400">正在获取芯片详细信息...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-6">
-        <div className="flex items-center gap-3">
-          <XCircle size={20} className="text-red-400 flex-shrink-0" />
-          <div>
-            <h3 className="text-sm font-semibold text-white">无法获取芯片详情</h3>
-            <p className="text-xs text-gray-400 mt-1">{error}</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
+  if (localItem) return <section className="mb-4 overflow-hidden rounded-xl border border-blue-500/30 bg-[#161b22]"><div className="border-b border-[#30363d] p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><span className="text-[10px] uppercase tracking-wider text-blue-400">型号详情</span><h2 className="mt-1 text-xl font-bold">{localItem.name}</h2><div className="mt-2 flex flex-wrap gap-2 text-xs"><span className="rounded bg-blue-500/10 px-2 py-1 text-blue-300">类型：{localItem.subcategory}</span><span className="rounded bg-[#0d1117] px-2 py-1 text-gray-400">类别：{localItem.category}</span><span className="rounded bg-[#0d1117] px-2 py-1 text-gray-400">厂商：{localItem.manufacturer}</span></div></div><span className="rounded-md bg-[#0d1117] px-3 py-1.5 text-xs text-gray-400">封装：{localItem.package}</span></div><div className="mt-4 rounded-lg border border-green-500/15 bg-green-500/5 p-3"><h3 className="text-xs font-semibold text-green-400">典型用途</h3><p className="mt-1 text-sm leading-6 text-gray-300">{typicalUse(localItem)}</p></div></div>{hasChipDocumentation(localItem) && <ChipManuals item={localItem} />}<div className="p-5"><h3 className="mb-1 text-xs font-semibold text-gray-300">关键使用参数</h3><p className="mb-3 text-[11px] text-gray-600">用于初步选型；最终设计请核对对应温度等级、封装后缀及最新版数据手册。</p><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{Object.entries(localItem.parameters).map(([key, value]) => <div key={key} className="rounded-lg bg-[#0d1117] p-3"><div className="text-[10px] text-gray-600">{key}</div><div className="mt-1 text-sm font-medium text-gray-200">{value}</div></div>)}</div></div></section>;
+  if (loading) return <div className="mb-4 rounded-xl border border-[#30363d] bg-[#161b22] p-5 text-center"><Loader2 size={20} className="mx-auto mb-2 animate-spin text-blue-400" /><p className="text-xs text-gray-500">正在查询 {query} 的重要参数和用途…</p></div>;
+  if (failed) return <div className="mb-4 flex gap-3 rounded-xl border border-yellow-500/20 bg-yellow-500/5 p-4"><Info size={18} className="shrink-0 text-yellow-400" /><div><p className="text-sm text-gray-300">暂未取得该型号的结构化参数</p><p className="mt-1 text-xs text-gray-500">请确认代理服务已启动并输入完整型号；仍可使用页面下方的数据手册和采购查询。</p></div></div>;
   if (!details) return null;
-
-  const hasDetails = details.description || Object.keys(details.specs).length > 0 || details.features.length > 0;
-  if (!hasDetails) {
-    return (
-      <div className="bg-[#161b22] border border-[#30363d] rounded-xl p-6">
-        <div className="flex items-center gap-3">
-          <Info size={20} className="text-yellow-400 flex-shrink-0" />
-          <div>
-            <h3 className="text-sm font-semibold text-white">暂无结构化详情</h3>
-            <p className="text-xs text-gray-400 mt-1">该厂商的产品页面尚未支持详情解析</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-[#161b22] border border-[#30363d] rounded-xl overflow-hidden">
-      <div className="p-5 border-b border-[#30363d]">
-        <div className="flex items-start gap-4">
-          <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-blue-500/20 to-cyan-500/20 flex items-center justify-center flex-shrink-0">
-            <Cpu size={24} className="text-blue-400" />
-          </div>
-          <div className="flex-1">
-            <h2 className="text-lg font-bold text-white">{details.productName || chipName}</h2>
-            {details.productFamily && <p className="text-sm text-gray-400 mt-0.5">{details.productFamily}</p>}
-            {details.description && <p className="text-sm text-gray-300 mt-2 leading-relaxed">{details.description}</p>}
-          </div>
-        </div>
-      </div>
-
-      {/* Key Specs */}
-      {Object.keys(details.specs).length > 0 && (
-        <div className="px-5 py-4 border-b border-[#30363d]">
-          <h3 className="text-xs font-semibold text-gray-400 mb-3 uppercase tracking-wider">关键参数</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {Object.entries(details.specs).map(([key, value]) => (
-              <div key={key} className="bg-[#0d1117] rounded-lg p-3">
-                <div className="text-xs text-gray-500 mb-1">{formatSpecKey(key)}</div>
-                <div className="text-sm font-medium text-white">{value}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Features */}
-      {details.features.length > 0 && (
-        <div className="px-5 py-4">
-          <h3 className="text-xs font-semibold text-gray-400 mb-3 uppercase tracking-wider">产品特性</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {details.features.map((feature, i) => (
-              <div key={i} className="flex items-start gap-2">
-                <CheckCircle size={14} className="text-green-400 flex-shrink-0 mt-0.5" />
-                <span className="text-sm text-gray-300">{feature}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  const specs = details.specs ?? {};
+  return <section className="mb-4 overflow-hidden rounded-xl border border-blue-500/30 bg-[#161b22]"><div className="border-b border-[#30363d] p-5"><span className="text-[10px] uppercase tracking-wider text-blue-400">在线型号详情</span><h2 className="mt-1 text-xl font-bold">{details.productName || query}</h2>{details.productFamily && <p className="mt-1 text-xs text-blue-300">{details.productFamily}</p>}<div className="mt-4 rounded-lg border border-green-500/15 bg-green-500/5 p-3"><h3 className="text-xs font-semibold text-green-400">功能与用途</h3><p className="mt-1 text-sm leading-6 text-gray-300">{details.description || '请结合数据手册确认器件功能和推荐应用。'}</p></div></div>{Object.keys(specs).length > 0 && <div className="p-5"><h3 className="mb-3 text-xs font-semibold text-gray-400">重要参数</h3><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{Object.entries(specs).map(([key, value]) => <div key={key} className="rounded-lg bg-[#0d1117] p-3"><div className="text-[10px] uppercase text-gray-600">{key}</div><div className="mt-1 break-words text-xs text-gray-200">{value}</div></div>)}</div></div>}{(details.features?.length ?? 0) > 0 && <div className="grid gap-2 border-t border-[#30363d] p-5 sm:grid-cols-2">{details.features!.map((feature) => <div key={feature} className="flex gap-2 text-xs text-gray-400"><CheckCircle size={13} className="shrink-0 text-green-400" />{feature}</div>)}</div>}</section>;
 }
 
-const SPEC_KEY_MAP: Record<string, string> = {
-  maxClock: '主频',
-  flashMemory: 'Flash',
-  sram: 'SRAM',
-  voltageRange: '工作电压',
-  adc: 'ADC',
-  productName: '产品名称',
-  productFamily: '产品系列',
-  tree: '产品树',
-  core: '内核',
-  operatingVoltage: '工作电压',
-};
-
-function formatSpecKey(key: string): string {
-  return SPEC_KEY_MAP[key] || key.replace(/([A-Z])/g, ' $1').trim();
+function ChipManuals({ item }: { item: CatalogItem }) {
+  const isMcu = item.category === '微控制器与处理器';
+  const manuals = isMcu ? [
+    { title: '数据手册', description: '引脚、封装、电气特性和极限参数', link: item.datasheetUrl || officialDocumentSearch(item, 'datasheet') },
+    { title: '参考手册', description: '外设功能、寄存器、时钟树和使用方法', link: item.reference || stm32ManualUrl(item, 'reference') },
+    { title: '编程手册', description: '内核、指令、异常、中断和系统控制', link: stm32ManualUrl(item, 'programming') },
+    { title: '勘误手册', description: '已知芯片问题、受影响版本和规避方法', link: officialDocumentSearch(item, 'errata sheet') },
+  ] : [
+    { title: '数据手册', description: '引脚、封装、时序、电气特性和极限参数', link: item.datasheetUrl || officialDocumentSearch(item, 'datasheet') },
+    { title: '应用手册', description: '典型电路、接口连接、布局和使用注意事项', link: officialDocumentSearch(item, 'application note typical application') },
+    { title: '设计指南', description: '选型、参数计算、替代料和系统设计建议', link: officialDocumentSearch(item, 'design guide selection guide') },
+    { title: '官方产品页', description: '厂商最新资料、软件工具和相关文档汇总', link: item.reference || officialDocumentSearch(item, 'product page technical documents') },
+  ];
+  return <div className="border-b border-[#30363d] bg-blue-500/[0.03] p-5"><div className="mb-3"><h3 className="flex items-center gap-2 text-sm font-semibold text-blue-300"><BookOpen size={15} />开发与使用手册</h3><p className="mt-1 text-[11px] text-gray-500">{isMcu ? '建议先看数据手册确认硬件，再用参考手册开发外设，上线前检查勘误。' : '优先查看数据手册和应用手册，确认典型电路、时序、布局及使用限制。'}</p></div><div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">{manuals.map((manual) => <a key={manual.title} href={manual.link} target="_blank" rel="noopener noreferrer" className="group rounded-lg border border-[#30363d] bg-[#0d1117] p-3 hover:border-blue-500/40"><div className="flex items-center justify-between"><b className="text-xs text-gray-200 group-hover:text-blue-300">{manual.title}</b><ExternalLink size={12} className="text-gray-600 group-hover:text-blue-400" /></div><p className="mt-1.5 text-[11px] leading-4 text-gray-600">{manual.description}</p></a>)}</div></div>;
 }
 
-const LINK_STYLES: Record<string, { bg: string; color: string }> = {
-  blue: { bg: 'from-blue-500/20 to-cyan-500/20', color: 'text-blue-400' },
-  purple: { bg: 'from-purple-500/20 to-pink-500/20', color: 'text-purple-400' },
-  yellow: { bg: 'from-yellow-500/20 to-orange-500/20', color: 'text-yellow-400' },
-  green: { bg: 'from-green-500/20 to-teal-500/20', color: 'text-green-400' },
-};
-
-function LinkSection({ title, icon: Icon, color, items }: { title: string; icon: any; color: string; items: ChipLink[] }) {
-  const style = LINK_STYLES[color] || LINK_STYLES.blue;
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-base font-semibold text-white flex items-center gap-2">
-          <Icon size={16} className={style.color} />
-          {title}
-        </h2>
-        <span className="text-xs text-gray-500">{items.length} 条</span>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {items.map((item, i) => (
-          <a
-            key={i}
-            href={item.link}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="bg-[#161b22] border border-[#30363d] rounded-lg p-4 hover:border-[#484f58] transition-colors block group"
-          >
-            <div className="flex items-start gap-3">
-              <div className={`w-8 h-8 rounded-md bg-gradient-to-br ${style.bg} flex items-center justify-center flex-shrink-0 mt-0.5`}>
-                <ExternalLink size={14} className={style.color} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-semibold text-white truncate group-hover:text-blue-300 transition-colors">{item.name}</h3>
-                <p className="text-xs text-gray-400 mt-0.5">{item.source}</p>
-                <p className="text-xs text-gray-500 mt-1 line-clamp-1">{item.description}</p>
-              </div>
-            </div>
-          </a>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ChipCard({ chip }: { chip: Chip }) {
+function ComponentCard({ item }: { item: CatalogItem }) {
   const [expanded, setExpanded] = useState(false);
+  return <article className="overflow-hidden rounded-xl border border-[#30363d] bg-[#161b22] hover:border-[#484f58]">
+    <button onClick={() => setExpanded((value) => !value)} className="w-full p-5 text-left"><div className="mb-3 flex items-start gap-3"><div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${item.isChip ? 'bg-blue-500/15 text-blue-400' : 'bg-purple-500/15 text-purple-400'}`}>{item.isChip ? <Cpu size={20} /> : <PackageSearch size={20} />}</div><div className="min-w-0 flex-1"><h3 className="truncate font-semibold">{item.name}</h3><p className="truncate text-xs text-gray-400">{item.manufacturer} · {item.subcategory}</p></div><span className="rounded bg-[#0d1117] px-2 py-1 text-[10px] text-gray-500">{item.category}</span></div><p className="line-clamp-2 min-h-10 text-sm leading-5 text-gray-400">{item.description}</p><div className="mt-4 grid grid-cols-2 gap-2">{Object.entries(item.parameters).slice(0, 4).map(([key, value]) => <div key={key} className="rounded-md bg-[#0d1117] px-2.5 py-2"><div className="text-[10px] text-gray-600">{key}</div><div className="mt-0.5 truncate text-xs text-gray-200">{value}</div></div>)}</div></button>
+    {expanded && <div className="border-t border-[#30363d] px-5 py-4"><div className="mb-3 flex flex-wrap gap-1.5">{item.tags.map((tag) => <span key={tag} className="flex items-center gap-1 rounded bg-[#0d1117] px-2 py-0.5 text-[10px] text-gray-500"><Tag size={9} />{tag}</span>)}</div><div className="flex flex-wrap items-center justify-between gap-2 text-xs"><span className="text-gray-500">封装：{item.package}</span><div className="flex gap-3">{item.reference && <a href={item.reference} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-green-400"><BookOpen size={13} />参考手册</a>}{item.datasheetUrl ? <a href={item.datasheetUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-blue-400"><ExternalLink size={13} />数据手册</a> : <span className="text-gray-600">可使用在线查询</span>}</div></div></div>}
+  </article>;
+}
 
-  return (
-    <div className="bg-[#161b22] border border-[#30363d] rounded-xl overflow-hidden hover:border-[#484f58] transition-colors">
-      <div
-        className="p-5 cursor-pointer"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <div className="flex items-start justify-between mb-3">
-          <div>
-            <h3 className="text-lg font-semibold text-white">{chip.name}</h3>
-            <p className="text-sm text-gray-400">{chip.manufacturer} · {chip.series}</p>
-          </div>
-          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center">
-            <Cpu size={20} className="text-blue-400" />
-          </div>
-        </div>
+const linkStyles: Record<string, { bg: string; text: string }> = { blue: { bg: 'from-blue-500/20 to-cyan-500/20', text: 'text-blue-400' }, purple: { bg: 'from-purple-500/20 to-pink-500/20', text: 'text-purple-400' }, yellow: { bg: 'from-yellow-500/20 to-orange-500/20', text: 'text-yellow-400' }, green: { bg: 'from-green-500/20 to-teal-500/20', text: 'text-green-400' } };
 
-        <div className="grid grid-cols-4 gap-3">
-          <div>
-            <div className="text-xs text-gray-500 mb-1">内核</div>
-            <div className="text-sm text-white">{chip.cores}</div>
-          </div>
-          <div>
-            <div className="text-xs text-gray-500 mb-1">主频</div>
-            <div className="text-sm text-white">{chip.frequency}</div>
-          </div>
-          <div>
-            <div className="text-xs text-gray-500 mb-1">Flash</div>
-            <div className="text-sm text-white">{chip.flash}</div>
-          </div>
-          <div>
-            <div className="text-xs text-gray-500 mb-1">RAM</div>
-            <div className="text-sm text-white">{chip.ram}</div>
-          </div>
-        </div>
-      </div>
-
-      {expanded && (
-        <div className="px-5 pb-5 border-t border-[#30363d] pt-4">
-          <div className="mb-3">
-            <div className="text-xs text-gray-500 mb-2">外设</div>
-            <div className="flex flex-wrap gap-1.5">
-              {chip.peripherals.map((p: string) => (
-                <span
-                  key={p}
-                  className="px-2 py-0.5 text-xs bg-[#0d1117] text-gray-300 rounded-md border border-[#30363d]"
-                >
-                  {p}
-                </span>
-              ))}
-            </div>
-          </div>
-          <div className="flex items-center justify-between">
-            <div className="text-xs text-gray-500">封装: {chip.package}</div>
-            <div className="flex items-center gap-3">
-              {chip.reference ? (
-                <a
-                  href={chip.reference}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-sm text-green-400 hover:text-green-300"
-                >
-                  <BookOpen size={14} />
-                  用户手册
-                </a>
-              ) : null}
-              {chip.datasheetUrl ? (
-                <a
-                  href={chip.datasheetUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-sm text-blue-400 hover:text-blue-300"
-                >
-                  <ExternalLink size={14} />
-                  数据手册
-                </a>
-              ) : (
-                <span className="flex items-center gap-1 text-sm text-gray-600">
-                  <ExternalLink size={14} />
-                  暂无数据手册
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+function LinkSection({ title, icon: Icon, color, items }: { title: string; icon: typeof FileText; color: string; items: PartLink[] }) {
+  const style = linkStyles[color] ?? linkStyles.blue;
+  return <div><div className="mb-3 flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-semibold"><Icon size={16} className={style.text} />{title}</h3><span className="text-xs text-gray-600">{items.length} 个来源</span></div><div className="grid gap-3 md:grid-cols-2">{items.map((item) => <a key={`${item.source}-${item.type}`} href={item.link} target="_blank" rel="noopener noreferrer" className="group flex gap-3 rounded-lg border border-[#30363d] bg-[#161b22] p-4 hover:border-[#484f58]"><div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-gradient-to-br ${style.bg}`}><ExternalLink size={14} className={style.text} /></div><div className="min-w-0"><h4 className="truncate text-sm font-medium group-hover:text-blue-300">{item.name}</h4><p className="mt-0.5 text-xs text-gray-400">{item.source}</p><p className="mt-1 text-xs text-gray-600">{item.description}</p></div></a>)}</div></div>;
 }

@@ -7,8 +7,8 @@ export const roadmapPhases: RoadmapPhase[] = [
     title: 'C语言基础',
     icon: 'code',
     color: '#3b82f6',
-    description: '掌握C语言核心语法，指针，内存管理，数据结构等嵌入式开发必备基础',
-    duration: '2-4周',
+    description: '掌握C语言核心语法、内存模型、寄存器访问、中断共享数据与有界资源设计',
+    duration: '3-5周',
     modules: [
       {
         id: 'c-syntax',
@@ -241,6 +241,43 @@ int main() {
     while (queue_pop(&q, &val)) printf("%d ", val);
     printf("\\n");
     return 0;}`,
+        codeLang: 'c',
+      },
+      {
+        id: 'embedded-c-semantics',
+        title: '面向嵌入式的 C 语言',
+        description: '把 C 语言落实到寄存器、内存模型、中断并发和资源受限环境',
+        topics: [
+          { name: '限定符与链接属性', content: '理解 volatile、const、static、extern 的真实语义。volatile 用于可能被硬件或并发上下文改变的对象，但不提供原子性，也不能替代临界区。' },
+          { name: '内存映射与寄存器访问', content: '使用固定宽度整数、指针和位掩码访问外设寄存器；理解读改写、保留位、只写寄存器与写 1 清零等硬件语义。' },
+          { name: '对齐、端序与序列化', content: '理解结构体填充、自然对齐、大小端和严格别名规则。通信报文应逐字段编码解码，避免直接强制转换结构体。' },
+          { name: '中断与主循环共享数据', content: '区分可见性和原子性；对共享状态使用短临界区、原子操作或无锁单生产者/单消费者队列，并保持 ISR 短小。' },
+          { name: '未定义行为与整数安全', content: '重点识别有符号溢出、越界、移位宽度、悬空指针和格式化参数错误。开启编译器告警，并在主机测试中使用 Sanitizer。' },
+          { name: '资源受限设计', content: '优先静态分配和有界缓冲区，明确栈、堆与最坏情况内存占用；只有在生命周期和失败路径清晰时才使用动态内存。' },
+        ],
+        resources: [
+          { title: 'CMSIS-Core 官方文档', url: 'https://arm-software.github.io/CMSIS_6/latest/Core/index.html', lang: 'en', type: 'doc' },
+          { title: 'SEI CERT C 编码规范', url: 'https://wiki.sei.cmu.edu/confluence/display/c/SEI+CERT+C+Coding+Standard', lang: 'en', type: 'doc' },
+          { title: 'C 语言参考 - cppreference', url: 'https://en.cppreference.com/w/c/language.html', lang: 'en', type: 'doc' },
+        ],
+        codeExample: `#include <stdint.h>
+#include <stdbool.h>
+
+#define UART_SR   (*(volatile const uint32_t *)0x40013800u)
+#define UART_DR   (*(volatile uint32_t *)0x40013804u)
+#define UART_RXNE (1u << 5)
+
+// ISR 写、主循环读：volatile 只保证每次访问真实发生，
+// 多字节共享状态仍需要临界区或原子操作。
+static volatile uint8_t rx_byte;
+static volatile bool rx_ready;
+
+void USART1_IRQHandler(void) {
+    if ((UART_SR & UART_RXNE) != 0u) {
+        rx_byte = (uint8_t)UART_DR;
+        rx_ready = true;
+    }
+}`,
         codeLang: 'c',
       },
     ],
@@ -684,7 +721,7 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
       },
       {
         id: 'stm32-adc-dac',
-        title: 'ADC/DAC与DAC',
+        title: 'ADC/DAC与模拟采集',
         description: '模数转换、数模转换、DMA传输、多通道采样',
         topics: [
           'ADC基本原理与分辨率',
@@ -1367,7 +1404,7 @@ JTAG状态机：
 引脚定义：
 • SWCLK：串行时钟
 • SWDIO：双向数据线
-• SWDIO、SWDIO和GND
+• 调试连接还应包含 GND，通常也会连接目标板参考电压与复位信号
 
 优势：
 • 引脚更少：相比JTAG的4根线，SWD只需2根信号线。
@@ -1387,7 +1424,7 @@ JTAG状态机：
 推荐工具：
 • Saleae Logic 2：专业级，8-16通道，支持协议解码
 • DSLogic Plus：开源方案，配合PulseView使用
-• NanoVNA：入门级，支持基础协议解码
+• 入门级 USB 逻辑分析仪：配合 sigrok/PulseView 完成基础协议解码
 
 常见用途：
 • 验证I2C/SPI/UART通信时序
@@ -1480,7 +1517,7 @@ watch adcBuffer[0]
           '远程调试与无线调试',
         ],
         resources: [
-          { title: 'HardFault调试指南 - ARM', url: 'https://www.arm.com/support/answers/hardfault.php', lang: 'en', type: 'doc' },
+          { title: 'Cortex-M Fault 调试指南', url: 'https://interrupt.memfault.com/blog/cortex-m-hardfault-debug', lang: 'en', type: 'doc' },
           { title: '嵌入式调试技巧汇总', url: 'https://www.bilibili.com/video/BV1Yh411K7Lb', lang: 'zh', type: 'video' },
         ],
         codeExample: `// ============================================
@@ -1555,8 +1592,8 @@ void HardFault_Handler(void) {
     title: '构建工具与版本控制',
     icon: 'tools',
     color: '#64748b',
-    description: '掌握CMake构建系统、Git版本控制和CI/CD流水线',
-    duration: '1-2周',
+    description: '贯通交叉编译、链接脚本、CMake、Git、固件测试和持续集成',
+    duration: '2-3周',
     modules: [
       {
         id: 'cmake-build',
@@ -1615,7 +1652,7 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
 # 包含CMake函数库
-include(\$CMAKE_CURRENT_LIST_DIR/cmake/STM32.cmake)
+include(\${CMAKE_CURRENT_LIST_DIR}/cmake/STM32.cmake)
 
 # 定义固件版本
 set(FIRMWARE_VERSION "1.0.0")
@@ -1665,9 +1702,9 @@ target_link_libraries(firmware PRIVATE stm32cube_hal)
 
 # 构建后生成.bin和.hex
 add_custom_command(TARGET firmware POST_BUILD
-    COMMAND \${CMAKE_OBJCOPY} -O binary \$<TARGET_FILE:firmware> \${CMAKE_BINARY_DIR}/firmware.bin
-    COMMAND \${CMAKE_OBJCOPY} -O ihex \$<TARGET_FILE:firmware> \${CMAKE_BINARY_DIR}/firmware.hex
-    COMMAND \${CMAKE_SIZEUTYPE} \$<TARGET_FILE:firmware>
+    COMMAND \${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:firmware> \${CMAKE_BINARY_DIR}/firmware.bin
+    COMMAND \${CMAKE_OBJCOPY} -O ihex $<TARGET_FILE:firmware> \${CMAKE_BINARY_DIR}/firmware.hex
+    COMMAND \${CMAKE_SIZE} $<TARGET_FILE:firmware>
     COMMENT "Generating binary and hex files"
 )
 
@@ -1683,7 +1720,7 @@ set(CMAKE_C_COMPILER \${TOOLCHAIN_PREFIX}-gcc)
 set(CMAKE_CXX_COMPILER \${TOOLCHAIN_PREFIX}-g++)
 set(CMAKE_ASM_COMPILER \${TOOLCHAIN_PREFIX}-gcc)
 set(CMAKE_OBJCOPY \${TOOLCHAIN_PREFIX}-objcopy)
-set(CMAKE_SIZEUTYPE \${TOOLCHAIN_PREFIX}-size)
+set(CMAKE_SIZE \${TOOLCHAIN_PREFIX}-size)
 
 # ============================================
 # .gitignore 嵌入式项目推荐配置
@@ -1711,6 +1748,54 @@ Thumbs.db
 !toolchain-arm-gcc.cmake`,
         codeLang: 'cmake',
       },
+      {
+        id: 'compiler-linker-memory',
+        title: '交叉编译、链接与内存布局',
+        description: '理解源码如何变成可烧录固件，并能通过 ELF/Map 文件解释 Flash 与 RAM 占用',
+        topics: [
+          { name: '编译流水线', content: '掌握预处理、编译、汇编、链接和 objcopy 的职责；保留 ELF 作为调试与分析的主产物，bin/hex 主要用于烧录和分发。' },
+          { name: 'ABI 与启动文件', content: '理解调用约定、栈对齐、弱符号、向量表、Reset_Handler、数据段复制和 BSS 清零。启动代码连接了硬件复位与 C 运行环境。' },
+          { name: '链接脚本', content: '掌握 MEMORY、SECTIONS、VMA/LMA、KEEP 和 NOLOAD；能把代码、只读数据、已初始化数据、BSS、堆栈与持久化区域放到正确地址。' },
+          { name: 'ELF 与 Map 分析', content: '使用 size、nm、objdump、readelf 和链接 Map 文件定位体积增长、重复符号、未引用段和栈/堆边界。' },
+          { name: '编译选项与可移植性', content: '区分 Debug/Release 配置；启用 -Wall、-Wextra、-Wconversion 等告警，并理解优化、LTO、调试信息与可观测性之间的取舍。' },
+        ],
+        resources: [
+          { title: 'CMake Toolchains 官方手册', url: 'https://cmake.org/cmake/help/latest/manual/cmake-toolchains.7.html', lang: 'en', type: 'doc' },
+          { title: 'Arm GNU Toolchain', url: 'https://developer.arm.com/Tools%20and%20Software/GNU%20Toolchain', lang: 'en', type: 'doc' },
+          { title: 'GNU ld 链接脚本手册', url: 'https://sourceware.org/binutils/docs/ld/Scripts.html', lang: 'en', type: 'doc' },
+        ],
+        codeExample: `/* STM32F4 最小链接脚本片段 */
+MEMORY {
+  FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 512K
+  RAM   (rwx) : ORIGIN = 0x20000000, LENGTH = 128K
+}
+
+SECTIONS {
+  .isr_vector : { KEEP(*(.isr_vector)) } > FLASH
+  .text : { *(.text*) *(.rodata*) } > FLASH
+  .data : { _sdata = .; *(.data*) _edata = .; } > RAM AT> FLASH
+  _sidata = LOADADDR(.data);
+  .bss (NOLOAD) : { _sbss = .; *(.bss*) *(COMMON) _ebss = .; } > RAM
+}`,
+        codeLang: 'text',
+      },
+      {
+        id: 'firmware-testing-ci',
+        title: '固件测试与持续集成',
+        description: '把可测试设计、主机单元测试、静态检查和目标板验证接入日常开发流程',
+        topics: [
+          { name: '可测试的分层设计', content: '把纯业务逻辑与 HAL、寄存器访问分离，通过窄接口注入时钟、存储和通信依赖，使大部分逻辑可在主机上快速测试。' },
+          { name: '单元测试与替身', content: '使用 Unity/Ceedling 或 CTest 编写边界、异常和状态机测试；对硬件接口使用 fake/mock，但避免把实现细节全部固化在测试中。' },
+          { name: '静态与动态检查', content: '在 CI 中把编译告警视为错误，运行 clang-tidy/cppcheck；主机测试启用 AddressSanitizer 和 UndefinedBehaviorSanitizer。' },
+          { name: '目标板与硬件在环', content: '在真实板卡验证启动、时序、功耗和外设；测试夹具应能自动烧录、复位、采集串口日志并给出明确的通过条件。' },
+          { name: '可追溯发布', content: '构建记录编译器、依赖和配置版本；产物包含 ELF、bin/hex、Map、版本信息、校验值和变更说明，并通过 tag 关联源码。' },
+        ],
+        resources: [
+          { title: 'Unity 单元测试框架', url: 'https://www.throwtheswitch.org/unity', lang: 'en', type: 'project' },
+          { title: 'CTest 官方文档', url: 'https://cmake.org/cmake/help/latest/manual/ctest.1.html', lang: 'en', type: 'doc' },
+          { title: 'GitHub Actions 官方文档', url: 'https://docs.github.com/actions', lang: 'en', type: 'doc' },
+        ],
+      },
     ],
   },
   {
@@ -1719,7 +1804,7 @@ Thumbs.db
     title: 'RTOS实时操作系统',
     icon: 'layers',
     color: '#ef4444',
-    description: '从FreeRTOS到RT-Thread，掌握嵌入式实时操作系统核心概念',
+    description: '从调度与并发原理到FreeRTOS、RT-Thread和Zephyr工程实践',
     duration: '3-4周',
     modules: [
       {
@@ -1736,8 +1821,8 @@ Thumbs.db
           '优先级继承与天花板',
         ],
         resources: [
-          { title: 'FreeRTOS官方文档', url: 'https://www.freertos.org/Documentation/', lang: 'en', type: 'doc' },
-          { title: 'FreeRTOS中文教程', url: 'https://www.oschina.net/question/1249040_2269142', lang: 'zh', type: 'doc' },
+          { title: 'FreeRTOS 初学者指南', url: 'https://docs.freertos.org/Documentation/01-FreeRTOS-quick-start/01-Beginners-guide/00-Overview', lang: 'en', type: 'course' },
+          { title: 'FreeRTOS Kernel 官方手册', url: 'https://docs.freertos.org/Documentation/02-Kernel/00-Overview', lang: 'en', type: 'doc' },
           { title: 'FreeRTOS入门教程 - 正点原子', url: 'https://www.bilibili.com/video/BV1bQ4y1n7jY', lang: 'zh', type: 'video' },
         ],
         codeExample: `#include "FreeRTOS.h"
@@ -1880,11 +1965,45 @@ int application_init(void) {
 INIT_APP_EXPORT(application_init);`,
         codeLang: 'c',
       },
+      {
+        id: 'zephyr-system-development',
+        title: 'Zephyr 系统化开发',
+        description: '学习现代 RTOS 的板级抽象、配置系统、设备模型、测试和可移植应用结构',
+        topics: [
+          { name: 'West 工作区与构建', content: '理解 west workspace、manifest、多仓库依赖和 west build/flash/debug；区分应用、board、SoC 与 module 的职责。' },
+          { name: 'Kconfig 与 Devicetree', content: 'Kconfig 决定编译期功能配置，Devicetree 描述硬件实例及连接关系。应用代码通过生成的配置和设备描述获得可移植性。' },
+          { name: '内核服务', content: '掌握线程、workqueue、timer、FIFO、message queue、semaphore、mutex 与 memory slab，并根据执行上下文选择合适原语。' },
+          { name: '设备驱动与异步 I/O', content: '使用统一设备模型访问 GPIO、I2C、SPI、传感器和网络接口；理解同步、异步和回调 API 的生命周期。' },
+          { name: '测试与模拟', content: '使用 ztest、Twister 和 native_sim 在主机及多块目标板上运行测试，把板级差异纳入自动化矩阵。' },
+        ],
+        resources: [
+          { title: 'Zephyr Getting Started', url: 'https://docs.zephyrproject.org/latest/develop/getting_started/index.html', lang: 'en', type: 'course' },
+          { title: 'Zephyr Kernel Services', url: 'https://docs.zephyrproject.org/latest/kernel/services/index.html', lang: 'en', type: 'doc' },
+          { title: 'Zephyr Application Development', url: 'https://docs.zephyrproject.org/latest/develop/application/index.html', lang: 'en', type: 'doc' },
+        ],
+        codeExample: `#include <zephyr/kernel.h>
+#include <zephyr/device.h>
+#include <zephyr/drivers/gpio.h>
+
+#define LED_NODE DT_ALIAS(led0)
+static const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(LED_NODE, gpios);
+
+int main(void) {
+    if (!gpio_is_ready_dt(&led)) return -ENODEV;
+    if (gpio_pin_configure_dt(&led, GPIO_OUTPUT_INACTIVE) < 0) return -EIO;
+
+    while (true) {
+        gpio_pin_toggle_dt(&led);
+        k_sleep(K_MSEC(500));
+    }
+}`,
+        codeLang: 'c',
+      },
     ],
   },
   {
     id: 'embedded-linux',
-    prerequisites: ['build-tools', 'rtos'],
+    prerequisites: ['build-tools', 'protocols'],
     title: '嵌入式Linux',
     icon: 'server',
     color: '#10b981',
@@ -1896,8 +2015,8 @@ INIT_APP_EXPORT(application_init);`,
         title: 'Linux内核基础',
         description: '内核架构、进程管理、内存管理、设备驱动模型',
         topics: [
-          { name: '内核架构与模块化', content: 'Linux是模块化 monolithic 内核。核心部分 monolithic，但通过可加载内核模块(LKM)提供扩展性。嵌入式中常用模块方式加载驱动，节省内存。' },
-          { name: '进程管理与调度', content: 'Linux使用CFS(完全公平调度器)处理普通任务，SCHED_FIFO/SCHED_RR处理实时任务。PREEMPT_RT补丁可将Linux改造为硬实时系统。' },
+          { name: '内核架构与模块化', content: 'Linux 是模块化单体内核，可通过可加载内核模块扩展。量产系统需根据启动时间、内存、升级与故障隔离要求决定驱动内建还是模块化，模块并不天然更省内存。' },
+          { name: '进程管理与调度', content: 'Linux 使用公平调度类处理普通任务，SCHED_FIFO/SCHED_RR 处理实时任务。PREEMPT_RT 可改善最坏时延和可预测性，但是否满足实时约束必须通过目标硬件上的测量验证。' },
           { name: '内存管理', content: '虚拟内存、分页、DMA映射、SLAB分配器。嵌入式中常用CONFIG_DEVTMPFS自动创建设备节点，CONFIG_TMPFS提供RAM磁盘。' },
           { name: '设备驱动模型', content: '字符设备、块设备、网络接口、Platform设备。驱动通过platform_bus与设备树匹配。' },
           { name: '内核编译与配置', content: 'make menuconfig配置内核选项，make zImage dtbs编译内核和设备树。关键选项：CONFIG_PREEMPT_RT、CONFIG_SQUASHFS、CONFIG_TMPFS。' },
@@ -2024,7 +2143,7 @@ dtc -I dts -O dtb -o myboard.dtb myboard.dts`,
         ],
         resources: [
           { title: 'Buildroot官方文档', url: 'https://buildroot.org/downloads/manual/manual.html', lang: 'en', type: 'doc' },
-          { title: 'Yocto Project快速入门', url: 'https://www.yoctoproject.org/docs/latest/mega-manual/mega-manual.html', lang: 'en', type: 'doc' },
+          { title: 'Yocto Project 快速构建', url: 'https://docs.yoctoproject.org/brief-yoctoprojectqs/index.html', lang: 'en', type: 'course' },
         ],
         codeExample: `# Buildroot
 make qemu_arm_vexpress_defconfig
@@ -2044,6 +2163,23 @@ bitbake core-image-minimal
 # Target packages -> Shell and utilities -> BusyBox
 # Filesystem images -> tar the root filesystem`,
         codeLang: 'bash',
+      },
+      {
+        id: 'linux-device-integration',
+        title: '设备接入与系统联调',
+        description: '贯通用户态应用、内核接口、服务管理、现场诊断和可靠升级',
+        topics: [
+          { name: '优先使用标准子系统', content: 'GPIO、I2C、SPI、IIO、input、LED、hwmon 等设备优先接入现有内核子系统；只有缺少合适抽象时才设计自定义字符设备和 ioctl。' },
+          { name: '用户态硬件访问', content: '使用 libgpiod、i2c-tools、spidev（仅适合部分场景）和 sysfs/debugfs 完成验证；量产接口需明确权限、并发和稳定性边界。' },
+          { name: '服务与启动管理', content: '通过 systemd 或轻量 init 管理依赖、重启策略、看门狗和日志；应用需支持优雅退出、配置校验与掉电恢复。' },
+          { name: '现场诊断', content: '综合使用 dmesg、journalctl、strace、gdbserver、perf、ftrace 和动态调试定位启动、系统调用、调度及驱动问题。' },
+          { name: '可靠文件系统与升级', content: '根据掉电风险选择只读根文件系统、overlay、数据分区和日志策略；升级方案应具备签名校验、原子切换、健康检查与回滚。' },
+        ],
+        resources: [
+          { title: 'Linux Kernel Driver API', url: 'https://docs.kernel.org/driver-api/index.html', lang: 'en', type: 'doc' },
+          { title: 'Linux Kernel 测试工具', url: 'https://docs.kernel.org/dev-tools/index.html', lang: 'en', type: 'doc' },
+          { title: 'libgpiod 官方仓库', url: 'https://git.kernel.org/pub/scm/libs/libgpiod/libgpiod.git/about/', lang: 'en', type: 'project' },
+        ],
       },
     ],
   },
@@ -2184,7 +2320,7 @@ void loop() {
         last = millis();
         char buf[128];
         snprintf(buf, sizeof(buf),
-            "{\"temp\":%.1f,\"humid\":%.1f,\"light\":%d}",
+            "{"temp":%.1f,"humid":%.1f,"light":%d}",
             25.6f, 60.2f, analogRead(A0));
         mqtt.publish(topic_pub, buf);
         Serial.println(buf);
@@ -2338,8 +2474,8 @@ String getMQTTClientID() {
 void postProperties(float temp, float humid) {
     char payload[128];
     snprintf(payload, sizeof(payload),
-        "{\"params\":{\"Temperature\":%.1f,\"Humidity\":%.1f},"
-        "\"method\":\"thing.event.property.post\"}", temp, humid);
+        "{"params":{"Temperature":%.1f,"Humidity":%.1f},"
+        ""method":"thing.event.property.post"}", temp, humid);
     mqtt.publish(topic_post, payload);
 }
 
@@ -2347,7 +2483,7 @@ void postProperties(float temp, float humid) {
 void syncDeviceShadow(String status) {
     char payload[128];
     snprintf(payload, sizeof(payload),
-        "{\"state\":{\"desired\":{\"led\":\"%s\"}},\"method\":\"shadow.update\"}",
+        "{"state":{"desired":{"led":"%s"}},"method":"shadow.update"}",
         status.c_str());
     mqtt.publish("$shadow/update", payload);
 }
@@ -2449,9 +2585,9 @@ WebServer server(80);
 
 void handleControl() {
     String json = "{";
-    json += "\"temp\":" + String(dht.readTemperature(), 1);
-    json += ",\"humid\":" + String(dht.readHumidity(), 1);
-    json += ",\"led\":" + String(digitalRead(RELAY_PIN_1));
+    json += ""temp":" + String(dht.readTemperature(), 1);
+    json += ","humid":" + String(dht.readHumidity(), 1);
+    json += ","led":" + String(digitalRead(RELAY_PIN_1));
     json += "}";
     server.send(200, "application/json", json);
 }
@@ -2524,7 +2660,7 @@ void loop() {
         
         // MQTT上报
         char buf[128];
-        snprintf(buf, sizeof(buf), "{\"temp\":%.1f,\"humid\":%.1f}", t, h);
+        snprintf(buf, sizeof(buf), "{"temp":%.1f,"humid":%.1f}", t, h);
         mqtt.publish("home/light/data", buf);
     }
 }`,
@@ -2754,7 +2890,7 @@ float CalculateBatteryLife(float batteryCapacity_mAh, float avgCurrent_mA) {
   },
   {
     id: 'security',
-    prerequisites: ['rtos', 'embedded-linux'],
+    prerequisites: ['rtos', 'protocols'],
     title: '嵌入式安全',
     icon: 'shield',
     color: '#dc2626',
@@ -2799,6 +2935,7 @@ float CalculateBatteryLife(float batteryCapacity_mAh, float avgCurrent_mA) {
 • AES-128/256：最常用，支持硬件加速
 • ChaCha20：软件实现高效，无S盒侧信道风险
 • DES/3DES：已不推荐使用
+• 新设计优先使用 AES-GCM、AES-CCM 或 ChaCha20-Poly1305 等认证加密，避免只加密不校验完整性
 
 非对称加密：
 • RSA-2048/4096：密钥交换、数字签名
@@ -2812,8 +2949,8 @@ float CalculateBatteryLife(float batteryCapacity_mAh, float avgCurrent_mA) {
 
 密钥管理：
 • 密钥存储：OTP区域、安全元件、TrustZone
-• 密钥派生：PBKDF2、HKDF、Argon2
-• 密钥轮换：定期更换密钥`,
+• 密钥派生：设备密钥常用 HKDF；用户口令可使用 PBKDF2 或 Argon2
+• 密钥轮换：设计版本、吊销、更新和销毁流程，不在源码或普通 Flash 中硬编码生产密钥`,
           },
           {
             name: '安全启动与固件更新',
@@ -2837,7 +2974,7 @@ float CalculateBatteryLife(float batteryCapacity_mAh, float avgCurrent_mA) {
 
 STM32安全特性：
 • RDP(Readout Protection)：Flash读取保护
-• BKR(Bit Key Register)：用户密钥存储
+• 安全存储：根据具体系列选用 OTP、隔离区域或安全元件，不能把普通备份寄存器当作密钥保险库
 • UID：唯一设备标识符
 • True RNG：硬件真随机数生成器`,
           },
@@ -2846,9 +2983,12 @@ STM32安全特性：
           { title: 'ARM TrustZone安全架构', url: 'https://developer.arm.com/technologies/trustzone', lang: 'en', type: 'doc' },
           { title: '嵌入式安全最佳实践 - NXP', url: 'https://www.nxp.com/doc/APPNOTE/APN2065', lang: 'en', type: 'doc' },
           { title: 'STM32安全功能参考', url: 'https://www.st.com/content/st_com/en/products/ecosystems/stm32-ecoscene/stm32-security.html', lang: 'en', type: 'doc' },
+          { title: 'MCUboot 安全升级文档', url: 'https://docs.mcuboot.com/', lang: 'en', type: 'project' },
+          { title: 'Arm 平台安全架构 PSA', url: 'https://www.arm.com/architecture/security-features/platform-security', lang: 'en', type: 'doc' },
         ],
         codeExample: `// ============================================
-// AES-128-CBC加密示例 (使用STM32硬件加密)
+// AES-128-CBC原语示例 (仅用于理解硬件接口)
+// 警告：CBC本身不提供完整性与身份认证，生产协议应使用AEAD并管理nonce。
 // ============================================
 #include "stm32f4xx_hal.h"
 
@@ -2890,7 +3030,7 @@ void AES_Encrypt(void) {
 }
 
 // ============================================
-// 固件签名验证 (使用CRC和简单校验)
+// 固件传输损坏检测（CRC不是签名，不能抵御恶意篡改）
 // ============================================
 #define FIRMWARE_SIGNATURE_ADDR  0x08000000
 #define FIRMWARE_CRC_ADDR        0x0807FFFC
@@ -2906,8 +3046,8 @@ uint32_t CalcCRC32(const uint8_t* data, uint32_t len) {
     return ~crc;
 }
 
-// 验证固件完整性
-bool VerifyFirmware(void) {
+// 仅检查偶发传输错误；安全启动必须验证厂商私钥生成的数字签名
+bool CheckFirmwareCRC(void) {
     uint32_t storedCRC = *(volatile uint32_t*)FIRMWARE_CRC_ADDR;
     // 计算除CRC区域外的固件CRC
     uint32_t calcCRC = CalcCRC32(
@@ -2936,7 +3076,7 @@ void EnableFlashProtection(void) {
   },
   {
     id: 'pcb-design',
-    prerequisites: ['electronics-basics'],
+    prerequisites: ['electronics-basics', 'stm32-development'],
     title: 'PCB设计与硬件',
     icon: 'layers',
     color: '#84cc16',
@@ -3101,7 +3241,7 @@ print(f"Production files generated in {plot_dir}")`,
  },
   {
     id: 'edge-ai',
-    prerequisites: ['embedded-linux', 'rtos'],
+    prerequisites: ['stm32-advanced-peripherals', 'build-tools'],
     title: '边缘AI / TinyML',
     icon: 'brain',
     color: '#8b5cf6',
@@ -3119,6 +3259,7 @@ print(f"Production files generated in {plot_dir}")`,
         ],
         resources: [
           { title: 'TensorFlow Lite Micro官方文档', url: 'https://www.tensorflow.org/lite/microcontrollers', lang: 'en', type: 'doc' },
+          { title: 'CMSIS-NN 优化算子文档', url: 'https://arm-software.github.io/CMSIS-NN/latest/', lang: 'en', type: 'doc' },
           { title: 'TinyML书籍', url: 'https://tinyml.org/', lang: 'en', type: 'doc' },
         ],
         codeExample: `#include "tensorflow/lite/micro/micro_mutable_op_resolver.h"

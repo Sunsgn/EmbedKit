@@ -1,21 +1,488 @@
 import http from 'http';
 import https from 'https';
-import { URL } from 'url';
+import net from 'net';
+import dgram from 'dgram';
+import { SerialPort } from 'serialport';
+import { randomUUID } from 'crypto';
+import { spawn } from 'child_process';
+import { appendFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'fs/promises';
+import { dirname, isAbsolute, join, relative, resolve } from 'path';
+import { URL, pathToFileURL } from 'url';
 
-const PORT = process.env.PORT || 9999;
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS || '*';
+const PORT = process.env.EMBEDKIT_PROXY_PORT || 9999;
+const HOST = process.env.EMBEDKIT_PROXY_HOST || '127.0.0.1';
+const AGENT_VERSION = '1.0.0';
+const AGENT_PROTOCOL_VERSION = 1;
+const MAX_REQUEST_BYTES = Number(process.env.EMBEDKIT_MAX_REQUEST_BYTES || 2 * 1024 * 1024);
+const MAX_NETWORK_SESSIONS = 16;
+const MAX_NETWORK_EVENTS = 2000;
+const MAX_SERIAL_SESSIONS = 16;
+const MAX_BUILD_JOBS = 8;
+const MAX_BUILD_EVENTS = 5000;
+const SERIAL_STATE_FILE = process.env.EMBEDKIT_SERIAL_STATE_FILE || join(process.cwd(), '.embedkit-state', 'serial-sessions.json');
+const NETWORK_STATE_FILE = process.env.EMBEDKIT_NETWORK_STATE_FILE || join(process.cwd(), '.embedkit-state', 'network-sessions.json');
+const AGENT_LOG_FILE = process.env.EMBEDKIT_AGENT_LOG_FILE || join(process.cwd(), '.embedkit-state', 'agent.log');
+const AGENT_LOG_MAX_BYTES = Number(process.env.EMBEDKIT_AGENT_LOG_MAX_BYTES || 1024 * 1024);
+let agentLoggingInstalled = false, logWriteQueue = Promise.resolve();
 
-function setCORS(res) {
-  res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGINS);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
+function installAgentLogging() {
+  if (agentLoggingInstalled) return;
+  agentLoggingInstalled = true;
+  for (const level of ['log', 'warn', 'error']) {
+    const original = console[level].bind(console);
+    console[level] = (...values) => {
+      original(...values);
+      const line = `${new Date().toISOString()} [${level.toUpperCase()}] ${values.map(value => value instanceof Error ? value.stack || value.message : typeof value === 'string' ? value : JSON.stringify(value)).join(' ')}\n`;
+      logWriteQueue = logWriteQueue.then(async () => {
+        await mkdir(dirname(AGENT_LOG_FILE), { recursive: true });
+        const size = await stat(AGENT_LOG_FILE).then(value => value.size).catch(() => 0);
+        if (size + Buffer.byteLength(line) > AGENT_LOG_MAX_BYTES) {
+          await rm(`${AGENT_LOG_FILE}.3`, { force: true });
+          await rename(`${AGENT_LOG_FILE}.2`, `${AGENT_LOG_FILE}.3`).catch(() => undefined);
+          await rename(`${AGENT_LOG_FILE}.1`, `${AGENT_LOG_FILE}.2`).catch(() => undefined);
+          await rename(AGENT_LOG_FILE, `${AGENT_LOG_FILE}.1`).catch(() => undefined);
+        }
+        await appendFile(AGENT_LOG_FILE, line, 'utf8');
+      }).catch(() => undefined);
+    };
+  }
+}
+const allowedOrigins = new Set((process.env.EMBEDKIT_ALLOWED_ORIGINS || 'http://localhost:3000,http://127.0.0.1:3000,https://sunsgn.github.io')
+  .split(',').map(value => value.trim()).filter(Boolean));
+const allowedTargets = new Set((process.env.EMBEDKIT_ALLOWED_TARGETS || [
+  'http://localhost:11434',
+  'http://127.0.0.1:11434',
+  'http://localhost:1234',
+  'http://127.0.0.1:1234',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:3123',
+  'http://127.0.0.1:3123',
+  'http://localhost:1337',
+  'http://127.0.0.1:1337',
+  'http://localhost:4891',
+  'http://127.0.0.1:4891',
+  'http://localhost:5000',
+  'http://127.0.0.1:5000',
+  'http://localhost:5001',
+  'http://127.0.0.1:5001',
+  'http://localhost:7860',
+  'http://127.0.0.1:7860',
+  'http://localhost:8000',
+  'http://127.0.0.1:8000',
+  'http://localhost:8080',
+  'http://127.0.0.1:8080',
+].join(',')).split(',').map(value => value.trim()).filter(Boolean));
+
+export function isAllowedOrigin(origin) {
+  return !origin || allowedOrigins.has(origin);
+}
+
+function setCORS(req, res) {
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    if (req.headers['access-control-request-private-network'] === 'true') {
+      res.setHeader('Access-Control-Allow-Private-Network', 'true');
+    }
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-EmbedKit-Protocol');
+  res.setHeader('Access-Control-Expose-Headers', 'X-EmbedKit-Protocol');
+  res.setHeader('X-EmbedKit-Protocol', String(AGENT_PROTOCOL_VERSION));
 }
 
 function jsonRes(res, status, data) {
-  setCORS(res);
+  if (status >= 400 && typeof data?.error === 'string') {
+    const message = data.error;
+    data = { ...data, code: status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : status === 405 ? 'METHOD_NOT_ALLOWED' : status >= 500 ? 'AGENT_INTERNAL_ERROR' : 'INVALID_REQUEST', message, details: data.details ?? null, recoverable: status < 500 };
+  }
   res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(data));
+}
+
+export function validateProxyTarget(targetUrl) {
+  let target;
+  try {
+    target = new URL(targetUrl);
+  } catch {
+    throw new Error('Invalid proxy target URL');
+  }
+  if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) {
+    throw new Error('Only credential-free HTTP(S) targets are allowed');
+  }
+  if (!allowedTargets.has(target.origin)) {
+    throw new Error(`Proxy target is not allowed: ${target.origin}`);
+  }
+  return target;
+}
+
+function readRequestBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    let tooLarge = false;
+    req.on('data', chunk => {
+      if (tooLarge) return;
+      size += chunk.length;
+      if (size > MAX_REQUEST_BYTES) {
+        tooLarge = true;
+        reject(new Error(`Request body exceeds ${MAX_REQUEST_BYTES} bytes`));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => { if (!tooLarge) resolve(Buffer.concat(chunks)); });
+    req.on('error', reject);
+  });
+}
+
+async function readJSONBody(req) {
+  const body = await readRequestBody(req);
+  if (!body.length) return {};
+  try { return JSON.parse(body.toString('utf8')); }
+  catch { throw new Error('Request body must be valid JSON'); }
+}
+
+const networkSessions = new Map();
+const serialSessions = new Map();
+const buildJobs = new Map();
+let restoringSerialSessions = false;
+
+async function persistSerialSessions() {
+  const sessions = [...serialSessions.values()].filter(session => session.state === 'connected').map(({ path, baudRate, dataBits, stopBits, parity, flowControl, dtr, rts, frameMode, frameGapMs }) => ({ path, baudRate, dataBits, stopBits, parity, flowControl, dtr, rts, frameMode, frameGapMs }));
+  try { await mkdir(dirname(SERIAL_STATE_FILE), { recursive: true }); await writeFile(SERIAL_STATE_FILE, JSON.stringify({ version: 1, sessions }, null, 2), 'utf8'); }
+  catch (error) { console.warn(`Unable to save serial sessions: ${error.message}`); }
+}
+
+async function restoreSerialSessions() {
+  let saved;
+  try { saved = JSON.parse(await readFile(SERIAL_STATE_FILE, 'utf8')); }
+  catch (error) { if (error.code !== 'ENOENT') console.warn(`Unable to read saved serial sessions: ${error.message}`); return; }
+  if (!Array.isArray(saved?.sessions)) return;
+  let failures = 0;
+  restoringSerialSessions = true;
+  for (const options of saved.sessions.slice(0, MAX_SERIAL_SESSIONS)) {
+    let restored = false, lastError;
+    for (let attempt = 1; attempt <= 8 && !restored; attempt += 1) {
+      try { const { session } = await createSerialSession(options); pushSerialEvent(session, 'system', '已自动恢复上次串口会话'); restored = true; }
+      catch (error) { lastError = error; if (attempt < 8) await new Promise(resolve => setTimeout(resolve, 500)); }
+    }
+    if (!restored) { failures += 1; console.warn(`Unable to restore serial session ${options?.path || ''}: ${lastError?.message || 'unknown error'}`); }
+  }
+  restoringSerialSessions = false;
+  if (!failures) await persistSerialSessions();
+}
+
+async function persistNetworkSessions() {
+  const sessions = [...networkSessions.values()].filter(session => session.state !== 'closed').map(({ type, mode, host, port, localPort }) => ({ type, mode, host, port, localPort }));
+  try { await mkdir(dirname(NETWORK_STATE_FILE), { recursive: true }); await writeFile(NETWORK_STATE_FILE, JSON.stringify({ version: 1, sessions }, null, 2), 'utf8'); }
+  catch (error) { console.warn(`Unable to save network sessions: ${error.message}`); }
+}
+
+async function restoreNetworkSessions() {
+  let saved;
+  try { saved = JSON.parse(await readFile(NETWORK_STATE_FILE, 'utf8')); }
+  catch (error) { if (error.code !== 'ENOENT') console.warn(`Unable to read saved network sessions: ${error.message}`); return; }
+  if (!Array.isArray(saved?.sessions)) return;
+  for (const options of saved.sessions.slice(0, MAX_NETWORK_SESSIONS)) {
+    try { const session = createNetworkSession(options.type, options.host, options.port, options.localPort, options.mode); pushNetworkEvent(session, 'system', '已自动恢复上次网络会话'); }
+    catch (error) { console.warn(`Unable to restore network session ${options?.type || ''} ${options?.host || ''}:${options?.port || ''}: ${error.message}`); }
+  }
+  await persistNetworkSessions();
+}
+
+export function validateSerialOptions(options = {}) {
+  const path = String(options.path || '').trim();
+  if (!path || path.length > 260 || /[\r\n\0]/.test(path)) throw new Error('Invalid serial port path');
+  const baudRate = Number(options.baudRate ?? 115200), dataBits = Number(options.dataBits ?? 8), stopBits = Number(options.stopBits ?? 1);
+  const parity = options.parity || 'none', flowControl = options.flowControl || 'none';
+  const frameMode = options.frameMode || 'auto', frameGapMs = Number(options.frameGapMs ?? 30);
+  if (!Number.isInteger(baudRate) || baudRate < 50 || baudRate > 12000000) throw new Error('Invalid serial baud rate');
+  if (![5, 6, 7, 8].includes(dataBits)) throw new Error('Serial data bits must be 5, 6, 7 or 8');
+  if (![1, 1.5, 2].includes(stopBits)) throw new Error('Serial stop bits must be 1, 1.5 or 2');
+  if (!['none', 'even', 'odd', 'mark', 'space'].includes(parity)) throw new Error('Invalid serial parity');
+  if (!['none', 'hardware'].includes(flowControl)) throw new Error('Invalid serial flow control');
+  if (!['auto', 'line', 'idle', 'raw'].includes(frameMode)) throw new Error('Invalid serial frame mode');
+  if (!Number.isFinite(frameGapMs) || frameGapMs < 5 || frameGapMs > 2000) throw new Error('Serial frame gap must be between 5 and 2000 ms');
+  return { path, baudRate, dataBits, stopBits, parity, flowControl, dtr: options.dtr !== false, rts: options.rts === true, frameMode, frameGapMs };
+}
+
+function pushSerialEvent(session, direction, bufferOrText) {
+  const buffer = Buffer.isBuffer(bufferOrText) ? bufferOrText : null;
+  session.lastEventId += 1;
+  session.events.push({ id: session.lastEventId, timestamp: new Date().toISOString(), direction, text: buffer ? buffer.toString('utf8') : String(bufferOrText), hex: buffer ? buffer.toString('hex').match(/.{1,2}/g)?.join(' ').toUpperCase() || '' : '', byteLength: buffer?.length || Buffer.byteLength(String(bufferOrText)) });
+  if (session.events.length > MAX_NETWORK_EVENTS) session.events.splice(0, session.events.length - MAX_NETWORK_EVENTS);
+  if (direction === 'tx' && buffer) session.txBytes += buffer.length;
+}
+
+function publicSerialSession(session, after = 0) {
+  const { port: _port, rxBuffer: _rxBuffer, rxTimer: _rxTimer, ...safe } = session;
+  return { ...safe, events: session.events.filter(event => event.id > after) };
+}
+
+function flushSerialReceive(session) {
+  if (!session.rxBuffer.length) return;
+  const frame = session.rxBuffer; session.rxBuffer = Buffer.alloc(0); pushSerialEvent(session, 'rx', frame);
+}
+
+export function receiveSerialData(session, data) {
+  session.rxBytes += data.length;
+  if (session.frameMode === 'raw') { pushSerialEvent(session, 'rx', data); return; }
+  session.rxBuffer = Buffer.concat([session.rxBuffer, data]);
+  if (session.frameMode === 'auto' || session.frameMode === 'line') {
+    for (;;) {
+      const cr = session.rxBuffer.indexOf(13), lf = session.rxBuffer.indexOf(10);
+      const at = cr < 0 ? lf : lf < 0 ? cr : Math.min(cr, lf);
+      if (at < 0) break;
+      const frame = session.rxBuffer.subarray(0, at); let next = at;
+      while (session.rxBuffer[next] === 10 || session.rxBuffer[next] === 13) next += 1;
+      session.rxBuffer = session.rxBuffer.subarray(next);
+      if (frame.length) pushSerialEvent(session, 'rx', frame);
+    }
+  }
+  if (session.rxTimer) { clearTimeout(session.rxTimer); session.rxTimer = null; }
+  if ((session.frameMode === 'auto' || session.frameMode === 'idle') && session.rxBuffer.length) session.rxTimer = setTimeout(() => { session.rxTimer = null; flushSerialReceive(session); }, session.frameGapMs);
+}
+
+async function listSerialPorts() {
+  return (await SerialPort.list()).map(port => ({ path: port.path, manufacturer: port.manufacturer || '', serialNumber: port.serialNumber || '', vendorId: port.vendorId || '', productId: port.productId || '', pnpId: port.pnpId || '', friendlyName: port.friendlyName || port.path }));
+}
+
+async function createSerialSession(input) {
+  const options = validateSerialOptions(input);
+  const available = await listSerialPorts();
+  if (!available.some(port => port.path.toLowerCase() === options.path.toLowerCase())) throw new Error(`Serial port is not available: ${options.path}`);
+  const existing = [...serialSessions.values()].find(session => session.path.toLowerCase() === options.path.toLowerCase() && session.state === 'connected');
+  if (existing) {
+    if (existing.baudRate !== options.baudRate || existing.dataBits !== options.dataBits || existing.stopBits !== options.stopBits || existing.parity !== options.parity || existing.flowControl !== options.flowControl || existing.frameMode !== options.frameMode || existing.frameGapMs !== options.frameGapMs) throw new Error(`${options.path} is already open with different settings`);
+    return { session: existing, reused: true };
+  }
+  if (serialSessions.size >= MAX_SERIAL_SESSIONS) throw new Error(`At most ${MAX_SERIAL_SESSIONS} serial sessions may be open`);
+  const id = randomUUID(), port = new SerialPort({ path: options.path, baudRate: options.baudRate, dataBits: options.dataBits, stopBits: options.stopBits, parity: options.parity, rtscts: options.flowControl === 'hardware', autoOpen: false });
+  const session = { id, ...options, state: 'connecting', events: [], lastEventId: 0, rxBytes: 0, txBytes: 0, openedAt: new Date().toISOString(), port, rxBuffer: Buffer.alloc(0), rxTimer: null };
+  serialSessions.set(id, session); pushSerialEvent(session, 'system', `正在打开 ${options.path} · ${options.baudRate} ${options.dataBits}${options.parity === 'none' ? 'N' : options.parity[0].toUpperCase()}${options.stopBits}`);
+  port.on('data', data => receiveSerialData(session, data));
+  port.on('error', error => { session.state = 'error'; pushSerialEvent(session, 'system', `串口错误：${error.message}`); });
+  port.on('close', error => { if (session.state !== 'closed') { session.state = 'closed'; pushSerialEvent(session, 'system', error ? `串口异常关闭：${error.message}` : '串口已关闭'); } });
+  try {
+    await new Promise((resolve, reject) => port.open(error => error ? reject(error) : resolve()));
+    session.state = 'connected';
+    await new Promise((resolve, reject) => port.set({ dtr: options.dtr, rts: options.rts }, error => error ? reject(error) : resolve()));
+    pushSerialEvent(session, 'system', `${options.path} 已连接`);
+    if (!restoringSerialSessions) await persistSerialSessions();
+    return { session, reused: false };
+  } catch (error) {
+    session.state = 'error'; pushSerialEvent(session, 'system', `打开失败：${error.message}`); serialSessions.delete(id); try { if (port.isOpen) port.close(); } catch { /* already closed */ } throw error;
+  }
+}
+
+async function closeSerialSession(session) {
+  if (!session || session.state === 'closed') return;
+  session.state = 'closed'; if (session.rxTimer) { clearTimeout(session.rxTimer); session.rxTimer = null; } flushSerialReceive(session);
+  if (session.port.isOpen) await new Promise(resolve => session.port.close(() => resolve()));
+  pushSerialEvent(session, 'system', '串口会话已关闭');
+}
+
+export function validateHostAndPort(host, port) {
+  if (typeof host !== 'string' || !host.trim() || host.length > 255 || /[\s/\\]/.test(host)) throw new Error('Invalid target host');
+  const parsedPort = Number(port);
+  if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) throw new Error('Port must be between 1 and 65535');
+  return { host: host.trim(), port: parsedPort };
+}
+
+function pushNetworkEvent(session, direction, bufferOrText) {
+  const buffer = Buffer.isBuffer(bufferOrText) ? bufferOrText : null;
+  session.lastEventId += 1;
+  session.events.push({
+    id: session.lastEventId,
+    timestamp: new Date().toISOString(),
+    direction,
+    text: buffer ? buffer.toString('utf8') : String(bufferOrText),
+    hex: buffer ? buffer.toString('hex').match(/.{1,2}/g)?.join(' ').toUpperCase() || '' : '',
+    byteLength: buffer?.length || Buffer.byteLength(String(bufferOrText)),
+  });
+  if (session.events.length > MAX_NETWORK_EVENTS) session.events.splice(0, session.events.length - MAX_NETWORK_EVENTS);
+  if (direction === 'rx' && buffer) session.rxBytes += buffer.length;
+  if (direction === 'tx' && buffer) session.txBytes += buffer.length;
+}
+
+function publicNetworkSession(session, after = 0) {
+  return {
+    id: session.id,
+    type: session.type,
+    mode: session.mode,
+    host: session.host,
+    port: session.port,
+    localAddress: session.localAddress,
+    state: session.state,
+    rxBytes: session.rxBytes,
+    txBytes: session.txBytes,
+    clientCount: session.clients?.size || 0,
+    events: session.events.filter(event => event.id > after),
+  };
+}
+
+function closeNetworkSession(session, reason = '会话已关闭') {
+  if (!session || session.state === 'closed') return;
+  session.state = 'closed';
+  if (session.type === 'tcp' && session.mode === 'server') { for (const client of session.clients) client.destroy(); try { session.socket.close(); } catch { /* not listening */ } }
+  else if (session.type === 'tcp') session.socket.destroy();
+  else { try { session.socket.close(); } catch { /* already closed */ } }
+  pushNetworkEvent(session, 'system', reason);
+}
+
+function createNetworkSession(type, host, port, localPort, mode = 'client') {
+  if (!['tcp', 'udp'].includes(type)) throw new Error('Only TCP and UDP sessions are supported');
+  if (!['client', 'server'].includes(mode)) throw new Error('Mode must be client or server');
+  if (networkSessions.size >= MAX_NETWORK_SESSIONS) throw new Error(`At most ${MAX_NETWORK_SESSIONS} network sessions may be open`);
+  const target = validateHostAndPort(host, port);
+  const bindPort = type === 'udp' && mode === 'client' ? Number(localPort || 0) : 0;
+  if (!Number.isInteger(bindPort) || bindPort < 0 || bindPort > 65535) throw new Error('Local port must be between 0 and 65535');
+  const id = randomUUID();
+  const session = { id, type, mode, ...target, localPort: bindPort, localAddress: '', state: 'connecting', events: [], lastEventId: 0, rxBytes: 0, txBytes: 0, socket: null, clients: new Set(), lastPeer: null };
+  networkSessions.set(id, session);
+  pushNetworkEvent(session, 'system', mode === 'server' ? `正在监听 ${type.toUpperCase()} ${target.host}:${target.port}` : `正在连接 ${type.toUpperCase()} ${target.host}:${target.port}`);
+
+  if (type === 'tcp' && mode === 'client') {
+    const socket = net.createConnection({ host: target.host, port: target.port });
+    session.socket = socket;
+    socket.setNoDelay(true);
+    socket.on('connect', () => { session.state = 'connected'; session.localAddress = `${socket.localAddress}:${socket.localPort}`; pushNetworkEvent(session, 'system', `已连接 ${target.host}:${target.port}`); });
+    socket.on('data', data => pushNetworkEvent(session, 'rx', data));
+    socket.on('error', error => { session.state = 'error'; pushNetworkEvent(session, 'system', `TCP 错误：${error.message}`); });
+    socket.on('close', () => { if (session.state !== 'closed') { session.state = 'closed'; pushNetworkEvent(session, 'system', 'TCP 连接已断开'); } });
+  } else if (type === 'tcp') {
+    const server = net.createServer(socket => {
+      session.clients.add(socket); const peer = `${socket.remoteAddress}:${socket.remotePort}`;
+      pushNetworkEvent(session, 'system', `客户端已连接 ${peer}`);
+      socket.on('data', data => { pushNetworkEvent(session, 'rx', data); session.events[session.events.length - 1].peer = peer; });
+      socket.on('error', error => pushNetworkEvent(session, 'system', `客户端 ${peer} 错误：${error.message}`));
+      socket.on('close', () => { session.clients.delete(socket); pushNetworkEvent(session, 'system', `客户端已断开 ${peer}`); });
+    });
+    session.socket = server;
+    server.on('error', error => { session.state = 'error'; pushNetworkEvent(session, 'system', `TCP 监听错误：${error.message}`); });
+    server.on('close', () => { if (session.state !== 'closed') session.state = 'closed'; });
+    server.listen(target.port, target.host, () => { const address = server.address(); session.state = 'connected'; session.localAddress = typeof address === 'object' && address ? `${address.address}:${address.port}` : `${target.host}:${target.port}`; pushNetworkEvent(session, 'system', `TCP 服务端正在监听 ${session.localAddress}`); });
+  } else if (mode === 'client') {
+    const socket = dgram.createSocket('udp4');
+    session.socket = socket;
+    socket.on('message', (data, info) => { pushNetworkEvent(session, 'rx', data); session.events[session.events.length - 1].peer = `${info.address}:${info.port}`; });
+    socket.on('error', error => { session.state = 'error'; pushNetworkEvent(session, 'system', `UDP 错误：${error.message}`); });
+    socket.on('close', () => { session.state = 'closed'; });
+    socket.bind(bindPort, '0.0.0.0', () => {
+      socket.connect(target.port, target.host, () => { const address = socket.address(); session.state = 'connected'; session.localAddress = `${address.address}:${address.port}`; pushNetworkEvent(session, 'system', `UDP 已就绪，目标 ${target.host}:${target.port}`); });
+    });
+  } else {
+    const socket = dgram.createSocket('udp4');
+    session.socket = socket;
+    socket.on('message', (data, info) => { session.lastPeer = info; pushNetworkEvent(session, 'rx', data); session.events[session.events.length - 1].peer = `${info.address}:${info.port}`; });
+    socket.on('error', error => { session.state = 'error'; pushNetworkEvent(session, 'system', `UDP 监听错误：${error.message}`); });
+    socket.on('close', () => { session.state = 'closed'; });
+    socket.bind(target.port, target.host, () => { const address = socket.address(); session.state = 'connected'; session.localAddress = `${address.address}:${address.port}`; pushNetworkEvent(session, 'system', `UDP 服务端正在监听 ${session.localAddress}`); });
+  }
+  return session;
+}
+
+export function decodeNetworkPayload(data, encoding) {
+  if (typeof data !== 'string') throw new Error('Data must be a string');
+  if (encoding === 'text') return Buffer.from(data, 'utf8');
+  if (encoding === 'hex') {
+    const normalized = data.replace(/0x/gi, '').replace(/[\s,;:_-]+/g, '');
+    if (!normalized || !/^[0-9a-f]+$/i.test(normalized) || normalized.length % 2) throw new Error('Invalid HEX payload');
+    return Buffer.from(normalized, 'hex');
+  }
+  throw new Error('Encoding must be text or hex');
+}
+
+function validateProjectPath(value) {
+  const input = String(value || '').trim();
+  if (!input || !isAbsolute(input) || /[\0\r\n]/.test(input)) throw new Error('Project path must be an absolute local directory');
+  return resolve(input);
+}
+
+function resolveInsideProject(rootPath, value, fallback) {
+  const target = resolve(rootPath, String(value || fallback));
+  const relation = relative(rootPath, target);
+  if (relation.startsWith('..') || isAbsolute(relation)) throw new Error('Build directory must stay inside the project directory');
+  return target;
+}
+
+export function createBuildCommand(options = {}) {
+  const rootPath = validateProjectPath(options.rootPath), system = String(options.system || '').toLowerCase(), action = options.action || 'build', configuration = options.configuration === 'Release' ? 'Release' : 'Debug';
+  if (!['cmake', 'make', 'ninja'].includes(system)) throw new Error('Build system must be cmake, make or ninja');
+  if (!['configure', 'build', 'clean', 'rebuild'].includes(action)) throw new Error('Build action is not supported');
+  const buildPath = resolveInsideProject(rootPath, options.buildDir, 'build'), requestedTool = String(options.toolPath || '').trim();
+  if (requestedTool && /[\0\r\n]/.test(requestedTool)) throw new Error('Invalid tool path');
+  if (system === 'cmake') {
+    const executable = requestedTool || 'cmake';
+    if (action === 'configure') return { rootPath, buildPath, executable, args: ['-S', rootPath, '-B', buildPath, `-DCMAKE_BUILD_TYPE=${configuration}`], system, action, configuration };
+    const args = ['--build', buildPath, '--config', configuration];
+    if (action === 'clean') args.push('--target', 'clean');
+    if (action === 'rebuild') args.push('--clean-first');
+    return { rootPath, buildPath, executable, args, system, action, configuration };
+  }
+  if (action === 'configure') throw new Error(`${system} does not require a configure action`);
+  const executable = requestedTool || (system === 'ninja' ? 'ninja' : process.platform === 'win32' ? 'mingw32-make' : 'make'), args = [];
+  if (system === 'ninja') args.push('-C', buildPath);
+  if (action === 'clean') args.push('clean');
+  if (action === 'rebuild') args.push('clean', 'all');
+  return { rootPath, buildPath, executable, args, system, action, configuration };
+}
+
+function pushBuildEvent(job, stream, text) {
+  for (const line of String(text).replace(/\r/g, '').split('\n').filter(Boolean)) {
+    job.lastEventId += 1;
+    const match = line.match(/^(.*?):(\d+)(?::(\d+))?:\s*(fatal error|error|warning|note):\s*(.*)$/i);
+    job.events.push({ id: job.lastEventId, timestamp: new Date().toISOString(), stream, text: line, diagnostic: match ? { file: match[1], line: Number(match[2]), column: Number(match[3] || 1), severity: /error/i.test(match[4]) ? 'error' : /warning/i.test(match[4]) ? 'warning' : 'note', message: match[5] } : undefined });
+  }
+  if (job.events.length > MAX_BUILD_EVENTS) job.events.splice(0, job.events.length - MAX_BUILD_EVENTS);
+}
+
+function publicBuildJob(job, after = 0) {
+  const { child: _child, ...safe } = job;
+  return { ...safe, events: job.events.filter(event => event.id > after) };
+}
+
+async function collectBuildArtifacts(rootPath, maxFiles = 2000) {
+  const artifacts = [], queue = [{ path: rootPath, depth: 0 }]; let visited = 0;
+  while (queue.length && visited < maxFiles) {
+    const current = queue.shift(); let entries;
+    try { entries = await readdir(current.path, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      if (visited++ >= maxFiles) break;
+      const path = join(current.path, entry.name);
+      if (entry.isDirectory() && current.depth < 4 && !['.git', 'node_modules'].includes(entry.name)) queue.push({ path, depth: current.depth + 1 });
+      else if (entry.isFile() && /\.(elf|map|bin|hex|uf2)$/i.test(entry.name)) { const info = await stat(path).catch(() => null); if (info) artifacts.push({ name: entry.name, path, type: entry.name.split('.').pop().toLowerCase(), size: info.size, modifiedAt: info.mtime.toISOString() }); }
+    }
+  }
+  return artifacts.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
+}
+
+async function detectBuildEnvironment(rootPathValue) {
+  const rootPath = validateProjectPath(rootPathValue), info = await stat(rootPath);
+  if (!info.isDirectory()) throw new Error('Project path is not a directory');
+  const names = await readdir(rootPath), lower = new Set(names.map(name => name.toLowerCase()));
+  const system = lower.has('cmakelists.txt') ? 'cmake' : lower.has('build.ninja') ? 'ninja' : lower.has('makefile') ? 'make' : '';
+  const tools = await Promise.all(['cmake', 'ninja', process.platform === 'win32' ? 'mingw32-make' : 'make'].map(executable => new Promise(resolveTool => {
+    const child = spawn(executable, ['--version'], { windowsHide: true, shell: false }); let output = '', settled = false;
+    const finish = available => { if (settled) return; settled = true; resolveTool({ executable, available, version: output.replace(/\r?\n/g, ' ').trim().slice(0, 180) }); };
+    child.stdout.on('data', data => { output += data.toString(); }); child.stderr.on('data', data => { output += data.toString(); }); child.on('error', () => finish(false)); child.on('close', code => finish(code === 0));
+  })));
+  return { rootPath, system, buildDir: system === 'ninja' && lower.has('build.ninja') ? '.' : 'build', projectFiles: names.filter(name => /^(CMakeLists\.txt|Makefile|build\.ninja|platformio\.ini|.*\.(uvprojx|ewp))$/i.test(name)), tools };
+}
+
+async function startBuildJob(options) {
+  if ([...buildJobs.values()].filter(job => job.state === 'running').length >= MAX_BUILD_JOBS) throw new Error(`At most ${MAX_BUILD_JOBS} build jobs may run at once`);
+  const command = createBuildCommand(options); await stat(command.rootPath).then(info => { if (!info.isDirectory()) throw new Error('Project path is not a directory'); });
+  const job = { id: randomUUID(), ...command, state: 'running', exitCode: null, signal: null, startedAt: new Date().toISOString(), finishedAt: '', artifacts: [], events: [], lastEventId: 0, child: null };
+  buildJobs.set(job.id, job); pushBuildEvent(job, 'system', `执行：${command.executable} ${command.args.join(' ')}`);
+  const child = spawn(command.executable, command.args, { cwd: command.rootPath, windowsHide: true, shell: false, env: { ...process.env, CLICOLOR: '0', NO_COLOR: '1' } }); job.child = child;
+  child.stdout.on('data', data => pushBuildEvent(job, 'stdout', data)); child.stderr.on('data', data => pushBuildEvent(job, 'stderr', data));
+  child.on('error', error => { pushBuildEvent(job, 'stderr', error.message); job.state = 'failed'; job.finishedAt = new Date().toISOString(); });
+  child.on('close', async (code, signal) => { job.exitCode = code; job.signal = signal; const finalState = job.state === 'stopping' ? 'cancelled' : code === 0 ? 'passed' : 'failed'; if (finalState === 'passed' && job.action !== 'clean') job.artifacts = await collectBuildArtifacts(job.buildPath); job.state = finalState; job.finishedAt = new Date().toISOString(); pushBuildEvent(job, 'system', job.state === 'passed' ? `构建成功，发现 ${job.artifacts.length} 个固件产物` : job.state === 'cancelled' ? '构建已停止' : `构建失败，退出码 ${code}`); job.child = null; });
+  return job;
 }
 
 function fetchJSON(urlStr) {
@@ -33,17 +500,30 @@ function fetchJSON(urlStr) {
   });
 }
 
-function proxyRequest(req, res, targetUrl) {
-  setCORS(res);
-  if (req.method === 'OPTIONS') { res.end(); return; }
-
-  const target = new URL(targetUrl);
+async function proxyRequest(req, res, targetUrl) {
+  let target;
+  try {
+    target = validateProxyTarget(targetUrl);
+  } catch (error) {
+    jsonRes(res, 403, { error: error.message });
+    return;
+  }
   const isHttps = target.protocol === 'https:';
   const client = isHttps ? https : http;
 
-  const headers = { ...req.headers };
-  delete headers.host;
-  headers.host = `${target.hostname}:${target.port || (isHttps ? 443 : 80)}`;
+  let body;
+  try {
+    body = await readRequestBody(req);
+  } catch (error) {
+    if (!res.headersSent) jsonRes(res, 413, { error: error.message });
+    return;
+  }
+
+  const headers = {};
+  for (const name of ['content-type', 'accept', 'authorization']) {
+    if (req.headers[name]) headers[name] = req.headers[name];
+  }
+  if (body.length) headers['content-length'] = String(body.length);
 
   const proxyReq = client.request({
     hostname: target.hostname,
@@ -52,18 +532,19 @@ function proxyRequest(req, res, targetUrl) {
     method: req.method,
     headers,
   }, (proxyRes) => {
-    const contentType = proxyRes.headers['content-type'] || '';
-    res.writeHead(proxyRes.statusCode, {
-      ...proxyRes.headers,
-      'Access-Control-Allow-Origin': ALLOWED_ORIGINS,
-    });
+    const responseHeaders = { ...proxyRes.headers };
+    for (const name of Object.keys(responseHeaders)) {
+      if (name.toLowerCase().startsWith('access-control-')) delete responseHeaders[name];
+    }
+    res.writeHead(proxyRes.statusCode || 502, responseHeaders);
     proxyRes.pipe(res);
   });
 
   proxyReq.on('error', (err) => {
-    jsonRes(res, 502, { error: err.message });
+    if (res.headersSent) res.destroy(err);
+    else jsonRes(res, 502, { error: err.message });
   });
-  req.pipe(proxyReq);
+  proxyReq.end(body);
 }
 
 function fetchHTML(urlStr, timeoutMs = 8000) {
@@ -422,6 +903,18 @@ async function detectOpencodeServer(baseURL) {
 
 const withTimeout = (promise, ms) => Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error(`Timeout after ${ms}ms`)), ms))]);
 
+async function detectOpenAICompatible(name, baseURL) {
+  try {
+    const data = await withTimeout(fetchJSON(`${baseURL}/v1/models`), 2500);
+    if (!data || !Array.isArray(data.data)) return null;
+    const models = data.data.filter(model => model && model.id).map(model => ({ id: model.id, name: model.name || model.id }));
+    if (!models.length) return null;
+    return { name, url: baseURL, chatUrl: `${baseURL}/v1/chat/completions`, models };
+  } catch (e) {
+    return null;
+  }
+}
+
 async function detectServers() {
   const servers = [];
   
@@ -458,6 +951,19 @@ async function detectServers() {
     }
   } catch (e) { }
 
+  const compatibleServers = [
+    ['Jan', 'http://localhost:1337'],
+    ['GPT4All', 'http://localhost:4891'],
+    ['text-generation-webui', 'http://localhost:5000'],
+    ['KoboldCpp', 'http://localhost:5001'],
+    ['vLLM', 'http://localhost:8000'],
+    ['LocalAI / llama.cpp', 'http://localhost:8080'],
+  ];
+  for (const [name, baseURL] of compatibleServers) {
+    const detected = await detectOpenAICompatible(name, baseURL);
+    if (detected && !servers.some(server => server.url === detected.url)) servers.push(detected);
+  }
+
   for (const port of commonPorts) {
     if (port === 11434 || port === 1234) continue;
     const baseURL = `http://localhost:${port}`;
@@ -477,12 +983,168 @@ const server = http.createServer(async (req, res) => {
   const requestUrl = new URL(req.url, `http://${req.headers.host}`);
   const pathname = requestUrl.pathname;
 
-  if (req.method === 'OPTIONS') { setCORS(res); res.end(); return; }
+  setCORS(req, res);
+  if (!isAllowedOrigin(req.headers.origin)) {
+    jsonRes(res, 403, { error: 'Origin is not allowed' });
+    return;
+  }
+  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+  if (!['GET', 'POST', 'DELETE'].includes(req.method || '')) {
+    jsonRes(res, 405, { error: 'Only GET, POST and DELETE are supported' });
+    return;
+  }
 
-  if (pathname === '/api/chip-details') {
-    const chipName = requestUrl.searchParams.get('chip');
+  if (pathname === '/api/agent/status' && req.method === 'GET') {
+    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: ['serial', 'tcp-client', 'tcp-server', 'udp-client', 'udp-server', 'session-restore', 'network-session-restore', 'structured-errors', 'project-build'] });
+    return;
+  }
+
+  if (pathname === '/api/build/detect' && req.method === 'POST') {
+    try { const body = await readJSONBody(req); jsonRes(res, 200, await detectBuildEnvironment(body.rootPath)); }
+    catch (error) { jsonRes(res, 400, { error: error.message }); }
+    return;
+  }
+
+  if (pathname === '/api/build/jobs') {
+    if (req.method === 'GET') { jsonRes(res, 200, { jobs: [...buildJobs.values()].map(job => publicBuildJob(job)) }); return; }
+    if (req.method === 'POST') {
+      try { jsonRes(res, 201, publicBuildJob(await startBuildJob(await readJSONBody(req)))); }
+      catch (error) { jsonRes(res, 400, { error: error.message }); }
+      return;
+    }
+  }
+
+  const buildMatch = pathname.match(/^\/api\/build\/jobs\/([0-9a-f-]+)$/i);
+  if (buildMatch) {
+    const job = buildJobs.get(buildMatch[1]);
+    if (!job) { jsonRes(res, 404, { error: 'Build job not found' }); return; }
+    if (req.method === 'GET') { const after = Math.max(0, Number(requestUrl.searchParams.get('after') || 0)); jsonRes(res, 200, publicBuildJob(job, Number.isFinite(after) ? after : 0)); return; }
+    if (req.method === 'DELETE') { if (job.child && job.state === 'running') { job.state = 'stopping'; job.child.kill(); } jsonRes(res, 200, publicBuildJob(job)); return; }
+    jsonRes(res, 405, { error: 'Unsupported operation for build job' });
+    return;
+  }
+
+  if (pathname === '/api/serial/status' && req.method === 'GET') {
+    jsonRes(res, 200, { available: true, activeSessions: serialSessions.size, maxSessions: MAX_SERIAL_SESSIONS });
+    return;
+  }
+
+  if (pathname === '/api/serial/ports' && req.method === 'GET') {
+    try { jsonRes(res, 200, { ports: await listSerialPorts() }); }
+    catch (error) { jsonRes(res, 500, { error: error.message }); }
+    return;
+  }
+
+  if (pathname === '/api/serial/sessions') {
+    if (req.method === 'GET') { jsonRes(res, 200, { sessions: [...serialSessions.values()].map(session => publicSerialSession(session)) }); return; }
+    if (req.method === 'POST') {
+      try { const body = await readJSONBody(req), { session, reused } = await createSerialSession(body); jsonRes(res, reused ? 200 : 201, { ...publicSerialSession(session), reused }); }
+      catch (error) { jsonRes(res, 400, { error: error.message }); }
+      return;
+    }
+  }
+
+  const serialMatch = pathname.match(/^\/api\/serial\/sessions\/([0-9a-f-]+)(?:\/(send|signals|config))?$/i);
+  if (serialMatch) {
+    const session = serialSessions.get(serialMatch[1]);
+    if (!session) { jsonRes(res, 404, { error: 'Serial session not found' }); return; }
+    if (serialMatch[2] === 'send' && req.method === 'POST') {
+      try { if (session.state !== 'connected' || !session.port.isOpen) throw new Error('Serial session is not connected'); const body = await readJSONBody(req), payload = decodeNetworkPayload(body.data, body.encoding); await new Promise((resolve, reject) => session.port.write(payload, error => error ? reject(error) : session.port.drain(drainError => drainError ? reject(drainError) : resolve()))); pushSerialEvent(session, 'tx', payload); jsonRes(res, 200, { sent: payload.length }); }
+      catch (error) { jsonRes(res, 400, { error: error.message }); }
+      return;
+    }
+    if (serialMatch[2] === 'signals' && req.method === 'POST') {
+      try { const body = await readJSONBody(req); if (typeof body.dtr === 'boolean') session.dtr = body.dtr; if (typeof body.rts === 'boolean') session.rts = body.rts; await new Promise((resolve, reject) => session.port.set({ dtr: session.dtr, rts: session.rts }, error => error ? reject(error) : resolve())); pushSerialEvent(session, 'system', `控制信号 DTR=${session.dtr ? 'ON' : 'OFF'} RTS=${session.rts ? 'ON' : 'OFF'}`); await persistSerialSessions(); jsonRes(res, 200, { dtr: session.dtr, rts: session.rts }); }
+      catch (error) { jsonRes(res, 400, { error: error.message }); }
+      return;
+    }
+    if (serialMatch[2] === 'config' && req.method === 'POST') {
+      try {
+        if (session.state !== 'connected' || !session.port.isOpen) throw new Error('Serial session is not connected');
+        const body = await readJSONBody(req), baudRate = Number(body.baudRate);
+        if (!Number.isInteger(baudRate) || baudRate < 50 || baudRate > 12000000) throw new Error('Invalid serial baud rate');
+        await new Promise((resolve, reject) => session.port.update({ baudRate }, error => error ? reject(error) : resolve()));
+        session.baudRate = baudRate;
+        pushSerialEvent(session, 'system', `波特率已切换为 ${baudRate}`);
+        await persistSerialSessions();
+        jsonRes(res, 200, { baudRate });
+      } catch (error) { jsonRes(res, 400, { error: error.message }); }
+      return;
+    }
+    if (!serialMatch[2] && req.method === 'GET') { const after = Math.max(0, Number(requestUrl.searchParams.get('after') || 0)); jsonRes(res, 200, publicSerialSession(session, Number.isFinite(after) ? after : 0)); return; }
+    if (!serialMatch[2] && req.method === 'DELETE') { await closeSerialSession(session); serialSessions.delete(session.id); await persistSerialSessions(); jsonRes(res, 200, { closed: true }); return; }
+    jsonRes(res, 405, { error: 'Unsupported operation for serial session' });
+    return;
+  }
+
+  if (pathname === '/api/network/status' && req.method === 'GET') {
+    jsonRes(res, 200, { available: true, protocols: ['tcp', 'udp'], modes: ['client', 'server'], activeSessions: networkSessions.size, maxSessions: MAX_NETWORK_SESSIONS });
+    return;
+  }
+
+  if (pathname === '/api/network/sessions' && req.method === 'GET') {
+    jsonRes(res, 200, { sessions: [...networkSessions.values()].map(session => publicNetworkSession(session)) });
+    return;
+  }
+
+  if (pathname === '/api/network/sessions' && req.method === 'POST') {
+    try {
+      const body = await readJSONBody(req);
+      const session = createNetworkSession(body.type, body.host, body.port, body.localPort, body.mode);
+      await persistNetworkSessions();
+      jsonRes(res, 201, publicNetworkSession(session));
+    } catch (error) {
+      jsonRes(res, 400, { error: error.message });
+    }
+    return;
+  }
+
+  const networkMatch = pathname.match(/^\/api\/network\/sessions\/([0-9a-f-]+)(?:\/(send))?$/i);
+  if (networkMatch) {
+    const session = networkSessions.get(networkMatch[1]);
+    if (!session) { jsonRes(res, 404, { error: 'Network session not found' }); return; }
+    if (networkMatch[2] === 'send' && req.method === 'POST') {
+      try {
+        if (session.state !== 'connected') throw new Error('Network session is not connected');
+        const body = await readJSONBody(req);
+        const payload = decodeNetworkPayload(body.data, body.encoding);
+        if (session.type === 'tcp' && session.mode === 'client') session.socket.write(payload);
+        else if (session.type === 'tcp') {
+          if (!session.clients.size) throw new Error('No TCP client is connected');
+          for (const client of session.clients) client.write(payload);
+        } else if (session.mode === 'client') session.socket.send(payload);
+        else {
+          if (!session.lastPeer) throw new Error('No UDP peer has sent data yet');
+          session.socket.send(payload, session.lastPeer.port, session.lastPeer.address);
+        }
+        pushNetworkEvent(session, 'tx', payload);
+        if (session.mode === 'server' && session.type === 'udp' && session.lastPeer) session.events[session.events.length - 1].peer = `${session.lastPeer.address}:${session.lastPeer.port}`;
+        jsonRes(res, 200, { sent: payload.length });
+      } catch (error) {
+        jsonRes(res, 400, { error: error.message });
+      }
+      return;
+    }
+    if (!networkMatch[2] && req.method === 'GET') {
+      const after = Math.max(0, Number(requestUrl.searchParams.get('after') || 0));
+      jsonRes(res, 200, publicNetworkSession(session, Number.isFinite(after) ? after : 0));
+      return;
+    }
+    if (!networkMatch[2] && req.method === 'DELETE') {
+      closeNetworkSession(session);
+      networkSessions.delete(session.id);
+      await persistNetworkSessions();
+      jsonRes(res, 200, { closed: true });
+      return;
+    }
+    jsonRes(res, 405, { error: 'Unsupported operation for network session' });
+    return;
+  }
+
+  if (pathname === '/api/chip-details' || pathname === '/api/component-details') {
+    const chipName = requestUrl.searchParams.get('chip') || requestUrl.searchParams.get('part');
     if (!chipName) {
-      jsonRes(res, 400, { error: 'Missing "chip" parameter' });
+      jsonRes(res, 400, { error: 'Missing "chip" or "part" parameter' });
       return;
     }
     const details = await getChipDetails(chipName);
@@ -511,38 +1173,50 @@ const server = http.createServer(async (req, res) => {
   if (pathname.startsWith('/proxy/')) {
     const targetUrl = pathname.slice(7);
     if (targetUrl) {
-      proxyRequest(req, res, targetUrl);
+      await proxyRequest(req, res, targetUrl);
       return;
     }
   }
 
   const targetUrl = requestUrl.searchParams.get('target');
   if (targetUrl) {
-    proxyRequest(req, res, targetUrl);
+    await proxyRequest(req, res, targetUrl);
     return;
   }
 
-  jsonRes(res, 400, { error: 'Unknown path. Use /api/chip-details?chip=<name>, /api/servers, /api/models, or /proxy/<url>' });
+  jsonRes(res, 404, { error: 'Unknown path. Use /api/network/*, /api/chip-details, /api/servers, /api/models, or /proxy/<url>' });
 });
 
-server.listen(PORT, async () => {
-  console.log(`\n✅ EmbedKit CORS Proxy running on http://localhost:${PORT}`);
-  const servers = await detectServers();
-  if (servers.length > 0) {
-    console.log(`\n🔍 Detected local AI servers:`);
-    for (const s of servers) {
-      console.log(`   ${s.name} at ${s.url} — ${s.models.length} model(s)`);
-      const shown = s.models.slice(0, 5);
-      for (const m of shown) {
-        console.log(`     • ${m.name}`);
+export function startServer({ detectAi = true, restoreSerial = true, restoreNetwork = restoreSerial, host = HOST, port = PORT } = {}) {
+  installAgentLogging();
+  return server.listen(port, host, async () => {
+    const address = server.address();
+    const listeningHost = typeof address === 'object' && address ? address.address : host;
+    const listeningPort = typeof address === 'object' && address ? address.port : port;
+    console.log(`\n✅ EmbedKit local proxy running on http://${listeningHost}:${listeningPort}`);
+    if (restoreSerial) await restoreSerialSessions();
+    if (restoreNetwork) await restoreNetworkSessions();
+    if (!detectAi) return;
+    const servers = await detectServers();
+    if (servers.length > 0) {
+      console.log(`\n🔍 Detected local AI servers:`);
+      for (const s of servers) {
+        console.log(`   ${s.name} at ${s.url} — ${s.models.length} model(s)`);
+        const shown = s.models.slice(0, 5);
+        for (const m of shown) {
+          console.log(`     • ${m.name}`);
+        }
+        if (s.models.length > 5) {
+          console.log(`     ... and ${s.models.length - 5} more`);
+        }
       }
-      if (s.models.length > 5) {
-        console.log(`     ... and ${s.models.length - 5} more`);
-      }
+    } else {
+      console.log(`\n⚠️  No local AI servers detected. Start Ollama or LM Studio.`);
     }
-  } else {
-    console.log(`\n⚠️  No local AI servers detected. Start Ollama or LM Studio.`);
-  }
-  console.log(`\n在 EmbedKit 中设置端点为: http://localhost:${PORT}/proxy/http://localhost:11434/v1/chat/completions`);
-  console.log(`\n按 Ctrl+C 停止代理\n`);
-});
+    console.log(`\n在 EmbedKit 中设置端点为: http://${listeningHost}:${listeningPort}/proxy/http://localhost:11434/v1/chat/completions`);
+    console.log(`\n按 Ctrl+C 停止代理\n`);
+  });
+}
+
+const isMainModule = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMainModule) startServer();

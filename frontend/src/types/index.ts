@@ -13,11 +13,27 @@ export interface Chip {
   reference?: string;
 }
 
+export interface ElectronicComponent {
+  id: string;
+  name: string;
+  manufacturer: string;
+  category: string;
+  subcategory: string;
+  description: string;
+  package: string;
+  parameters: Record<string, string>;
+  tags: string[];
+  datasheetUrl?: string;
+  reference?: string;
+}
+
 export interface FileNode {
   name: string;
   path: string;
   content: string;
   language: 'c' | 'cpp' | 'h' | 'makefile' | 'toml' | 'text';
+  size?: number;
+  lastModified?: number;
 }
 
 export interface Project {

@@ -14,15 +14,114 @@
     -moz-osx-font-smoothing: grayscale;
     background-color: #0d1117;
     color: #e6edf3;
+    color-scheme: dark;
   }
 
   #root {
     height: 100vh;
     overflow: hidden;
   }
+
+  ::selection {
+    background: rgb(59 130 246 / 0.35);
+    color: white;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease, opacity 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+  }
+
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid rgb(59 130 246 / 0.55);
+    outline-offset: 2px;
+  }
+}
+
+/* 快捷指令使用终端右侧独立区域；隐藏旧的底部临时容器。 */
+.serial-page div[class*="max-h-24"][class*="flex-wrap"][class*="scrollbar-thin"],
+.serial-page div[class*="mb-2"][class*="flex-wrap"][class*="bg-blue-500/5"] {
+  display: none;
 }
 
 @layer components {
+  .field {
+    margin-top: 0.25rem;
+    width: 100%;
+    border: 1px solid #30363d;
+    border-radius: 0.5rem;
+    background: #0d1117;
+    padding: 0.5rem 0.75rem;
+    color: white;
+  }
+
+  .field:disabled {
+    opacity: 0.5;
+  }
+
+  .build-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    border: 1px solid #30363d;
+    border-radius: 0.375rem;
+    padding: 0.375rem 0.625rem;
+    color: #9ca3af;
+    font-size: 0.625rem;
+  }
+
+  .build-button:hover:not(:disabled) {
+    border-color: rgb(59 130 246 / 0.5);
+    color: #bfdbfe;
+  }
+
+  .build-button:disabled {
+    opacity: 0.35;
+  }
+
+  .serial-settings .field {
+    margin-top: 0.25rem;
+    width: 100%;
+    border: 1px solid #30363d;
+    border-radius: 0.25rem;
+    background: #0d1117;
+    padding: 0.375rem 0.5rem;
+    color: white;
+  }
+
+  .serial-settings .field:disabled {
+    opacity: 0.4;
+  }
+
+  .serial-page input[type='checkbox'] {
+    width: 0.8rem;
+    height: 0.8rem;
+    accent-color: #3b82f6;
+    vertical-align: -0.1rem;
+  }
+
+  .serial-page button,
+  .serial-page select,
+  .serial-page input {
+    transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease, opacity 120ms ease;
+  }
+
+  .serial-page button:focus-visible,
+  .serial-page select:focus-visible,
+  .serial-page input:focus-visible {
+    outline: 2px solid rgb(59 130 246 / 0.55);
+    outline-offset: 2px;
+  }
+
+  .serial-terminal-row:hover {
+    background: rgb(255 255 255 / 0.025);
+  }
+
   .scrollbar-thin {
     scrollbar-width: thin;
     scrollbar-color: #30363d transparent;
@@ -45,4 +144,14 @@
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
     background-color: #484f58;
   }
+}
+.automation-page > div > .grid > aside:last-child {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.automation-page > div > .grid > aside:last-child > section:last-child {
+  min-height: 12rem;
+  flex: none;
 }

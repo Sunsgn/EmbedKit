@@ -5,7 +5,10 @@
   "main": "proxy.js",
   "type": "module",
   "scripts": {
-    "start": "node proxy.js"
+    "start": "node proxy.js",
+    "test": "node --test"
   },
-  "dependencies": {}
+  "dependencies": {
+    "serialport": "^13.0.0"
+  }
 }
