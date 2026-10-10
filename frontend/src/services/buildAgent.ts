@@ -6,7 +6,7 @@ export type BuildAction = 'configure' | 'build' | 'clean' | 'rebuild';
 export interface BuildDiagnostic { file: string; line: number; column: number; severity: 'error' | 'warning' | 'note'; message: string }
 export interface BuildEvent { id: number; timestamp: string; stream: 'stdout' | 'stderr' | 'system'; text: string; diagnostic?: BuildDiagnostic }
 export interface BuildArtifact { name: string; path: string; type: string; size: number; modifiedAt: string }
-export interface BuildJob { id: string; state: 'running' | 'stopping' | 'passed' | 'failed' | 'cancelled'; exitCode: number | null; startedAt: string; finishedAt: string; artifacts?: BuildArtifact[]; events: BuildEvent[] }
+export interface BuildJob { id: string; state: 'running' | 'stopping' | 'passed' | 'failed' | 'cancelled'; exitCode: number | null; startedAt: string; finishedAt: string; artifacts?: BuildArtifact[]; events: BuildEvent[]; system?: BuildSystem; action?: BuildAction; configuration?: 'Debug' | 'Release'; executable?: string; rootPath?: string; buildPath?: string }
 export interface BuildDetection { rootPath: string; system: BuildSystem | ''; buildDir: string; projectFiles: string[]; tools: Array<{ executable: string; available: boolean; version: string }> }
 export interface BuildJobOptions { rootPath: string; system: BuildSystem; buildDir: string; configuration: 'Debug' | 'Release'; toolPath: string; action: BuildAction }
 

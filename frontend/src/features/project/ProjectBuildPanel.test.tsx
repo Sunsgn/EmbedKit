@@ -44,6 +44,7 @@ describe('ProjectBuildPanel capability-gated workflow', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '构建' }));
     await waitFor(() => expect(buildAgent.createBuildJob).toHaveBeenCalledWith(expect.objectContaining({ rootPath: 'D:\\firmware\\demo', system: 'cmake', buildDir: 'out', toolPath: 'cmake', action: 'build' })));
+    expect(await screen.findByRole('button', { name: '导出证据' })).toBeEnabled();
   });
 
   it('uses the system directory picker and immediately detects the selected project', async () => {
