@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { analyzeElf, lookupElfAddress, parseElfAddress } from './elf.js';
+import { deflateSync } from 'node:zlib';
+import { analyzeElf, decompressDebugSection, lookupElfAddress, parseElfAddress } from './elf.js';
 
 function fixtureElf32() {
   const bytes = new Uint8Array(0x400), view = new DataView(bytes.buffer), strings = new TextEncoder().encode('\0.shstrtab\0.text\0.symtab\0.debug_line\0.strtab\0'), symbolNames = new TextEncoder().encode('\0main\0');
@@ -79,4 +80,14 @@ test('supports 64-bit big-endian headers and degrades unknown architectures expl
   assert.equal(result.entry, '0x1234567890');
   assert.equal(result.hasSymbols, false);
   assert.ok(result.warnings.some(item => /符号表/.test(item)));
+});
+
+test('decompresses GNU and ELF compressed debug sections with declared-size checks', () => {
+  const original = new TextEncoder().encode('bounded dwarf line data'), compressed = deflateSync(original);
+  const gnu = new Uint8Array(12 + compressed.length), gnuView = new DataView(gnu.buffer); gnu.set(new TextEncoder().encode('ZLIB')); gnuView.setBigUint64(4, BigInt(original.length), false); gnu.set(compressed, 12);
+  assert.deepEqual(decompressDebugSection(gnu, { name: '.zdebug_line', flags: '0x0' }, 32, true), original);
+  const elf = new Uint8Array(12 + compressed.length), elfView = new DataView(elf.buffer); elfView.setUint32(0, 1, true); elfView.setUint32(4, original.length, true); elfView.setUint32(8, 1, true); elf.set(compressed, 12);
+  assert.deepEqual(decompressDebugSection(elf, { name: '.debug_line', flags: '0x800' }, 32, true), original);
+  gnuView.setBigUint64(4, BigInt(original.length + 1), false);
+  assert.throws(() => decompressDebugSection(gnu, { name: '.zdebug_line', flags: '0x0' }, 32, true), /长度/);
 });

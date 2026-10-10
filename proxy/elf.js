@@ -1,7 +1,11 @@
+import { inflateSync } from 'node:zlib';
+import { lookupDwarfLine, parseDwarfLineSection } from './dwarf.js';
+
 const MAX_TABLE_BYTES = 8 * 1024 * 1024;
 const MAX_SECTION_COUNT = 8192;
 const MAX_SEGMENT_COUNT = 1024;
 const MAX_SYMBOL_COUNT = 250000;
+const MAX_DEBUG_SECTION_BYTES = 32 * 1024 * 1024;
 
 const machineNames = new Map([[3, 'x86'], [8, 'MIPS'], [20, 'PowerPC'], [40, 'Arm'], [62, 'x86-64'], [83, 'AVR'], [94, 'Xtensa'], [105, 'MSP430'], [183, 'AArch64'], [243, 'RISC-V']]);
 const typeNames = new Map([[0, 'NONE'], [1, 'REL'], [2, 'EXEC'], [3, 'DYN'], [4, 'CORE']]);
@@ -15,6 +19,24 @@ function hex(value) { return `0x${value.toString(16).toUpperCase()}`; }
 function safeNumber(value, label) { if (value > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error(`${label} exceeds the supported numeric range`); return Number(value); }
 function cString(bytes, offset) { if (offset < 0 || offset >= bytes.length) return ''; let end = offset; while (end < bytes.length && bytes[end]) end += 1; return new TextDecoder().decode(bytes.subarray(offset, end)); }
 function sectionLabel(index, sections) { if (index === 0) return 'UNDEF'; if (index === 0xfff1) return 'ABS'; if (index === 0xfff2) return 'COMMON'; return sections[index]?.name || `#${index}`; }
+
+export function decompressDebugSection(bytes, section, bits, littleEndian) {
+  let compressed = bytes, expected = 0;
+  if (section.name.startsWith('.zdebug_')) {
+    if (bytes.length < 12 || new TextDecoder().decode(bytes.subarray(0, 4)) !== 'ZLIB') throw new Error(`${section.name} 缺少 GNU ZLIB 头`);
+    expected = Number(new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getBigUint64(4, false)); compressed = bytes.subarray(12);
+  } else if (BigInt(section.flags) & 0x800n) {
+    const headerSize = bits === 32 ? 12 : 24;
+    if (bytes.length < headerSize) throw new Error(`${section.name} 压缩头被截断`);
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), type = view.getUint32(0, littleEndian);
+    if (type !== 1) throw new Error(`${section.name} 使用不支持的压缩类型 ${type}`);
+    expected = safeNumber(bits === 32 ? BigInt(view.getUint32(4, littleEndian)) : view.getBigUint64(8, littleEndian), `${section.name} decompressed size`); compressed = bytes.subarray(headerSize);
+  } else return bytes;
+  if (!Number.isSafeInteger(expected) || expected < 0 || expected > MAX_DEBUG_SECTION_BYTES) throw new Error(`${section.name} 解压后超过 ${MAX_DEBUG_SECTION_BYTES} 字节`);
+  const output = inflateSync(compressed, { maxOutputLength: MAX_DEBUG_SECTION_BYTES });
+  if (output.length !== expected) throw new Error(`${section.name} 解压长度与头部声明不一致`);
+  return new Uint8Array(output.buffer, output.byteOffset, output.byteLength);
+}
 
 export function parseElfAddress(value) {
   const text = String(value ?? '').trim();
@@ -129,18 +151,22 @@ export async function analyzeElf({ size, read }) {
   const namedSymbols = symbols.filter(symbol => symbol.name && !['FILE', 'SECTION'].includes(symbol.type));
   const dwarfSections = sections.filter(section => /^\.(?:debug_|zdebug_|eh_frame)/.test(section.name)).map(section => section.name);
   let lineRows = [], dwarfVersions = [], dwarfLineUnits = 0;
-  const lineSection = rawSections.find(section => sections[section.index].name === '.debug_line');
+  const namedRawSection = (...names) => rawSections.find(section => names.includes(sections[section.index].name));
+  const readDebugSection = async section => {
+    if (!section) return undefined;
+    const publicSection = sections[section.index];
+    if (section.size > MAX_TABLE_BYTES || section.offset + section.size > size) throw new Error(`${publicSection.name} 超出有界读取范围`);
+    return decompressDebugSection(await read(section.offset, section.size), publicSection, bits, littleEndian);
+  };
+  const lineSection = namedRawSection('.debug_line', '.zdebug_line');
   if (lineSection) {
-    if (lineSection.size > MAX_TABLE_BYTES || lineSection.offset + lineSection.size > size) warnings.push('.debug_line 超出有界解析范围，已跳过源码行');
-    else {
-      try {
-        const parsed = parseDwarfLineSection(await read(lineSection.offset, lineSection.size), { littleEndian, addressSize: bits / 8 });
-        lineRows = parsed.rows; dwarfVersions = parsed.versions; dwarfLineUnits = parsed.unitCount; warnings.push(...parsed.warnings);
-      } catch (error) { warnings.push(`DWARF 行表解析失败：${error.message}`); }
-    }
+    try {
+      const [lineBytes, lineStrings, debugStrings] = await Promise.all([readDebugSection(lineSection), readDebugSection(namedRawSection('.debug_line_str', '.zdebug_line_str')), readDebugSection(namedRawSection('.debug_str', '.zdebug_str'))]);
+      const parsed = parseDwarfLineSection(lineBytes, { littleEndian, addressSize: bits / 8, lineStringBytes: lineStrings, debugStringBytes: debugStrings });
+      lineRows = parsed.rows; dwarfVersions = parsed.versions; dwarfLineUnits = parsed.unitCount; warnings.push(...parsed.warnings);
+    } catch (error) { warnings.push(`DWARF 行表解析失败：${error.message}`); }
   }
   if (!symbols.length) warnings.push('未发现可解析符号表，地址到函数名定位能力受限');
   if (!dwarfSections.length) warnings.push('未发现 DWARF 调试节，无法直接定位源码行');
   return { format: 'ELF', bits, byteOrder: littleEndian ? 'little' : 'big', type: typeNames.get(type) || `0x${type.toString(16)}`, machine: machineNames.get(machine) || `Unknown (${machine})`, machineId: machine, entry: hex(entry), fileSize: size, sections, segments, symbols, symbolCount: symbols.length, namedSymbolCount: namedSymbols.length, hasSymbols: namedSymbols.length > 0, symbolPreview: namedSymbols.filter(symbol => ['FUNC', 'OBJECT'].includes(symbol.type)).slice(0, 100), dwarfSections, hasDwarf: dwarfSections.length > 0, dwarfVersions, dwarfLineUnits, dwarfLineCount: lineRows.filter(row => !row.endSequence).length, hasSourceLines: lineRows.some(row => !row.endSequence && row.file), lineRows, warnings };
 }
-import { lookupDwarfLine, parseDwarfLineSection } from './dwarf.js';
