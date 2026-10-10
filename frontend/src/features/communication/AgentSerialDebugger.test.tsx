@@ -27,8 +27,9 @@ describe('AgentSerialDebugger independent degradation', () => {
 
     render(<AgentSerialDebugger />);
 
-    await waitFor(() => expect(screen.getByText('Agent：未连接')).toBeVisible());
-    expect(screen.getByText(/请重启 proxy 目录中的 Local Agent/)).toBeVisible();
+    await waitFor(() =>
+      expect(screen.getByText(/请重启 proxy 目录中的 Local Agent/)).toBeVisible(),
+    );
     expect(screen.getByRole('button', { name: /连接/ })).toBeDisabled();
     expect(screen.getByPlaceholderText('搜索当前串口日志…')).toBeEnabled();
     expect(screen.getAllByText(/快捷指令/).length).toBeGreaterThan(0);

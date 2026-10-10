@@ -32,6 +32,13 @@ import {
 } from "../services/productStorage";
 import type { TestRunRecord, TestStepRun } from "../types/product";
 import { formatHex, parseHexBytes } from "../utils/embeddedTools";
+import {
+  applySharedFlowChannel,
+  requiredFlowChannels,
+  resolvedFlowStep,
+  sharedFlowChannel,
+  stepUsesChannel,
+} from "../utils/testFlow";
 
 type Channel = "serial-a" | "serial-b" | "websocket" | "tcp" | "udp";
 type StepType =
@@ -169,8 +176,6 @@ const createStep = (type: StepType = "command"): TestStep => ({
   retryCount: type === "command" ? 1 : 0,
   matchMode: "contains",
 });
-const stepUsesChannel = (type: StepType) =>
-  !["delay", "set-variable", "manual"].includes(type);
 const createAtNetworkCase = (): TestCase => {
   const command = (
     name: string,
@@ -759,15 +764,7 @@ export default function TestAutomationPage() {
       haltMain = false,
       aborted = false;
     addRunLog("info", `开始执行：${selectedCase.name}`);
-    const requiredChannels = new Set(
-      selectedCase.steps
-        .filter((step) => stepUsesChannel(step.type))
-        .map((step) =>
-          selectedCase.sharedChannel !== false
-            ? (selectedCase.channel ?? "serial-a")
-            : step.channel,
-        ),
-    );
+    const requiredChannels = requiredFlowChannels(selectedCase);
     for (const channel of requiredChannels)
       if (
         (channel === "serial-a" || channel === "serial-b") &&
@@ -793,17 +790,7 @@ export default function TestAutomationPage() {
         continue;
       }
       executingTeardown.current = stage === "teardown";
-      const executionStep =
-          selectedCase.sharedChannel !== false && step.type !== "delay"
-            ? {
-                ...step,
-                channel:
-                  selectedCase.channel ??
-                  selectedCase.steps.find((item) => item.type !== "delay")
-                    ?.channel ??
-                  "serial-a",
-              }
-            : step,
+      const executionStep = resolvedFlowStep(selectedCase, step),
         stepStarted = Date.now(),
         stepStartedAt = new Date(stepStarted).toISOString();
       let attempts = 0;
@@ -1030,7 +1017,7 @@ export default function TestAutomationPage() {
       ...createStep(type),
       channel:
         selectedCase.sharedChannel !== false
-          ? (selectedCase.channel ?? "serial-a")
+          ? sharedFlowChannel(selectedCase)
           : "serial-a",
     };
     setSuites((previous) =>
@@ -1248,10 +1235,6 @@ export default function TestAutomationPage() {
   };
   const setSharedChannel = (sharedChannel: boolean) => {
     if (!selectedCase) return;
-    const channel =
-      selectedCase.channel ??
-      selectedCase.steps.find((step) => stepUsesChannel(step.type))?.channel ??
-      "serial-a";
     setSuites((previous) =>
       previous.map((suite) =>
         suite.id !== selectedSuite.id
@@ -1260,18 +1243,7 @@ export default function TestAutomationPage() {
               ...suite,
               cases: suite.cases.map((item) =>
                 item.id === selectedCase.id
-                  ? {
-                      ...item,
-                      sharedChannel,
-                      channel,
-                      steps: sharedChannel
-                        ? item.steps.map((step) =>
-                            stepUsesChannel(step.type)
-                              ? { ...step, channel }
-                              : step,
-                          )
-                        : item.steps,
-                    }
+                  ? applySharedFlowChannel(item, sharedChannel)
                   : item,
               ),
             },
@@ -1344,10 +1316,7 @@ export default function TestAutomationPage() {
       if (!parsed?.name || !Array.isArray(parsed.cases))
         throw new Error("文件不是有效的测试套件");
       const importedCases = parsed.cases.map((item) => {
-          const channel =
-            item.channel ??
-            item.steps.find((step) => stepUsesChannel(step.type))?.channel ??
-            "serial-a";
+          const channel = sharedFlowChannel(item);
           return {
             ...item,
             id: crypto.randomUUID(),
