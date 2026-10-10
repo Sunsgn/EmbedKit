@@ -38,3 +38,9 @@ node scripts/serial-device-acceptance.mjs --port COM11 --baud 115200 --hex "01 0
 - 导出日志并确认时间戳、方向、文本/HEX 和字节统计可追溯。
 
 真实设备结果必须记录设备型号、固件版本、USB 转串口型号、端口、参数和测试时间。没有连接真实硬件时只能报告“自动回归通过、真实设备待验收”。
+
+## 4. WebSocket 独立链路自测
+
+在 `proxy` 目录运行 `npm run websocket:loopback`，然后在“通信调试 → WebSocket”中连接 `ws://127.0.0.1:18080`。依次发送文本和 HEX 数据，应原样回显；主动断开后可再次连接。
+
+`npm test` 还会在真实本地 socket 上自动验证文本、二进制、关闭和重连。该回环只证明 EmbedKit WebSocket 链路正常，不代表目标设备或远程服务已验收。
