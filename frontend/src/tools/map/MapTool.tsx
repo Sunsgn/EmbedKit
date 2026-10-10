@@ -3,10 +3,9 @@ import { FileUp, Search } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { analyzeMap } from './map';
 import { lookupMapAddress, type MapAddressLookup } from '../../utils/mapAnalyzer';
-import { decodeLocalFileChunk, getLocalFileMetadata, readLocalFileChunk, revokeLocalPath } from '../../services/localFiles';
+import { readLocalFileBytes, revokeLocalPath } from '../../services/localFiles';
 
 const MAX_MAP_BYTES = 16 * 1024 * 1024;
-const MAP_CHUNK_BYTES = 256 * 1024;
 const formatSize = (value: number) => value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(2)} MiB` : value >= 1024 ? `${(value / 1024).toFixed(2)} KiB` : `${value} B`;
 const hex = (value: number) => `0x${value.toString(16).toUpperCase()}`;
 function Value({ label, value }: { label: string; value: string | number }) { return <div className="rounded-lg bg-[#0d1117] px-3 py-2"><span className="block text-[10px] text-gray-600">{label}</span><code className="mt-1 block break-all text-xs text-gray-200">{value}</code></div>; }
@@ -20,18 +19,8 @@ export default function MapTool() {
   const consumeSelection = useCallback(async (selectionId: string, incomingName: string) => {
     setError(''); setLookup(null); setProgress(0);
     try {
-      const metadata = await getLocalFileMetadata(selectionId);
-      if (metadata.size > MAX_MAP_BYTES) throw new Error(`MAP 文件超过 ${formatSize(MAX_MAP_BYTES)} 上限`);
-      const decoder = new TextDecoder('utf-8'), parts: string[] = []; let offset = 0;
-      while (offset < metadata.size) {
-        const chunk = await readLocalFileChunk(selectionId, offset, Math.min(MAP_CHUNK_BYTES, metadata.size - offset));
-        if (chunk.size !== metadata.size || chunk.offset !== offset || chunk.byteLength <= 0) throw new Error('MAP 文件分块读取结果不一致');
-        parts.push(decoder.decode(decodeLocalFileChunk(chunk), { stream: !chunk.eof }));
-        offset += chunk.byteLength; setProgress(metadata.size ? Math.round(offset / metadata.size * 100) : 100);
-        if (chunk.eof) break;
-      }
-      if (offset !== metadata.size) throw new Error('MAP 文件未完整读取');
-      setSource(parts.join('')); setFileName(incomingName || metadata.name); setProgress(100);
+      const { metadata, bytes } = await readLocalFileBytes(selectionId, MAX_MAP_BYTES, setProgress);
+      setSource(new TextDecoder('utf-8').decode(bytes)); setFileName(incomingName || metadata.name); setProgress(100);
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); setProgress(null); }
     finally { await revokeLocalPath(selectionId).catch(() => undefined); }
   }, []);

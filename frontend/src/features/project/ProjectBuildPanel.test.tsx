@@ -84,4 +84,16 @@ describe('ProjectBuildPanel capability-gated workflow', () => {
     await waitFor(() => expect(buildAgent.authorizeBuildArtifact).toHaveBeenCalledWith('build-map', 0));
     expect(onArtifactAnalyze).toHaveBeenCalledWith(artifact, 'selection-map');
   });
+
+  it.each([['bin', 'BIN 工具'], ['hex', 'HEX 工具']])('authorizes a discovered %s artifact before opening its tool', async (type, label) => {
+    const onArtifactAnalyze = vi.fn(), artifact = { name: `app.${type}`, path: `D:\\firmware\\demo\\build\\app.${type}`, type, size: 128, modifiedAt: '2026-10-10T00:00:00.000Z' };
+    vi.mocked(buildAgent.createBuildJob).mockResolvedValue({ id: `build-${type}`, state: 'passed', exitCode: 0, startedAt: '', finishedAt: '', artifacts: [artifact], events: [] });
+    vi.mocked(buildAgent.authorizeBuildArtifact).mockResolvedValue({ cancelled: false, kind: 'file', name: artifact.name, selectionId: `selection-${type}` });
+    render(<ProjectBuildPanel {...props} onArtifactAnalyze={onArtifactAnalyze} />);
+    fireEvent.change(screen.getByPlaceholderText(/my_project/), { target: { value: 'D:\\firmware\\demo' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: '构建' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '构建' })); fireEvent.click(await screen.findByRole('button', { name: label }));
+    await waitFor(() => expect(buildAgent.authorizeBuildArtifact).toHaveBeenCalledWith(`build-${type}`, 0));
+    expect(onArtifactAnalyze).toHaveBeenCalledWith(artifact, `selection-${type}`);
+  });
 });

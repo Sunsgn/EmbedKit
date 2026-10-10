@@ -2,11 +2,10 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import MapTool from './MapTool';
-import { getLocalFileMetadata, readLocalFileChunk, revokeLocalPath } from '../../services/localFiles';
+import { readLocalFileBytes, revokeLocalPath } from '../../services/localFiles';
 
 vi.mock('../../services/localFiles', () => ({
-  decodeLocalFileChunk: (chunk: { data: string }) => Uint8Array.from(window.atob(chunk.data), value => value.charCodeAt(0)),
-  getLocalFileMetadata: vi.fn(), readLocalFileChunk: vi.fn(), revokeLocalPath: vi.fn(),
+  readLocalFileBytes: vi.fn(), revokeLocalPath: vi.fn(),
 }));
 
 const map = `Memory Configuration
@@ -18,8 +17,7 @@ Linker script and memory map
 describe('MAP address workflow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getLocalFileMetadata).mockResolvedValue({ id: 'selection-map', kind: 'file', name: 'firmware.map', size: map.length, modifiedAt: '', expiresAt: '' });
-    vi.mocked(readLocalFileChunk).mockResolvedValue({ selectionId: 'selection-map', offset: 0, byteLength: map.length, size: map.length, eof: true, encoding: 'base64', data: window.btoa(map) });
+    vi.mocked(readLocalFileBytes).mockResolvedValue({ metadata: { id: 'selection-map', kind: 'file', name: 'firmware.map', size: map.length, modifiedAt: '', expiresAt: '' }, bytes: new TextEncoder().encode(map) });
     vi.mocked(revokeLocalPath).mockResolvedValue({ revoked: true });
   });
   it('locates an address with MAP evidence and offers explicit ELF refinement', () => {
@@ -43,17 +41,17 @@ describe('MAP address workflow', () => {
 
   it('reads, analyzes, and revokes an authorized build MAP artifact', async () => {
     render(<MemoryRouter initialEntries={[{ pathname: '/toolbox/map', state: { selectionId: 'selection-map', fileName: 'firmware.map', source: 'build-artifact' } }]}><MapTool /></MemoryRouter>);
-    await waitFor(() => expect(readLocalFileChunk).toHaveBeenCalledWith('selection-map', 0, map.length));
+    await waitFor(() => expect(readLocalFileBytes).toHaveBeenCalledWith('selection-map', 16 * 1024 * 1024, expect.any(Function)));
     await waitFor(() => expect(revokeLocalPath).toHaveBeenCalledWith('selection-map'));
     expect(await screen.findByText('firmware.map')).toBeVisible();
     expect(screen.getByText('GNU ld / LLVM lld / ESP-IDF')).toBeVisible();
   });
 
   it('rejects oversized authorized MAP files and still revokes the token', async () => {
-    vi.mocked(getLocalFileMetadata).mockResolvedValue({ id: 'selection-map', kind: 'file', name: 'huge.map', size: 16 * 1024 * 1024 + 1, modifiedAt: '', expiresAt: '' });
+    vi.mocked(readLocalFileBytes).mockRejectedValue(new Error('文件大小 16777217 B 超过 16777216 B 上限'));
     render(<MemoryRouter initialEntries={[{ pathname: '/toolbox/map', state: { selectionId: 'selection-map', fileName: 'huge.map', source: 'build-artifact' } }]}><MapTool /></MemoryRouter>);
-    expect(await screen.findByText(/超过 16\.00 MiB 上限/)).toBeVisible();
-    expect(readLocalFileChunk).not.toHaveBeenCalled();
+    expect(await screen.findByText(/超过.*上限/)).toBeVisible();
+    expect(readLocalFileBytes).toHaveBeenCalled();
     await waitFor(() => expect(revokeLocalPath).toHaveBeenCalledWith('selection-map'));
   });
 });

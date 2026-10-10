@@ -1,6 +1,8 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Download, FileUp, Plus, Trash2 } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
 import ToolResultRow from "../../features/toolbox/ToolResultRow";
+import { readLocalFileBytes, revokeLocalPath } from "../../services/localFiles";
 import { compareFirmware, mergeFirmware, type OverlapPolicy } from "./firmware";
 
 interface SegmentRow {
@@ -13,6 +15,7 @@ const parseAddress = (value: string) =>
   Number.parseInt(value.trim().replace(/^0x/i, ""), 16);
 const crc = (value: number) =>
   `0x${value.toString(16).padStart(8, "0").toUpperCase()}`;
+const MAX_BIN_BYTES = 32 * 1024 * 1024;
 function download(bytes: Uint8Array) {
   const url = URL.createObjectURL(
       new Blob([Uint8Array.from(bytes)], { type: "application/octet-stream" }),
@@ -25,6 +28,7 @@ function download(bytes: Uint8Array) {
 }
 
 export default function FirmwareTool() {
+  const location = useLocation(), navigate = useNavigate(), consumedIncoming = useRef(false);
   const [segments, setSegments] = useState<SegmentRow[]>([
     { id: 1, name: "boot.bin", address: "08000000", bytes: null },
     { id: 2, name: "app.bin", address: "08010000", bytes: null },
@@ -34,6 +38,7 @@ export default function FirmwareTool() {
     [fill, setFill] = useState("FF"),
     [leftId, setLeftId] = useState(1),
     [rightId, setRightId] = useState(2);
+  const [loadError, setLoadError] = useState(''), [progress, setProgress] = useState<number | null>(null), [importedBuild, setImportedBuild] = useState(false);
   const loaded = useMemo(
     () =>
       segments.filter(
@@ -90,13 +95,23 @@ export default function FirmwareTool() {
     setSegments((current) =>
       current.map((item) => (item.id === id ? { ...item, ...change } : item)),
     );
-  const choose = (id: number, file?: File) => {
-    if (file)
-      void file
-        .arrayBuffer()
-        .then((buffer) =>
-          update(id, { name: file.name, bytes: new Uint8Array(buffer) }),
-        );
+  const consumeSelection = useCallback(async (selectionId: string, name: string) => {
+    setLoadError(''); setProgress(0);
+    try { const result = await readLocalFileBytes(selectionId, MAX_BIN_BYTES, setProgress); setSegments(current => current.map((item, index) => index === 0 ? { ...item, name: name || result.metadata.name, bytes: result.bytes } : item)); setImportedBuild(true); setProgress(100); }
+    catch (reason) { setLoadError(reason instanceof Error ? reason.message : String(reason)); setProgress(null); }
+    finally { await revokeLocalPath(selectionId).catch(() => undefined); }
+  }, []);
+  useEffect(() => {
+    const incoming = location.state as { selectionId?: string; fileName?: string; source?: string } | null;
+    if (consumedIncoming.current || !incoming?.selectionId || incoming.source !== 'build-artifact') return;
+    consumedIncoming.current = true; void consumeSelection(incoming.selectionId, incoming.fileName || 'firmware.bin');
+    void navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+  }, [consumeSelection, location.pathname, location.search, location.state, navigate]);
+  const choose = async (id: number, file?: File) => {
+    if (!file) return; setLoadError('');
+    if (file.size > MAX_BIN_BYTES) { setLoadError('BIN 文件超过 32 MiB 上限'); return; }
+    try { update(id, { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) }); }
+    catch (reason) { setLoadError(reason instanceof Error ? reason.message : String(reason)); }
   };
   const add = () => {
     setSegments((current) => [
@@ -126,6 +141,9 @@ export default function FirmwareTool() {
           添加分段
         </button>
       </div>
+      {importedBuild && <p className="mb-3 rounded border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-xs text-blue-300">已导入构建 BIN；BIN 不包含加载地址，请确认首个分段的基地址。</p>}
+      {progress !== null && progress < 100 && <p className="mb-3 text-xs text-blue-300">正在读取构建 BIN · {progress}%</p>}
+      {loadError && <p className="mb-3 rounded border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-300">{loadError}</p>}
       <div className="mb-3 space-y-2">
         {segments.map((item) => (
           <div
@@ -143,7 +161,7 @@ export default function FirmwareTool() {
                   type="file"
                   accept=".bin,application/octet-stream"
                   className="hidden"
-                  onChange={(event) => choose(item.id, event.target.files?.[0])}
+                  onChange={(event) => void choose(item.id, event.target.files?.[0])}
                 />
               </label>
             </label>
