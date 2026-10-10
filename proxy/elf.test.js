@@ -3,7 +3,7 @@ import test from 'node:test';
 import { analyzeElf, lookupElfAddress, parseElfAddress } from './elf.js';
 
 function fixtureElf32() {
-  const bytes = new Uint8Array(0x400), view = new DataView(bytes.buffer), strings = new TextEncoder().encode('\0.shstrtab\0.text\0.symtab\0.debug_info\0.strtab\0'), symbolNames = new TextEncoder().encode('\0main\0');
+  const bytes = new Uint8Array(0x400), view = new DataView(bytes.buffer), strings = new TextEncoder().encode('\0.shstrtab\0.text\0.symtab\0.debug_line\0.strtab\0'), symbolNames = new TextEncoder().encode('\0main\0');
   bytes.set([0x7f, 0x45, 0x4c, 0x46, 1, 1, 1], 0);
   view.setUint16(16, 2, true); view.setUint16(18, 40, true); view.setUint32(20, 1, true); view.setUint32(24, 0x08000101, true);
   view.setUint32(28, 52, true); view.setUint32(32, 0x200, true); view.setUint16(40, 52, true); view.setUint16(42, 32, true); view.setUint16(44, 1, true); view.setUint16(46, 40, true); view.setUint16(48, 6, true); view.setUint16(50, 1, true);
@@ -13,7 +13,10 @@ function fixtureElf32() {
   section(1, 1, 3, 0, 0, 0x80, strings.length);
   section(2, 11, 1, 6, 0x08000100, 0x100, 32);
   section(3, 17, 2, 0, 0, 0x120, 32, 16, 5);
-  section(4, 25, 1, 0, 0, 0x150, 8);
+  const lineHeader = [1, 1, 1, 0xfb, 14, 13, ...new Array(12).fill(0), 0x73, 0x72, 0x63, 0, 0, 0x6d, 0x61, 0x69, 0x6e, 0x2e, 0x63, 0, 1, 0, 0, 0];
+  const lineProgram = [0, 5, 2, 0x00, 0x01, 0x00, 0x08, 1, 3, 9, 2, 4, 1, 2, 4, 0, 1, 1], lineLength = 4 + 2 + 4 + lineHeader.length + lineProgram.length;
+  view.setUint32(0x150, lineLength - 4, true); view.setUint16(0x154, 4, true); view.setUint32(0x156, lineHeader.length, true); bytes.set(lineHeader, 0x15a); bytes.set(lineProgram, 0x15a + lineHeader.length);
+  section(4, 25, 1, 0, 0, 0x150, lineLength);
   section(5, 37, 3, 0, 0, 0xc0, symbolNames.length);
   view.setUint32(0x130, 1, true); view.setUint32(0x134, 0x08000101, true); view.setUint32(0x138, 12, true); view.setUint8(0x13c, 0x12); view.setUint16(0x13e, 2, true);
   return bytes;
@@ -34,8 +37,10 @@ test('parses bounded ELF metadata, segments, symbols and DWARF evidence', async 
   assert.equal(result.hasSymbols, true);
   assert.equal(result.symbolPreview[0].name, 'main');
   assert.equal(result.symbolPreview[0].normalizedAddress, '0x8000100');
-  assert.deepEqual(result.dwarfSections, ['.debug_info']);
+  assert.deepEqual(result.dwarfSections, ['.debug_line']);
   assert.equal(result.hasDwarf, true);
+  assert.equal(result.hasSourceLines, true);
+  assert.equal(result.dwarfLineCount, 2);
 });
 
 test('resolves Arm Thumb addresses to exact symbols, offsets, and section-only evidence', async () => {
@@ -45,9 +50,10 @@ test('resolves Arm Thumb addresses to exact symbols, offsets, and section-only e
   assert.equal(exact.thumbBitCleared, true);
   assert.equal(exact.symbol.name, 'main');
   assert.equal(exact.symbol.offset, '0x0');
-  const inside = lookupElfAddress(result, '0x08000108');
+  const inside = lookupElfAddress(result, '0x08000106');
   assert.equal(inside.match, 'inside-symbol');
-  assert.equal(inside.symbol.offset, '0x8');
+  assert.equal(inside.symbol.offset, '0x6');
+  assert.deepEqual(inside.source, { file: 'src/main.c', line: 10, column: 0, address: '0x8000104' });
   const sectionOnly = lookupElfAddress({ ...result, symbols: [] }, '0x08000110');
   assert.equal(sectionOnly.match, 'section');
   assert.equal(sectionOnly.section.name, '.text');

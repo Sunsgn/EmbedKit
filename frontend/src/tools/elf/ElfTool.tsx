@@ -55,7 +55,7 @@ export default function ElfTool() {
         <Value label="格式" value={`${analysis.bits}-bit ${analysis.byteOrder}-endian`} /><Value label="目标架构" value={`${analysis.machine} (${analysis.machineId})`} />
         <Value label="文件类型 / 入口" value={`${analysis.type} / ${analysis.entry}`} /><Value label="文件大小" value={size(analysis.fileSize)} />
         <Value label="程序段 / 节区" value={`${analysis.segments.length} / ${analysis.sections.length}`} /><Value label="符号" value={analysis.hasSymbols ? `${analysis.namedSymbolCount} 个命名 / ${analysis.symbolCount} 个总计` : '未发现'} />
-        <Value label="DWARF" value={analysis.hasDwarf ? analysis.dwarfSections.join(', ') : '未发现'} /><Value label="源码定位能力" value={analysis.hasDwarf ? '具备基础条件' : analysis.hasSymbols ? '函数/对象级' : '仅地址/节区级'} />
+        <Value label="DWARF" value={analysis.hasDwarf ? `${analysis.dwarfSections.join(', ')}${analysis.dwarfVersions.length ? ` / v${analysis.dwarfVersions.join(', v')}` : ''}` : '未发现'} /><Value label="源码定位能力" value={analysis.hasSourceLines ? `${analysis.dwarfLineCount} 条源码行` : analysis.hasSymbols ? '函数/对象级' : '仅地址/节区级'} />
       </div>
       {analysis.warnings.length > 0 && <div className="mt-3 rounded border border-yellow-500/20 bg-yellow-500/5 p-3 text-xs text-yellow-300">{analysis.warnings.join('；')}</div>}
 
@@ -72,7 +72,8 @@ export default function ElfTool() {
           <Value label="规范化地址" value={`${lookup.normalizedAddress}${lookup.thumbBitCleared ? '（已清除 Thumb 位）' : ''}`} />
           <Value label="符号 / 偏移" value={lookup.symbol ? `${lookup.symbol.name} + ${lookup.symbol.offset}` : '未匹配符号'} />
           <Value label="节区 / 偏移" value={lookup.section ? `${lookup.section.name} + ${lookup.section.offset}` : '未匹配节区'} />
-          <p className="sm:col-span-2 lg:col-span-4 text-[11px] text-gray-500">{lookup.note}</p>
+          <Value label="源码位置" value={lookup.source ? `${lookup.source.file}:${lookup.source.line}${lookup.source.column ? `:${lookup.source.column}` : ''}` : '没有匹配的受支持行表'} />
+          <p className="sm:col-span-2 lg:col-span-3 text-[11px] text-gray-500">{lookup.note}</p>
         </div>}
       </section>
 

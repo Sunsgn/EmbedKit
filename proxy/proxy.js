@@ -137,7 +137,7 @@ async function analyzeSelectedElf(id) {
     for (const [cachedId, cached] of elfAnalyses) if (cached.expiresAt <= now) elfAnalyses.delete(cachedId);
     while (elfAnalyses.size >= MAX_ELF_ANALYSES) elfAnalyses.delete(elfAnalyses.keys().next().value);
     elfAnalyses.set(analysisId, { analysis, expiresAt: now + ELF_ANALYSIS_TTL_MS });
-    const { symbols: _symbols, ...publicAnalysis } = analysis;
+    const { symbols: _symbols, lineRows: _lineRows, ...publicAnalysis } = analysis;
     return { ...publicAnalysis, analysisId, expiresAt: new Date(now + ELF_ANALYSIS_TTL_MS).toISOString() };
   } finally { await handle.close(); }
 }

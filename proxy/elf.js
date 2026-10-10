@@ -47,13 +47,14 @@ export function lookupElfAddress(analysis, value) {
   else if (previous && section && previous.symbol.sectionIndex === section.index) { match = 'nearest-symbol'; confidence = 'medium'; }
   else if (section) { match = 'section'; confidence = 'low'; }
   const useSymbol = matched && match !== 'section' && match !== 'unresolved';
+  const source = lookupDwarfLine(analysis.lineRows || [], address);
   return {
     requestedAddress: hex(requested), normalizedAddress: hex(address), thumbBitCleared: requested !== address,
     match, confidence,
     symbol: useSymbol ? { ...matched.symbol, offset: hex(address - matched.start) } : null,
     section: section ? { index: section.index, name: section.name, address: section.address, size: section.size, offset: hex(address - BigInt(section.address)) } : null,
-    source: null,
-    note: match === 'unresolved' ? '地址不在已知节区或符号范围内' : match === 'section' ? '缺少可用符号，仅定位到节区' : match === 'nearest-symbol' ? '符号大小为零或地址位于符号间隙，结果为同节区最近前置符号' : '由 ELF 符号表定位；尚未解析 DWARF 源码行',
+    source,
+    note: source ? '由 DWARF 行表定位到源码；路径可能是编译时记录的相对路径' : match === 'unresolved' ? '地址不在已知节区或符号范围内' : match === 'section' ? '缺少可用符号，仅定位到节区' : match === 'nearest-symbol' ? '符号大小为零或地址位于符号间隙，结果为同节区最近前置符号' : '由 ELF 符号表定位；没有匹配的受支持 DWARF 源码行',
   };
 }
 
@@ -127,7 +128,19 @@ export async function analyzeElf({ size, read }) {
   }
   const namedSymbols = symbols.filter(symbol => symbol.name && !['FILE', 'SECTION'].includes(symbol.type));
   const dwarfSections = sections.filter(section => /^\.(?:debug_|zdebug_|eh_frame)/.test(section.name)).map(section => section.name);
+  let lineRows = [], dwarfVersions = [], dwarfLineUnits = 0;
+  const lineSection = rawSections.find(section => sections[section.index].name === '.debug_line');
+  if (lineSection) {
+    if (lineSection.size > MAX_TABLE_BYTES || lineSection.offset + lineSection.size > size) warnings.push('.debug_line 超出有界解析范围，已跳过源码行');
+    else {
+      try {
+        const parsed = parseDwarfLineSection(await read(lineSection.offset, lineSection.size), { littleEndian, addressSize: bits / 8 });
+        lineRows = parsed.rows; dwarfVersions = parsed.versions; dwarfLineUnits = parsed.unitCount; warnings.push(...parsed.warnings);
+      } catch (error) { warnings.push(`DWARF 行表解析失败：${error.message}`); }
+    }
+  }
   if (!symbols.length) warnings.push('未发现可解析符号表，地址到函数名定位能力受限');
   if (!dwarfSections.length) warnings.push('未发现 DWARF 调试节，无法直接定位源码行');
-  return { format: 'ELF', bits, byteOrder: littleEndian ? 'little' : 'big', type: typeNames.get(type) || `0x${type.toString(16)}`, machine: machineNames.get(machine) || `Unknown (${machine})`, machineId: machine, entry: hex(entry), fileSize: size, sections, segments, symbols, symbolCount: symbols.length, namedSymbolCount: namedSymbols.length, hasSymbols: namedSymbols.length > 0, symbolPreview: namedSymbols.filter(symbol => ['FUNC', 'OBJECT'].includes(symbol.type)).slice(0, 100), dwarfSections, hasDwarf: dwarfSections.length > 0, warnings };
+  return { format: 'ELF', bits, byteOrder: littleEndian ? 'little' : 'big', type: typeNames.get(type) || `0x${type.toString(16)}`, machine: machineNames.get(machine) || `Unknown (${machine})`, machineId: machine, entry: hex(entry), fileSize: size, sections, segments, symbols, symbolCount: symbols.length, namedSymbolCount: namedSymbols.length, hasSymbols: namedSymbols.length > 0, symbolPreview: namedSymbols.filter(symbol => ['FUNC', 'OBJECT'].includes(symbol.type)).slice(0, 100), dwarfSections, hasDwarf: dwarfSections.length > 0, dwarfVersions, dwarfLineUnits, dwarfLineCount: lineRows.filter(row => !row.endSequence).length, hasSourceLines: lineRows.some(row => !row.endSequence && row.file), lineRows, warnings };
 }
+import { lookupDwarfLine, parseDwarfLineSection } from './dwarf.js';
