@@ -11,7 +11,7 @@ function renderToolbox(initial = '/toolbox') {
 describe('ToolboxPage independent tool workspace', () => {
   it('shows the catalog without mounting every tool', () => {
     renderToolbox();
-    expect(screen.getAllByRole('button', { name: /^打开/ })).toHaveLength(15);
+    expect(screen.getAllByRole('button', { name: /^打开/ })).toHaveLength(16);
     expect(screen.queryByText('Modbus 线序')).not.toBeInTheDocument();
     expect(screen.queryByText('每帧位数')).not.toBeInTheDocument();
   });
