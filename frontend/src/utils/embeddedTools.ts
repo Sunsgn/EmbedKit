@@ -31,18 +31,6 @@ export function swapEndian(bytes: Uint8Array): Uint8Array {
   return Uint8Array.from(bytes).reverse();
 }
 
-export function parseInteger(value: string, radix: number): bigint {
-  const input = value.trim().replaceAll('_', '');
-  if (!input) throw new Error('请输入数值');
-  const negative = input.startsWith('-');
-  const unsigned = negative ? input.slice(1) : input;
-  const clean = unsigned.replace(/^0[xob]/i, '');
-  if (!clean || ![...clean].every(char => Number.parseInt(char, radix).toString(radix).toLowerCase() === char.toLowerCase())) throw new Error('输入与当前进制不匹配');
-  let result = 0n;
-  for (const char of clean.toLowerCase()) result = result * BigInt(radix) + BigInt(Number.parseInt(char, radix));
-  return negative ? -result : result;
-}
-
 export function float32Representations(value: number): { hex: string; binary: string; bytesLE: string; bytesBE: string } {
   if (!Number.isFinite(value)) throw new Error('请输入有限数值');
   const buffer = new ArrayBuffer(4);
