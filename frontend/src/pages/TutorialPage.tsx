@@ -27,6 +27,7 @@ import {
   BrainCircuit,
 } from 'lucide-react';
 import { roadmapPhases } from '../data/roadmap';
+import { embeddedSources } from '../data/embeddedSources';
 import { lessonGuides } from '../data/lessonGuides';
 import { topicLessons } from '../data/topicLessons';
 import type { RoadmapModule, ExternalResource } from '../types';
@@ -135,11 +136,13 @@ const specializationTracks = [
 ] as const;
 
 const officialReferences = [
-  { title: 'ARM CMSIS', url: 'https://arm-software.github.io/CMSIS_6/latest/General/index.html' },
-  { title: 'FreeRTOS', url: 'https://docs.freertos.org/' },
-  { title: 'Zephyr', url: 'https://docs.zephyrproject.org/latest/develop/getting_started/index.html' },
-  { title: 'Linux Kernel', url: 'https://docs.kernel.org/driver-api/' },
-];
+  'arm-cmsis',
+  'freertos-docs',
+  'zephyr-docs',
+  'rt-thread-docs',
+  'linux-kernel-docs',
+  'iar-docs',
+].map(id => embeddedSources.find(source => source.id === id)).filter((source): source is (typeof embeddedSources)[number] => Boolean(source));
 
 /* ── resource type badge ── */
 const typeLabel: Record<string, string> = {
