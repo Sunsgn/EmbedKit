@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Download, FileUp } from 'lucide-react';
-import { analyzeBinary, analyzeCanFrame, calculateAdc, calculateTimerPwm, formatHex, parseIntelHex } from '../../utils/embeddedTools';
+import { analyzeBinary, calculateAdc, calculateTimerPwm, formatHex, parseIntelHex } from '../../utils/embeddedTools';
 import { analyzeMap } from '../../utils/mapAnalyzer';
 
 function Value({ label, value }: { label: string; value: string | number }) {
@@ -10,12 +10,6 @@ function Value({ label, value }: { label: string; value: string | number }) {
 function ErrorText({ error }: { error: string }) { return error ? <p className="mb-3 rounded border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-300">{error}</p> : null; }
 const numberValue = (value: string) => Number(value);
 const formatSize = (value: number) => value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(2)} MiB` : value >= 1024 ? `${(value / 1024).toFixed(2)} KiB` : `${value} B`;
-
-export function CanFrameTool() {
-  const [id, setId] = useState('123'), [extended, setExtended] = useState(false), [data, setData] = useState('DE AD BE EF'), [bitRate, setBitRate] = useState('500000');
-  const result = useMemo(() => { try { return { value: analyzeCanFrame(id, extended, data, numberValue(bitRate)), error: '' }; } catch (reason) { return { value: null, error: reason instanceof Error ? reason.message : String(reason) }; } }, [bitRate, data, extended, id]);
-  return <><div className="mb-3 grid gap-2 sm:grid-cols-2"><label className="text-[11px] text-gray-500">CAN ID（HEX）<input value={id} onChange={event => setId(event.target.value)} className="field mt-1" /></label><label className="text-[11px] text-gray-500">波特率 bit/s<input type="number" value={bitRate} onChange={event => setBitRate(event.target.value)} className="field mt-1" /></label></div><label className="mb-3 flex items-center gap-2 text-xs text-gray-400"><input type="checkbox" checked={extended} onChange={event => setExtended(event.target.checked)} />29 位扩展帧</label><label className="mb-3 block text-[11px] text-gray-500">数据字节（最多 8 字节）<textarea value={data} onChange={event => setData(event.target.value)} rows={3} className="field mt-1 resize-none font-mono" /></label><ErrorText error={result.error} />{result.value && <div className="grid gap-2 sm:grid-cols-2"><Value label="规范 ID" value={result.value.idHex} /><Value label="DLC" value={result.value.dlc} /><Value label="数据" value={formatHex(result.value.data) || '无'} /><Value label="基础帧长度" value={`${result.value.baseBits} bit`} /><Value label="最坏填充长度" value={`${result.value.worstCaseBits} bit`} /><Value label="理论发送时间" value={`${result.value.durationUs.toFixed(2)}–${result.value.worstDurationUs.toFixed(2)} µs`} /></div>}</>;
-}
 
 export function TimerPwmTool() {
   const [clock, setClock] = useState('72000000'), [psc, setPsc] = useState('71'), [arr, setArr] = useState('999'), [ccr, setCcr] = useState('500');
