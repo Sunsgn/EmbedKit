@@ -1,5 +1,5 @@
 import { lazy } from 'react';
-import { Activity, Binary, CircuitBoard, FileCode2, Gauge, Hash, Map as MapIcon, Replace, Timer } from 'lucide-react';
+import { Activity, Binary, CircuitBoard, FileCode2, Gauge, Hash, Map as MapIcon, Network, Replace, Timer } from 'lucide-react';
 import type { ToolDefinition } from './types';
 
 const loadBasic = <K extends 'FloatConverter' | 'UartCalculator'>(name: K) => lazy(() => import('../features/toolbox/BasicTools').then(module => ({ default: module[name] })));
@@ -14,6 +14,7 @@ export const toolRegistry: ToolDefinition[] = [
   { apiVersion: 1, id: 'ihex', version: '1.0.0', title: 'Intel HEX', description: '记录校验、地址与 BIN 导出', detail: '校验 Intel HEX 记录、解析扩展地址并生成空洞填充为 FF 的 BIN。', category: 'firmware', keywords: ['HEX', '固件', 'BIN'], requiresAgent: false, icon: FileCode2, component: lazy(() => import('./ihex/IntelHexTool')) },
   { apiVersion: 1, id: 'bin', version: '1.0.0', title: 'BIN 文件', description: '大小、CRC 和内容概览', detail: '在浏览器本地分析二进制文件的大小、CRC32、空白比例和头尾字节。', category: 'firmware', keywords: ['BIN', '固件', 'CRC'], requiresAgent: false, icon: Binary, component: lazy(() => import('./bin/BinaryTool')) },
   { apiVersion: 1, id: 'map', version: '1.0.0', title: 'MAP 快速分析', description: '内存、模块、风险和优化', detail: '复用通用 MAP 解析器，快速查看格式、覆盖率、Flash/RAM 和优化建议。', category: 'analysis', keywords: ['MAP', '内存', '优化'], requiresAgent: false, icon: MapIcon, component: lazy(() => import('./map/MapTool')) },
+  { apiVersion: 1, id: 'modbus', version: '1.0.0', title: 'Modbus RTU / TCP', description: '请求生成、响应解析与校验', detail: '生成常用功能码请求，校验 RTU CRC 与 TCP MBAP，并解析正常和异常响应。', category: 'protocol', keywords: ['Modbus', 'RTU', 'TCP', '寄存器'], requiresAgent: false, icon: Network, component: lazy(() => import('./modbus/ModbusTool')) },
 ];
 
 export function findTool(id: string | undefined) { return id ? toolRegistry.find(tool => tool.id === id) ?? null : null; }
