@@ -1,0 +1,11 @@
+import { useMemo, useState } from 'react';
+import { Download, FileUp } from 'lucide-react';
+import ToolResultRow from '../../features/toolbox/ToolResultRow';
+import { parseSrec } from './srec';
+
+function download(bytes: Uint8Array) { const url = URL.createObjectURL(new Blob([Uint8Array.from(bytes)], { type: 'application/octet-stream' })), link = document.createElement('a'); link.href = url; link.download = 'firmware.bin'; link.click(); URL.revokeObjectURL(url); }
+export default function SrecTool() {
+  const [source, setSource] = useState('S1137AF0000102030405060708090A0B0C0D0E0F0A\nS5030001FB\nS9030000FC');
+  const result = useMemo(() => { try { return { value: parseSrec(source), error: '' }; } catch (error) { return { value: null, error: error instanceof Error ? error.message : String(error) }; } }, [source]);
+  return <><label className="mb-3 block text-[11px] text-gray-500">Motorola SREC 内容<textarea value={source} onChange={event => setSource(event.target.value)} rows={9} className="field mt-1 resize-y font-mono" /></label><label className="mb-3 inline-flex cursor-pointer items-center gap-2 rounded border border-[#30363d] px-3 py-2 text-xs text-gray-400"><FileUp size={13} />导入 SREC 文件<input type="file" accept=".srec,.s19,.s28,.s37,.mot,text/plain" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) void file.text().then(setSource); }} /></label>{result.error && <p className="mb-3 text-xs text-red-400">{result.error}</p>}{result.value && <div className="space-y-2"><ToolResultRow label="记录 / 数据" value={`${result.value.records} / ${result.value.dataRecords}`} /><ToolResultRow label="数据类型" value={result.value.dataTypes.join(', ') || '无'} /><ToolResultRow label="有效字节" value={String(result.value.dataBytes)} /><ToolResultRow label="地址范围" value={result.value.dataBytes ? `0x${result.value.minAddress.toString(16).toUpperCase()}–0x${result.value.maxAddress.toString(16).toUpperCase()}` : '无'} /><ToolResultRow label="启动地址" value={result.value.startAddress === undefined ? '未声明' : `0x${result.value.startAddress.toString(16).toUpperCase()}`} /><button onClick={() => download(result.value!.binary)} disabled={!result.value.binary.length} className="flex items-center gap-2 rounded bg-blue-600 px-3 py-2 text-xs text-white disabled:opacity-40"><Download size={13} />导出 BIN（空洞填充 FF）</button></div>}</>;
+}
