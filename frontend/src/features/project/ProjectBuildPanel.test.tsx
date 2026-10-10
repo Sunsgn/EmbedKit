@@ -6,7 +6,7 @@ import * as buildAgent from '../../services/buildAgent';
 import * as localFiles from '../../services/localFiles';
 
 vi.mock('../../services/agentClient', () => ({ getAgentStatus: vi.fn(), hasAgentCapability: vi.fn() }));
-vi.mock('../../services/buildAgent', () => ({ createBuildJob: vi.fn(), detectBuildEnvironment: vi.fn(), readBuildJob: vi.fn(), stopBuildJob: vi.fn() }));
+vi.mock('../../services/buildAgent', () => ({ authorizeBuildArtifact: vi.fn(), createBuildJob: vi.fn(), detectBuildEnvironment: vi.fn(), readBuildJob: vi.fn(), stopBuildJob: vi.fn() }));
 vi.mock('../../services/localFiles', () => ({ selectLocalDirectory: vi.fn() }));
 
 const status = { available: true, name: 'EmbedKit Local Agent', version: '1.0.0', protocolVersion: 1, uptimeSeconds: 1, capabilities: ['project-build'], serialSessions: 0, networkSessions: 0, buildJobs: 0 };
@@ -57,5 +57,18 @@ describe('ProjectBuildPanel capability-gated workflow', () => {
     await waitFor(() => expect(buildAgent.detectBuildEnvironment).toHaveBeenCalledWith('D:\\firmware\\picked'));
     expect(screen.getByDisplayValue('D:\\firmware\\picked')).toBeVisible();
     expect(await screen.findByText(/build\.ninja/)).toBeVisible();
+  });
+
+  it('authorizes a discovered ELF artifact before handing it to analysis', async () => {
+    const onArtifactAnalyze = vi.fn(), artifact = { name: 'app.axf', path: 'D:\\firmware\\demo\\build\\app.axf', type: 'axf', size: 4096, modifiedAt: '2026-10-10T00:00:00.000Z' };
+    vi.mocked(buildAgent.createBuildJob).mockResolvedValue({ id: 'build-elf', state: 'passed', exitCode: 0, startedAt: '', finishedAt: '', artifacts: [artifact], events: [] });
+    vi.mocked(buildAgent.authorizeBuildArtifact).mockResolvedValue({ cancelled: false, kind: 'file', name: 'app.axf', selectionId: 'selection-elf' });
+    render(<ProjectBuildPanel {...props} onArtifactAnalyze={onArtifactAnalyze} />);
+    fireEvent.change(screen.getByPlaceholderText(/my_project/), { target: { value: 'D:\\firmware\\demo' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: '构建' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '构建' }));
+    const analyze = await screen.findByRole('button', { name: 'ELF 分析' }); fireEvent.click(analyze);
+    await waitFor(() => expect(buildAgent.authorizeBuildArtifact).toHaveBeenCalledWith('build-elf', 0));
+    expect(onArtifactAnalyze).toHaveBeenCalledWith(artifact, 'selection-elf');
   });
 });

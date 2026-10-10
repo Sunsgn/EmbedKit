@@ -1,4 +1,5 @@
 import { agentRequest } from './agentClient';
+import type { LocalPathSelection } from './localFiles';
 
 export type BuildSystem = 'cmake' | 'make' | 'ninja';
 export type BuildAction = 'configure' | 'build' | 'clean' | 'rebuild';
@@ -17,3 +18,4 @@ export function createBuildJob(options: BuildJobOptions) {
 }
 export function readBuildJob(id: string, after = 0) { return agentRequest<BuildJob>(`/api/build/jobs/${id}?after=${after}`); }
 export function stopBuildJob(id: string) { return agentRequest<BuildJob>(`/api/build/jobs/${id}`, { method: 'DELETE' }); }
+export function authorizeBuildArtifact(jobId: string, artifactIndex: number) { return agentRequest<LocalPathSelection>(`/api/build/jobs/${jobId}/artifacts/${artifactIndex}/select`, { method: 'POST' }); }

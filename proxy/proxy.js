@@ -70,6 +70,16 @@ const systemFilePickerAdapter = {
 };
 let filePickerAdapter = systemFilePickerAdapter;
 
+function createPathSelection(kind, path, info) {
+  if (kind === 'file' && info.size > MAX_SELECTED_FILE_BYTES) throw new Error(`Selected file exceeds ${MAX_SELECTED_FILE_BYTES} bytes`);
+  const now = Date.now(), selectionId = randomUUID();
+  for (const [id, selection] of fileSelections) if (selection.expiresAt <= now) fileSelections.delete(id);
+  while (fileSelections.size >= MAX_FILE_SELECTIONS) fileSelections.delete(fileSelections.keys().next().value);
+  const selection = { id: selectionId, kind, path, name: path.split(/[\\/]/).filter(Boolean).pop() || path, size: kind === 'file' ? info.size : undefined, modifiedAt: info.mtime.toISOString(), expiresAt: now + FILE_SELECTION_TTL_MS };
+  fileSelections.set(selectionId, selection);
+  return { cancelled: false, kind, path, name: selection.name, selectionId, size: selection.size, modifiedAt: selection.modifiedAt, expiresAt: new Date(selection.expiresAt).toISOString() };
+}
+
 export function configureSerialAdapter(adapter) {
   if (adapter == null) { serialAdapter = systemSerialAdapter; return; }
   if (typeof adapter.list !== 'function' || typeof adapter.create !== 'function') throw new Error('Serial adapter must provide list() and create()');
@@ -93,13 +103,7 @@ async function selectLocalPath(options = {}) {
     if (!isAbsolute(result.path) || /[\0\r\n]/.test(result.path)) throw new Error('System picker returned an invalid path');
     const path = resolve(result.path), info = await stat(path);
     if (kind === 'directory' ? !info.isDirectory() : !info.isFile()) throw new Error(`Selected path is not a ${kind}`);
-    if (kind === 'file' && info.size > MAX_SELECTED_FILE_BYTES) throw new Error(`Selected file exceeds ${MAX_SELECTED_FILE_BYTES} bytes`);
-    const now = Date.now(), selectionId = randomUUID();
-    for (const [id, selection] of fileSelections) if (selection.expiresAt <= now) fileSelections.delete(id);
-    while (fileSelections.size >= MAX_FILE_SELECTIONS) fileSelections.delete(fileSelections.keys().next().value);
-    const selection = { id: selectionId, kind, path, name: path.split(/[\\/]/).filter(Boolean).pop() || path, size: kind === 'file' ? info.size : undefined, modifiedAt: info.mtime.toISOString(), expiresAt: now + FILE_SELECTION_TTL_MS };
-    fileSelections.set(selectionId, selection);
-    return { cancelled: false, kind, path, name: selection.name, selectionId, size: selection.size, modifiedAt: selection.modifiedAt, expiresAt: new Date(selection.expiresAt).toISOString() };
+    return createPathSelection(kind, path, info);
   } finally { filePickerActive = false; }
 }
 
@@ -593,10 +597,20 @@ async function collectBuildArtifacts(rootPath, maxFiles = 2000) {
       if (visited++ >= maxFiles) break;
       const path = join(current.path, entry.name);
       if (entry.isDirectory() && current.depth < 4 && !['.git', 'node_modules'].includes(entry.name)) queue.push({ path, depth: current.depth + 1 });
-      else if (entry.isFile() && /\.(elf|map|bin|hex|uf2)$/i.test(entry.name)) { const info = await stat(path).catch(() => null); if (info) artifacts.push({ name: entry.name, path, type: entry.name.split('.').pop().toLowerCase(), size: info.size, modifiedAt: info.mtime.toISOString() }); }
+      else if (entry.isFile() && /\.(elf|axf|out|map|bin|hex|uf2)$/i.test(entry.name)) { const info = await stat(path).catch(() => null); if (info) artifacts.push({ name: entry.name, path, type: entry.name.split('.').pop().toLowerCase(), size: info.size, modifiedAt: info.mtime.toISOString() }); }
     }
   }
   return artifacts.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
+}
+
+export async function authorizeBuildArtifact(job, indexValue) {
+  const index = Number(indexValue), artifact = Number.isInteger(index) && index >= 0 ? job?.artifacts?.[index] : null;
+  if (!artifact) throw new Error('Build artifact was not found');
+  const artifactPath = resolve(artifact.path), relation = relative(job.buildPath, artifactPath);
+  if (relation.startsWith('..') || isAbsolute(relation)) throw new Error('Build artifact is outside the authorized build directory');
+  const info = await stat(artifactPath);
+  if (!info.isFile() || info.size !== artifact.size || info.mtime.toISOString() !== artifact.modifiedAt) throw new Error('Build artifact changed after discovery; run or refresh the build again');
+  return createPathSelection('file', artifactPath, info);
 }
 
 async function detectBuildEnvironment(rootPathValue) {
@@ -1184,6 +1198,16 @@ const server = http.createServer(async (req, res) => {
       catch (error) { jsonRes(res, 400, { error: error.message }); }
       return;
     }
+  }
+
+  const buildArtifactMatch = pathname.match(/^\/api\/build\/jobs\/([0-9a-f-]+)\/artifacts\/(\d+)\/select$/i);
+  if (buildArtifactMatch) {
+    if (req.method !== 'POST') { jsonRes(res, 405, { error: 'Build artifact authorization requires POST' }); return; }
+    const job = buildJobs.get(buildArtifactMatch[1]);
+    if (!job) { jsonRes(res, 404, { error: 'Build job not found' }); return; }
+    try { jsonRes(res, 200, await authorizeBuildArtifact(job, buildArtifactMatch[2])); }
+    catch (error) { jsonRes(res, 400, { error: error.message }); }
+    return;
   }
 
   const buildMatch = pathname.match(/^\/api\/build\/jobs\/([0-9a-f-]+)$/i);

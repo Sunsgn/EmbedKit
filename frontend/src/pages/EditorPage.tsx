@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import {
   FolderOpen,
@@ -964,6 +965,7 @@ function ProjectLanding({
 }
 
 export default function EditorPage() {
+  const navigate = useNavigate();
   const [files, setFiles] = useState<FileNode[]>(() =>
     defaultFiles.length
       ? createProjectFiles(
@@ -1479,7 +1481,7 @@ export default function EditorPage() {
       </div>
       {activeToolPanel && <button type="button" aria-label="关闭分析工具" onClick={() => setActiveToolPanel(null)} className="absolute inset-x-0 top-12 bottom-0 z-20 bg-black/25" />}
       {activeToolPanel && <div className="absolute top-12 right-0 bottom-0 z-30 flex max-w-full shadow-[-18px_0_40px_rgba(0,0,0,0.38)]">
-        {activeToolPanel === 'build' && <ProjectBuildPanel suggestedSystem={projectSummary?.agentBuildSystem} onClose={() => setActiveToolPanel(null)} onDiagnostic={(diagnostic) => { handleBuildDiagnostic(diagnostic); setActiveToolPanel(null); }} />}
+        {activeToolPanel === 'build' && <ProjectBuildPanel suggestedSystem={projectSummary?.agentBuildSystem} onClose={() => setActiveToolPanel(null)} onDiagnostic={(diagnostic) => { handleBuildDiagnostic(diagnostic); setActiveToolPanel(null); }} onArtifactAnalyze={(artifact, selectionId) => navigate('/toolbox/elf', { state: { selectionId, fileName: artifact.name, source: 'build-artifact' } })} />}
         {activeToolPanel === 'map' && mapFile && mapAnalysis && <MapAnalysisPanel options={mapOptions.map(item => ({ path: item.file.path, name: item.file.name, lastModified: item.file.lastModified, analysis: item.analysis }))} selectedPath={mapFile.path} onSelect={setSelectedMapPath} onClose={() => setActiveToolPanel(null)} onModuleSelect={(module) => { handleMapModuleSelect(module); setActiveToolPanel(null); }} />}
         {activeToolPanel === 'architecture' && projectArchitecture && programBehavior && <ProjectArchitecturePanel architecture={projectArchitecture} behavior={programBehavior} trace={runtimeTrace} onTraceChange={handleRuntimeTraceChange} onClose={() => setActiveToolPanel(null)} onSelect={(file, line) => { handleFindingSelect({ id: `architecture:${file}:${line}`, severity: 'low', title: '程序框架', file, line, evidence: '', recommendation: '' }); setActiveToolPanel(null); }} />}
       </div>}

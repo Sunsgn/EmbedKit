@@ -3,10 +3,10 @@ import test from 'node:test';
 import net from 'node:net';
 import dgram from 'node:dgram';
 import { EventEmitter, once } from 'node:events';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { configureFilePickerAdapter, configureSerialAdapter, createBuildCommand, decodeNetworkPayload, isAllowedOrigin, parseBuildDiagnostic, receiveSerialData, startServer, validateHostAndPort, validateProxyTarget, validateSerialOptions } from './proxy.js';
+import { authorizeBuildArtifact, configureFilePickerAdapter, configureSerialAdapter, createBuildCommand, decodeNetworkPayload, isAllowedOrigin, parseBuildDiagnostic, receiveSerialData, startServer, validateHostAndPort, validateProxyTarget, validateSerialOptions } from './proxy.js';
 
 class VirtualSerialPort extends EventEmitter {
   constructor(options) { super(); this.options = options; this.isOpen = false; this.signals = { dtr: false, rts: false }; }
@@ -253,6 +253,21 @@ test('runs and reports a build job lifecycle without invoking a shell', async ()
   for (let attempt = 0; attempt < 30 && current.state === 'running'; attempt += 1) { await new Promise(resolveWait => setTimeout(resolveWait, 20)); current = await (await fetch(`${agentBaseUrl}/api/build/jobs/${created.id}`)).json(); }
   assert.equal(current.state, 'failed');
   assert.ok(current.events.some(event => /does-not-exist|ENOENT/i.test(event.text)));
+});
+
+test('authorizes only unchanged artifacts discovered inside a completed build directory', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'embedkit-build-artifact-')), artifactPath = join(directory, 'app.elf');
+  try {
+    await writeFile(artifactPath, elfWithMainSymbol()); const info = await stat(artifactPath);
+    const job = { buildPath: directory, artifacts: [{ name: 'app.elf', path: artifactPath, type: 'elf', size: info.size, modifiedAt: info.mtime.toISOString() }] };
+    const selected = await authorizeBuildArtifact(job, 0);
+    assert.ok(selected.selectionId); assert.equal(selected.name, 'app.elf');
+    const metadata = await (await fetch(`${agentBaseUrl}/api/files/selections/${selected.selectionId}`)).json();
+    assert.equal(metadata.name, 'app.elf'); assert.equal(metadata.path, undefined);
+    await writeFile(artifactPath, Buffer.concat([elfWithMainSymbol(), Buffer.from([0])]));
+    await assert.rejects(authorizeBuildArtifact(job, 0), /changed after discovery/);
+    await assert.rejects(authorizeBuildArtifact({ buildPath: directory, artifacts: [{ ...job.artifacts[0], path: resolve(directory, '..', 'outside.elf') }] }, 0), /outside/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
 test('returns structured recoverable API errors', async () => {

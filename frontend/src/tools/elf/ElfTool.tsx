@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, FileSearch, Search } from 'lucide-react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { analyzeSelectedElf, lookupElfAddress, type ElfAddressLookup, type ElfAnalysis } from '../../services/elfAgent';
 import { revokeLocalPath, selectLocalFile } from '../../services/localFiles';
 
@@ -9,6 +9,7 @@ function Value({ label, value }: { label: string; value: string | number }) { re
 
 export default function ElfTool() {
   const [searchParams] = useSearchParams();
+  const location = useLocation(), navigate = useNavigate(), consumedIncoming = useRef(false);
   const [analysis, setAnalysis] = useState<ElfAnalysis | null>(null);
   const [fileName, setFileName] = useState('');
   const [address, setAddress] = useState(() => searchParams.get('address') || '');
@@ -18,19 +19,22 @@ export default function ElfTool() {
   const [error, setError] = useState('');
   const [lookupError, setLookupError] = useState('');
 
-  const select = async () => {
+  const consumeSelection = useCallback(async (selectionId: string, name: string) => {
     setBusy(true); setError(''); setLookup(null); setLookupError('');
     try {
-      const selected = await selectLocalFile();
-      if (selected.cancelled || !selected.selectionId) return;
-      setFileName(selected.name || 'ELF');
-      try {
-        const result = await analyzeSelectedElf(selected.selectionId);
-        setAnalysis(result); setAddress(current => current || result.entry);
-      } finally { await revokeLocalPath(selected.selectionId).catch(() => undefined); }
+      setFileName(name || 'ELF');
+      try { const result = await analyzeSelectedElf(selectionId); setAnalysis(result); setAddress(current => current || result.entry); }
+      finally { await revokeLocalPath(selectionId).catch(() => undefined); }
     } catch (reason) { setAnalysis(null); setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setBusy(false); }
-  };
+  }, []);
+  const select = async () => { setBusy(true); setError(''); try { const selected = await selectLocalFile(); if (!selected.cancelled && selected.selectionId) await consumeSelection(selected.selectionId, selected.name || 'ELF'); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } finally { setBusy(false); } };
+  useEffect(() => {
+    const incoming = location.state as { selectionId?: string; fileName?: string; source?: string } | null;
+    if (consumedIncoming.current || !incoming?.selectionId || incoming.source !== 'build-artifact') return;
+    consumedIncoming.current = true; void consumeSelection(incoming.selectionId, incoming.fileName || 'ELF');
+    void navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+  }, [consumeSelection, location.pathname, location.search, location.state, navigate]);
   const locate = async () => {
     if (!analysis || !address.trim()) return;
     setLookupBusy(true); setLookupError('');
