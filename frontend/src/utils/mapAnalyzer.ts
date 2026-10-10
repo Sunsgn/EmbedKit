@@ -57,6 +57,16 @@ export interface MapComparison {
   symbols: MapDeltaItem[];
   warnings: string[];
 }
+export interface MapAddressLookup {
+  requestedAddress: number;
+  normalizedAddress: number;
+  lowBitCleared: boolean;
+  match: 'exact-symbol' | 'inside-symbol' | 'nearest-symbol' | 'section' | 'unresolved';
+  confidence: 'high' | 'medium' | 'low' | 'none';
+  symbol: (MapSymbol & { offset: number }) | null;
+  section: (MapSection & { offset: number }) | null;
+  note: string;
+}
 
 interface ParsedMap extends Omit<MapAnalysis, 'format' | 'formatLabel' | 'coverage' | 'insights' | 'optimizations'> { evidence: string[] }
 
@@ -252,6 +262,35 @@ export function analyzeMap(content: string): MapAnalysis {
   if (format === 'unknown') parsed.warnings.unshift('未能确定 MAP 工具链，已使用通用链接映射规则降级解析。');
   const coverage = coverageOf(parsed, format);
   return { format, formatLabel: labels[format], regions: parsed.regions, sections: parsed.sections, modules: parsed.modules, symbols: parsed.symbols, totals: parsed.totals, warnings: parsed.warnings, coverage, insights: buildInsights(parsed, coverage), optimizations: buildOptimizations(parsed) };
+}
+
+export function lookupMapAddress(analysis: MapAnalysis, input: string | number): MapAddressLookup {
+  const text = String(input).trim();
+  if (!/^(?:0x[\da-f]+|\d+)$/i.test(text)) throw new Error('地址必须是 0x 开头的十六进制或十进制整数');
+  const requestedAddress = Number(text);
+  if (!Number.isSafeInteger(requestedAddress) || requestedAddress < 0) throw new Error('地址超出可安全解析范围');
+  const resolveAt = (address: number) => {
+    const sections = analysis.sections.filter(item => item.size > 0 && item.address <= address && address < item.address + item.size).sort((a, b) => a.size - b.size);
+    const exact = analysis.symbols.filter(item => item.address === address).sort((a, b) => (b.size > 0 ? 1 : 0) - (a.size > 0 ? 1 : 0))[0];
+    const inside = analysis.symbols.filter(item => item.size > 0 && item.address <= address && address < item.address + item.size).sort((a, b) => a.size - b.size)[0];
+    const section = sections[0];
+    const nearest = section ? analysis.symbols.filter(item => item.address <= address && item.address >= section.address && item.address < section.address + section.size).sort((a, b) => b.address - a.address)[0] : undefined;
+    return { address, exact, inside, nearest, section };
+  };
+  let resolved = resolveAt(requestedAddress), lowBitCleared = false;
+  if (!resolved.exact && !resolved.inside && requestedAddress % 2 === 1) {
+    const normalized = resolveAt(requestedAddress - 1);
+    if (normalized.exact || normalized.inside) { resolved = normalized; lowBitCleared = true; }
+  }
+  const symbol = resolved.exact || resolved.inside || resolved.nearest;
+  const match = resolved.exact ? 'exact-symbol' : resolved.inside ? 'inside-symbol' : resolved.nearest ? 'nearest-symbol' : resolved.section ? 'section' : 'unresolved';
+  const confidence = resolved.exact || resolved.inside ? 'high' : resolved.nearest ? 'medium' : resolved.section ? 'low' : 'none';
+  return {
+    requestedAddress, normalizedAddress: resolved.address, lowBitCleared, match, confidence,
+    symbol: symbol ? { ...symbol, offset: resolved.address - symbol.address } : null,
+    section: resolved.section ? { ...resolved.section, offset: resolved.address - resolved.section.address } : null,
+    note: match === 'unresolved' ? 'MAP 中没有覆盖该地址的节区或符号' : match === 'section' ? 'MAP 缺少可用符号，仅定位到节区' : match === 'nearest-symbol' ? '地址位于符号间隙，返回同节区最近的前置符号' : '由 MAP 中的链接地址和符号尺寸定位；MAP 通常不包含可靠源码行',
+  };
 }
 
 const deltasFor = (current: Array<{ name: string; size: number }>, baseline: Array<{ name: string; size: number }>) => {

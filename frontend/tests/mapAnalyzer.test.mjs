@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { analyzeMap, compareMapAnalyses, detectMapFormat } from '../src/utils/mapAnalyzer.ts';
+import { analyzeMap, compareMapAnalyses, detectMapFormat, lookupMapAddress } from '../src/utils/mapAnalyzer.ts';
 
 test('parses GNU ld memory regions, sections and modules', () => {
   const content = `Memory Configuration
@@ -133,4 +133,20 @@ Linker script and memory map
   const comparison = compareMapAnalyses(current, baseline);
   assert.notEqual(comparison.confidence, 'high');
   assert.match(comparison.warnings.join(' '), /工具链格式不同/);
+});
+
+test('resolves MAP addresses with symbol, offset, low-bit, and section degradation evidence', () => {
+  const analysis = analyzeMap(`Memory Configuration
+FLASH 0x08000000 0x1000 xr
+Linker script and memory map
+.text 0x08000000 0x100
+                0x08000000 0x10 main
+                0x08000020 handler`);
+  const inside = lookupMapAddress(analysis, '0x08000008');
+  assert.equal(inside.match, 'inside-symbol'); assert.equal(inside.symbol.name, 'main'); assert.equal(inside.symbol.offset, 8);
+  const thumb = lookupMapAddress(analysis, '0x08000021');
+  assert.equal(thumb.match, 'exact-symbol'); assert.equal(thumb.lowBitCleared, true); assert.equal(thumb.symbol.name, 'handler');
+  const sectionOnly = lookupMapAddress({ ...analysis, symbols: [] }, '0x08000080');
+  assert.equal(sectionOnly.match, 'section'); assert.equal(sectionOnly.section.name, '.text');
+  assert.throws(() => lookupMapAddress(analysis, 'main+4'), /地址/);
 });
