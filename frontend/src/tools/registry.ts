@@ -2,12 +2,12 @@ import { lazy } from 'react';
 import { Activity, Binary, CircuitBoard, FileCode2, Gauge, Hash, Map as MapIcon, Replace, Timer } from 'lucide-react';
 import type { ToolDefinition } from './types';
 
-const loadBasic = <K extends 'NumberConverter' | 'CrcCalculator' | 'FloatConverter' | 'UartCalculator'>(name: K) => lazy(() => import('../features/toolbox/BasicTools').then(module => ({ default: module[name] })));
+const loadBasic = <K extends 'NumberConverter' | 'FloatConverter' | 'UartCalculator'>(name: K) => lazy(() => import('../features/toolbox/BasicTools').then(module => ({ default: module[name] })));
 const loadAdvanced = <K extends 'CanFrameTool' | 'TimerPwmTool' | 'AdcTool' | 'IntelHexTool' | 'BinaryTool' | 'MapQuickTool'>(name: K) => lazy(() => import('../features/toolbox/AdvancedTools').then(module => ({ default: module[name] })));
 
 export const toolRegistry: ToolDefinition[] = [
   { apiVersion: 1, id: 'number', version: '1.0.0', title: '进制转换', description: '地址、寄存器和位掩码', detail: '支持任意长度整数及二、八、十、十六进制互转。', category: 'conversion', keywords: ['进制', '地址', '掩码'], requiresAgent: false, icon: Binary, component: loadBasic('NumberConverter') },
-  { apiVersion: 1, id: 'crc', version: '1.0.0', title: 'CRC 与字节序', description: '校验、HEX 与大小端', detail: 'CRC16-Modbus、CRC32、HEX 解析与大小端反转。', category: 'protocol', keywords: ['CRC', '校验', '字节序'], requiresAgent: false, icon: Hash, component: loadBasic('CrcCalculator') },
+  { apiVersion: 1, id: 'crc', version: '1.0.0', title: 'CRC 与字节序', description: '校验、HEX 与大小端', detail: 'CRC16-Modbus、CRC32、HEX 解析与大小端反转。', category: 'protocol', keywords: ['CRC', '校验', '字节序'], requiresAgent: false, icon: Hash, component: lazy(() => import('./crc/CrcTool')) },
   { apiVersion: 1, id: 'float', version: '1.0.0', title: 'IEEE 754 Float32', description: '浮点位模式与字节序', detail: '查看浮点数的位模式及大端、小端字节序。', category: 'conversion', keywords: ['浮点', 'IEEE754'], requiresAgent: false, icon: Replace, component: loadBasic('FloatConverter') },
   { apiVersion: 1, id: 'uart', version: '1.0.0', title: 'UART 传输时间', description: '帧格式、吞吐量和耗时', detail: '根据波特率与帧格式计算有效吞吐量和理论传输时间。', category: 'calculation', keywords: ['UART', '波特率', '耗时'], requiresAgent: false, icon: Gauge, component: loadBasic('UartCalculator') },
   { apiVersion: 1, id: 'can', version: '1.0.0', title: 'CAN 帧分析', description: 'ID、DLC、位数和总线时间', detail: '分析经典 CAN 标准帧和扩展帧，估算位填充后的最坏总线占用。', category: 'protocol', keywords: ['CAN', 'DLC', '总线'], requiresAgent: false, icon: CircuitBoard, component: loadAdvanced('CanFrameTool') },
