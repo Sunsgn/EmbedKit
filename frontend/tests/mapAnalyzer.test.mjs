@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { analyzeMap, detectMapFormat } from '../src/utils/mapAnalyzer.ts';
+import { analyzeMap, compareMapAnalyses, detectMapFormat } from '../src/utils/mapAnalyzer.ts';
 
 test('parses GNU ld memory regions, sections and modules', () => {
   const content = `Memory Configuration
@@ -97,4 +97,40 @@ Image component sizes
   assert.equal(result.optimizations.length > 0, true);
   assert.equal(result.optimizations.every(item => item.maxBytes >= item.minBytes), true);
   assert.equal(result.optimizations.some(item => item.module === 'network.o' && item.target === 'ram'), true);
+});
+
+test('compares MAP baselines and identifies verified module growth', () => {
+  const create = (code, zi) => analyzeMap(`ARM Linker, 6.21.0
+ArmClang
+Memory Map of the image
+Execution Region ER_IROM1 (Exec base: 0x08000000, Load base: 0x08000000, Size: 0x00009000, Max: 0x00010000)
+Image component sizes
+   ${code}          0       2048        512       ${zi}          0   network.o`);
+  const comparison = compareMapAnalyses(create(20000, 5000), create(16000, 4000));
+  assert.equal(comparison.status, 'regressed');
+  assert.equal(comparison.confidence, 'high');
+  assert.equal(comparison.totals.flash, 4000);
+  assert.equal(comparison.totals.ram, 1000);
+  assert.deepEqual(comparison.modules[0], {
+    name: 'network.o',
+    before: 22560,
+    after: 27560,
+    delta: 5000,
+  });
+});
+
+test('degrades cross-toolchain MAP comparisons instead of claiming verified savings', () => {
+  const current = analyzeMap(`IAR ELF Linker V9
+MODULE SUMMARY
+  900 bytes of readonly code memory
+  100 bytes of readonly data memory
+  50 bytes of readwrite data memory
+  100 bytes of zero initialized data memory`);
+  const baseline = analyzeMap(`Memory Configuration
+FLASH 0x08000000 0x1000 xr
+Linker script and memory map
+.text 0x08000000 0x500`);
+  const comparison = compareMapAnalyses(current, baseline);
+  assert.notEqual(comparison.confidence, 'high');
+  assert.match(comparison.warnings.join(' '), /工具链格式不同/);
 });

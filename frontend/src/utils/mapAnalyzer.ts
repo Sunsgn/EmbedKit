@@ -48,6 +48,15 @@ export interface MapAnalysis {
   optimizations: MapOptimization[];
   warnings: string[];
 }
+export interface MapDeltaItem { name: string; before: number; after: number; delta: number }
+export interface MapComparison {
+  status: 'improved' | 'regressed' | 'mixed' | 'unchanged' | 'insufficient';
+  confidence: 'high' | 'medium' | 'low';
+  totals: MapAnalysis['totals'];
+  modules: MapDeltaItem[];
+  symbols: MapDeltaItem[];
+  warnings: string[];
+}
 
 interface ParsedMap extends Omit<MapAnalysis, 'format' | 'formatLabel' | 'coverage' | 'insights' | 'optimizations'> { evidence: string[] }
 
@@ -243,4 +252,61 @@ export function analyzeMap(content: string): MapAnalysis {
   if (format === 'unknown') parsed.warnings.unshift('未能确定 MAP 工具链，已使用通用链接映射规则降级解析。');
   const coverage = coverageOf(parsed, format);
   return { format, formatLabel: labels[format], regions: parsed.regions, sections: parsed.sections, modules: parsed.modules, symbols: parsed.symbols, totals: parsed.totals, warnings: parsed.warnings, coverage, insights: buildInsights(parsed, coverage), optimizations: buildOptimizations(parsed) };
+}
+
+const deltasFor = (current: Array<{ name: string; size: number }>, baseline: Array<{ name: string; size: number }>) => {
+  const after = new Map(current.map(item => [item.name, item.size])),
+    before = new Map(baseline.map(item => [item.name, item.size]));
+  return [...new Set([...before.keys(), ...after.keys()])]
+    .map(name => ({ name, before: before.get(name) ?? 0, after: after.get(name) ?? 0, delta: (after.get(name) ?? 0) - (before.get(name) ?? 0) }))
+    .filter(item => item.delta !== 0)
+    .sort((left, right) => Math.abs(right.delta) - Math.abs(left.delta));
+};
+
+export function compareMapAnalyses(current: MapAnalysis, baseline: MapAnalysis): MapComparison {
+  const totals = {
+      flash: current.totals.flash - baseline.totals.flash,
+      ram: current.totals.ram - baseline.totals.ram,
+      code: current.totals.code - baseline.totals.code,
+      roData: current.totals.roData - baseline.totals.roData,
+      rwData: current.totals.rwData - baseline.totals.rwData,
+      ziData: current.totals.ziData - baseline.totals.ziData,
+    },
+    comparable = current.coverage.capabilities.totals && baseline.coverage.capabilities.totals,
+    sameFormat = current.format === baseline.format && current.format !== 'unknown',
+    confidence = !comparable || Math.min(current.coverage.score, baseline.coverage.score) < 45
+      ? 'low'
+      : sameFormat && Math.min(current.coverage.score, baseline.coverage.score) >= 75
+        ? 'high'
+        : 'medium',
+    movements = [totals.flash, totals.ram].filter(value => value !== 0),
+    status = confidence === 'low'
+      ? 'insufficient'
+      : !movements.length
+        ? 'unchanged'
+        : movements.every(value => value <= 0)
+          ? 'improved'
+          : movements.every(value => value >= 0)
+            ? 'regressed'
+            : 'mixed',
+    warnings: string[] = [];
+  if (!comparable) warnings.push('至少一份 MAP 缺少 Flash/RAM 汇总，不能判定优化成效。');
+  if (current.format !== baseline.format)
+    warnings.push(`工具链格式不同（${baseline.formatLabel} → ${current.formatLabel}），模块和符号差异只作参考。`);
+  if (!current.coverage.capabilities.modules || !baseline.coverage.capabilities.modules)
+    warnings.push('至少一份 MAP 缺少模块表，无法完整定位增长来源。');
+  return {
+    status,
+    confidence,
+    totals,
+    modules: deltasFor(
+      current.modules.map(item => ({ name: item.name, size: item.total })),
+      baseline.modules.map(item => ({ name: item.name, size: item.total })),
+    ),
+    symbols: deltasFor(
+      current.symbols.filter(item => item.size > 0).map(item => ({ name: `${item.module ?? '?'}:${item.name}`, size: item.size })),
+      baseline.symbols.filter(item => item.size > 0).map(item => ({ name: `${item.module ?? '?'}:${item.name}`, size: item.size })),
+    ),
+    warnings,
+  };
 }

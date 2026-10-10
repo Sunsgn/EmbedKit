@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { AlertTriangle, BarChart3, Boxes, CheckCircle2, Cpu, Search, X } from 'lucide-react';
-import type { MapAnalysis, MapInsight } from '../../utils/mapAnalyzer';
+import { compareMapAnalyses, type MapAnalysis, type MapInsight } from '../../utils/mapAnalyzer';
 
 const bytes = (value: number) => { const sign = value < 0 ? '-' : '', absolute = Math.abs(value); return absolute >= 1024 * 1024 ? `${sign}${(absolute / 1024 / 1024).toFixed(2)} MB` : absolute >= 1024 ? `${sign}${(absolute / 1024).toFixed(2)} KB` : `${value} B`; };
 const address = (value: number) => `0x${value.toString(16).toUpperCase().padStart(8, '0')}`;
@@ -19,11 +19,8 @@ export default function MapAnalysisPanel({ options, selectedPath, onSelect, onCl
   const symbols = useMemo(() => analysis.symbols.filter(item => !query || `${item.name} ${item.module ?? ''}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => b.size - a.size), [analysis.symbols, query]);
   const maxModule = Math.max(1, ...analysis.modules.map(item => item.total));
   const optimizationRange = useMemo(() => analysis.optimizations.reduce((total, item) => ({ min: total.min + item.minBytes, max: total.max + item.maxBytes }), { min: 0, max: 0 }), [analysis.optimizations]);
-  const moduleDeltas = useMemo(() => {
-    if (!baseline) return [];
-    const old = new Map(baseline.analysis.modules.map(item => [item.name, item.total])), current = new Map(analysis.modules.map(item => [item.name, item.total]));
-    return [...new Set([...old.keys(), ...current.keys()])].map(name => ({ name, before: old.get(name) ?? 0, after: current.get(name) ?? 0, delta: (current.get(name) ?? 0) - (old.get(name) ?? 0) })).filter(item => item.delta !== 0).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
-  }, [analysis.modules, baseline]);
+  const comparison = useMemo(() => baseline ? compareMapAnalyses(analysis, baseline.analysis) : null, [analysis, baseline]);
+  const moduleDeltas = comparison?.modules ?? [];
   const capabilityLabels = [['totals', '用量'], ['capacity', '容量'], ['modules', '模块'], ['sections', 'Section'], ['symbols', '符号']] as const;
 
   return <aside className="flex h-full w-[min(680px,92vw)] max-w-none shrink-0 flex-col border-l border-[#30363d] bg-[#0d1117]">
@@ -36,6 +33,7 @@ export default function MapAnalysisPanel({ options, selectedPath, onSelect, onCl
     <div className="grid grid-cols-6 gap-1 border-b border-[#30363d] p-3 text-center text-[9px]">{([['FLASH', analysis.totals.flash], ['RAM', analysis.totals.ram], ['CODE', analysis.totals.code], ['RO', analysis.totals.roData], ['RW', analysis.totals.rwData], ['ZI/BSS', analysis.totals.ziData]] as const).map(([name, value]) => <div key={name} className="rounded bg-[#111820] p-2"><b className="block text-gray-200">{bytes(value)}</b><span className="text-gray-600">{name}</span></div>)}</div>
     <nav className="flex shrink-0 border-b border-[#30363d] px-2">{([['overview', `结论 ${analysis.insights.length}`], ['optimize', `优化 ${analysis.optimizations.length}`], ['modules', `模块 ${analysis.modules.length}`], ['sections', `Section ${analysis.sections.length}`], ['symbols', `符号 ${analysis.symbols.length}`], ['compare', '版本对比']] as const).map(([value, label]) => <button key={value} onClick={() => setTab(value)} disabled={value === 'compare' && options.length < 2} className={`border-b-2 px-2.5 py-2 text-[10px] disabled:opacity-30 ${tab === value ? 'border-purple-400 text-purple-300' : 'border-transparent text-gray-600'}`}>{label}</button>)}</nav>
     {tab !== 'overview' && tab !== 'optimize' && tab !== 'compare' && <label className="flex shrink-0 items-center gap-2 border-b border-[#30363d] px-3 py-2"><Search size={12} className="text-gray-600" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索模块、Section 或符号" className="min-w-0 flex-1 bg-transparent text-xs outline-none" /></label>}
+    {tab === 'compare' && comparison && <section className="border-b border-[#30363d] bg-[#111820] px-3 py-2"><div className="flex items-center gap-2"><b className={`text-[10px] ${comparison.status === 'improved' ? 'text-green-400' : comparison.status === 'regressed' ? 'text-red-400' : comparison.status === 'insufficient' ? 'text-yellow-400' : 'text-gray-300'}`}>{comparison.status === 'improved' ? '已验证资源下降' : comparison.status === 'regressed' ? '资源占用增长' : comparison.status === 'mixed' ? 'Flash/RAM 变化方向不一致' : comparison.status === 'unchanged' ? '汇总用量未变' : '证据不足，无法判定成效'}</b><span className="ml-auto text-[8px] uppercase text-gray-600">{comparison.confidence} confidence</span></div>{comparison.warnings.map(item => <p key={item} className="mt-1 text-[8px] text-yellow-500/70">{item}</p>)}</section>}
     <div className="min-h-0 flex-1 overflow-y-auto p-3 scrollbar-thin">
       {tab === 'overview' && <div className="space-y-3">
         <section className="rounded border border-[#30363d] bg-[#111820] p-3">
