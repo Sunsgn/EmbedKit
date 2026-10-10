@@ -3,8 +3,9 @@ import https from 'https';
 import net from 'net';
 import dgram from 'dgram';
 import { SerialPort } from 'serialport';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { spawn } from 'child_process';
+import { createReadStream } from 'fs';
 import { appendFile, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'path';
 import { URL, pathToFileURL } from 'url';
@@ -20,6 +21,7 @@ const MAX_NETWORK_EVENTS = 2000;
 const MAX_SERIAL_SESSIONS = 16;
 const MAX_BUILD_JOBS = 8;
 const MAX_BUILD_EVENTS = 5000;
+const MAX_ARTIFACT_HASH_JOBS = 2;
 const MAX_FILE_SELECTIONS = 32;
 const MAX_SELECTED_FILE_BYTES = Number(process.env.EMBEDKIT_MAX_SELECTED_FILE_BYTES || 512 * 1024 * 1024);
 const MAX_FILE_CHUNK_BYTES = 256 * 1024;
@@ -31,6 +33,7 @@ const NETWORK_STATE_FILE = process.env.EMBEDKIT_NETWORK_STATE_FILE || join(proce
 const AGENT_LOG_FILE = process.env.EMBEDKIT_AGENT_LOG_FILE || join(process.cwd(), '.embedkit-state', 'agent.log');
 const AGENT_LOG_MAX_BYTES = Number(process.env.EMBEDKIT_AGENT_LOG_MAX_BYTES || 1024 * 1024);
 let agentLoggingInstalled = false, logWriteQueue = Promise.resolve();
+let activeArtifactHashJobs = 0;
 const systemSerialAdapter = {
   list: () => SerialPort.list(),
   create: options => new SerialPort(options),
@@ -603,14 +606,35 @@ async function collectBuildArtifacts(rootPath, maxFiles = 2000) {
   return artifacts.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
 }
 
-export async function authorizeBuildArtifact(job, indexValue) {
+async function resolveCurrentBuildArtifact(job, indexValue) {
   const index = Number(indexValue), artifact = Number.isInteger(index) && index >= 0 ? job?.artifacts?.[index] : null;
   if (!artifact) throw new Error('Build artifact was not found');
   const artifactPath = resolve(artifact.path), relation = relative(job.buildPath, artifactPath);
   if (relation.startsWith('..') || isAbsolute(relation)) throw new Error('Build artifact is outside the authorized build directory');
   const info = await stat(artifactPath);
   if (!info.isFile() || info.size !== artifact.size || info.mtime.toISOString() !== artifact.modifiedAt) throw new Error('Build artifact changed after discovery; run or refresh the build again');
+  return { artifact, artifactPath, info };
+}
+
+export async function authorizeBuildArtifact(job, indexValue) {
+  const { artifactPath, info } = await resolveCurrentBuildArtifact(job, indexValue);
   return createPathSelection('file', artifactPath, info);
+}
+
+export async function hashBuildArtifact(job, indexValue) {
+  const { artifact, artifactPath, info } = await resolveCurrentBuildArtifact(job, indexValue);
+  if (info.size > MAX_SELECTED_FILE_BYTES) throw new Error(`Build artifact exceeds ${MAX_SELECTED_FILE_BYTES} byte hash limit`);
+  if (activeArtifactHashJobs >= MAX_ARTIFACT_HASH_JOBS) throw new Error('Too many artifact hash jobs are running');
+  activeArtifactHashJobs += 1;
+  try {
+    const sha256 = await new Promise((resolveHash, reject) => {
+      const hash = createHash('sha256'), input = createReadStream(artifactPath, { highWaterMark: 256 * 1024 });
+      input.on('data', chunk => hash.update(chunk)); input.on('error', reject); input.on('end', () => resolveHash(hash.digest('hex')));
+    });
+    const after = await stat(artifactPath);
+    if (after.size !== artifact.size || after.mtime.toISOString() !== artifact.modifiedAt) throw new Error('Build artifact changed while hashing; run or refresh the build again');
+    return { algorithm: 'sha256', digest: sha256, size: artifact.size, modifiedAt: artifact.modifiedAt };
+  } finally { activeArtifactHashJobs -= 1; }
 }
 
 async function detectBuildEnvironment(rootPathValue) {
@@ -1206,6 +1230,16 @@ const server = http.createServer(async (req, res) => {
     const job = buildJobs.get(buildArtifactMatch[1]);
     if (!job) { jsonRes(res, 404, { error: 'Build job not found' }); return; }
     try { jsonRes(res, 200, await authorizeBuildArtifact(job, buildArtifactMatch[2])); }
+    catch (error) { jsonRes(res, 400, { error: error.message }); }
+    return;
+  }
+
+  const buildArtifactHashMatch = pathname.match(/^\/api\/build\/jobs\/([0-9a-f-]+)\/artifacts\/(\d+)\/hash$/i);
+  if (buildArtifactHashMatch) {
+    if (req.method !== 'POST') { jsonRes(res, 405, { error: 'Build artifact hashing requires POST' }); return; }
+    const job = buildJobs.get(buildArtifactHashMatch[1]);
+    if (!job) { jsonRes(res, 404, { error: 'Build job not found' }); return; }
+    try { jsonRes(res, 200, await hashBuildArtifact(job, buildArtifactHashMatch[2])); }
     catch (error) { jsonRes(res, 400, { error: error.message }); }
     return;
   }

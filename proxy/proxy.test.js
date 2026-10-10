@@ -3,10 +3,11 @@ import test from 'node:test';
 import net from 'node:net';
 import dgram from 'node:dgram';
 import { EventEmitter, once } from 'node:events';
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { authorizeBuildArtifact, configureFilePickerAdapter, configureSerialAdapter, createBuildCommand, decodeNetworkPayload, isAllowedOrigin, parseBuildDiagnostic, receiveSerialData, startServer, validateHostAndPort, validateProxyTarget, validateSerialOptions } from './proxy.js';
+import { authorizeBuildArtifact, configureFilePickerAdapter, configureSerialAdapter, createBuildCommand, decodeNetworkPayload, hashBuildArtifact, isAllowedOrigin, parseBuildDiagnostic, receiveSerialData, startServer, validateHostAndPort, validateProxyTarget, validateSerialOptions } from './proxy.js';
 
 class VirtualSerialPort extends EventEmitter {
   constructor(options) { super(); this.options = options; this.isOpen = false; this.signals = { dtr: false, rts: false }; }
@@ -262,6 +263,8 @@ test('authorizes only unchanged artifacts discovered inside a completed build di
     const job = { buildPath: directory, artifacts: [{ name: 'app.elf', path: artifactPath, type: 'elf', size: info.size, modifiedAt: info.mtime.toISOString() }] };
     const selected = await authorizeBuildArtifact(job, 0);
     assert.ok(selected.selectionId); assert.equal(selected.name, 'app.elf');
+    const hash = await hashBuildArtifact(job, 0);
+    assert.equal(hash.algorithm, 'sha256'); assert.equal(hash.digest, createHash('sha256').update(elfWithMainSymbol()).digest('hex'));
     const metadata = await (await fetch(`${agentBaseUrl}/api/files/selections/${selected.selectionId}`)).json();
     assert.equal(metadata.name, 'app.elf'); assert.equal(metadata.path, undefined);
     await writeFile(artifactPath, Buffer.concat([elfWithMainSymbol(), Buffer.from([0])]));

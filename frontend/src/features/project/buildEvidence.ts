@@ -4,9 +4,9 @@ export interface BuildEvidenceContext { projectPath: string; system: BuildSystem
 const basename = (value: string) => value.split(/[\\/]/).filter(Boolean).pop() || '';
 const finiteDuration = (start: string, finish: string) => { const value = Date.parse(finish) - Date.parse(start); return Number.isFinite(value) && value >= 0 ? value : null; };
 const sanitizeDiagnostic = (item: BuildDiagnostic) => ({ file: basename(item.file), line: item.line, column: item.column, severity: item.severity, message: item.message });
-const sanitizeArtifact = (item: BuildArtifact) => ({ name: basename(item.name), type: item.type, size: item.size, modifiedAt: item.modifiedAt });
+const sanitizeArtifact = (item: BuildArtifact, sha256?: string) => ({ name: basename(item.name), type: item.type, size: item.size, modifiedAt: item.modifiedAt, ...(sha256 ? { sha256 } : {}) });
 
-export function createBuildEvidence(job: BuildJob, context: BuildEvidenceContext, generatedAt = new Date().toISOString()) {
+export function createBuildEvidence(job: BuildJob, context: BuildEvidenceContext, generatedAt = new Date().toISOString(), artifactHashes: Record<number, string> = {}) {
   const diagnostics = job.events.flatMap(event => event.diagnostic ? [sanitizeDiagnostic(event.diagnostic)] : []);
   return {
     schema: 'embedkit.build-evidence', version: 1, generatedAt,
@@ -22,7 +22,7 @@ export function createBuildEvidence(job: BuildJob, context: BuildEvidenceContext
       warnings: diagnostics.filter(item => item.severity === 'warning').length,
       notes: diagnostics.filter(item => item.severity === 'note').length,
     },
-    artifacts: (job.artifacts || []).map(sanitizeArtifact), diagnostics,
+    artifacts: (job.artifacts || []).map((item, index) => sanitizeArtifact(item, artifactHashes[index])), diagnostics,
     privacy: 'Absolute project, build, artifact, and source paths are omitted.',
   };
 }
