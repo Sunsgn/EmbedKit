@@ -135,5 +135,6 @@ git:      git diff --check
 | 已完成 | P5 工具箱首批完整能力 | 10 个工具按需展开；CAN、PWM、ADC、HEX、BIN 新增 5 项算法测试；MAP 复用 7 项解析测试 | `d8be8e6` |
 | 已完成 | P6 官方资料来源治理首批 | 8 个联网验证来源；唯一 ID、HTTPS、范围和日期自动校验 | `90c8755` |
 | 已完成 | P0 虚拟串口端到端闭环 | Local Agent API 覆盖枚举、连接、HEX 回环、信号、波特率和关闭；前端覆盖连接与 CRLF 发送 | `aa2f3a7` |
-| 已完成 | P4 GitHub Pages 发布门禁 | 校验 HashRouter、`/EmbedKit/` 资源前缀与文件存在性；部署前运行 Agent 测试 | 待创建 |
+| 已完成 | P4 GitHub Pages 发布门禁 | 校验 HashRouter、`/EmbedKit/` 资源前缀与文件存在性；部署前运行 Agent 测试 | `94e95df` |
+| 已完成 | P3 真实串口验收工具与规程 | 显式端口、文本/HEX、期望响应、DTR/RTS、超时与版本化 JSON 证据；Runner 自测及核心测试通过 | 待创建 |
 | 待处理 | 依赖安全基线 | 生产依赖审计发现 Monaco 间接依赖的 3 项中等级问题，当前上游无可用修复 | — |
