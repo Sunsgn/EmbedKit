@@ -1,5 +1,5 @@
 import { lazy } from 'react';
-import { Activity, Binary, Braces, CircuitBoard, FileCode2, Gauge, Hash, Map as MapIcon, Network, Replace, Timer } from 'lucide-react';
+import { Activity, Binary, Braces, Bug, CircuitBoard, FileCode2, Gauge, Hash, Map as MapIcon, Network, Replace, Timer } from 'lucide-react';
 import type { ToolDefinition } from './types';
 
 const loadBasic = <K extends 'FloatConverter' | 'UartCalculator'>(name: K) => lazy(() => import('../features/toolbox/BasicTools').then(module => ({ default: module[name] })));
@@ -16,6 +16,7 @@ export const toolRegistry: ToolDefinition[] = [
   { apiVersion: 1, id: 'map', version: '1.0.0', title: 'MAP 快速分析', description: '内存、模块、风险和优化', detail: '复用通用 MAP 解析器，快速查看格式、覆盖率、Flash/RAM 和优化建议。', category: 'analysis', keywords: ['MAP', '内存', '优化'], requiresAgent: false, icon: MapIcon, component: lazy(() => import('./map/MapTool')) },
   { apiVersion: 1, id: 'modbus', version: '1.0.0', title: 'Modbus RTU / TCP', description: '请求生成、响应解析与校验', detail: '生成常用功能码请求，校验 RTU CRC 与 TCP MBAP，并解析正常和异常响应。', category: 'protocol', keywords: ['Modbus', 'RTU', 'TCP', '寄存器'], requiresAgent: false, icon: Network, component: lazy(() => import('./modbus/ModbusTool')) },
   { apiVersion: 1, id: 'frame', version: '1.0.0', title: '自定义协议帧', description: '字段模板、生成、解析与错误定位', detail: '配置帧头、命令、长度和校验规则，生成或解析自定义二进制协议帧。', category: 'protocol', keywords: ['协议帧', 'SUM8', 'XOR8', 'CRC'], requiresAgent: false, icon: Braces, component: lazy(() => import('./frame/FrameTool')) },
+  { apiVersion: 1, id: 'hardfault', version: '1.0.0', title: 'Cortex-M HardFault', description: '堆栈、SCB 状态与故障证据', detail: '解析异常堆栈和 CFSR/HFSR，提取故障地址、原因证据与 ELF 定位输入。', category: 'analysis', keywords: ['HardFault', 'CFSR', 'HFSR', '堆栈'], requiresAgent: false, icon: Bug, component: lazy(() => import('./hardfault/HardFaultTool')) },
 ];
 
 export function findTool(id: string | undefined) { return id ? toolRegistry.find(tool => tool.id === id) ?? null : null; }
