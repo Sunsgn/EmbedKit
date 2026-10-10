@@ -1,5 +1,5 @@
 import { lazy } from 'react';
-import { Activity, Binary, Braces, Bug, Bus, CircuitBoard, FileCode2, FileDigit, Files, Gauge, Hash, Map as MapIcon, Microchip, Network, Replace, Timer } from 'lucide-react';
+import { Activity, Binary, Braces, Bug, Bus, CircuitBoard, FileCode2, FileDigit, FileSearch, Files, Gauge, Hash, Map as MapIcon, Microchip, Network, Replace, Timer } from 'lucide-react';
 import type { ToolDefinition } from './types';
 
 const loadBasic = <K extends 'FloatConverter' | 'UartCalculator'>(name: K) => lazy(() => import('../features/toolbox/BasicTools').then(module => ({ default: module[name] })));
@@ -21,6 +21,7 @@ export const toolRegistry: ToolDefinition[] = [
   { apiVersion: 1, id: 'firmware', version: '1.0.0', title: '固件合并与比较', description: '基地址、重叠策略与差异区间', detail: '按基地址合并 BIN 分段，检查冲突并比较连续差异区间、大小与 CRC32。', category: 'firmware', keywords: ['固件', '合并', '比较', 'BIN'], requiresAgent: false, icon: Files, component: lazy(() => import('./firmware/FirmwareTool')) },
   { apiVersion: 1, id: 'svd', version: '1.0.0', title: 'CMSIS-SVD 寄存器', description: '外设、寄存器、字段与地址', detail: '本地解析 SVD，检索寄存器与字段，计算绝对地址和位掩码并导出结果。', category: 'analysis', keywords: ['SVD', 'CMSIS', '寄存器', '位域'], requiresAgent: false, icon: Microchip, component: lazy(() => import('./svd/SvdTool')) },
   { apiVersion: 1, id: 'dbc', version: '1.0.0', title: 'CAN DBC 解码', description: '消息、信号、位序与物理值', detail: '本地导入 DBC，检索消息和信号，按 Intel/Motorola 位序解码帧并导出结果。', category: 'protocol', keywords: ['CAN', 'DBC', '信号', 'Motorola'], requiresAgent: false, icon: Bus, component: lazy(() => import('./dbc/DbcTool')) },
+  { apiVersion: 1, id: 'elf', version: '1.0.0', title: 'ELF / AXF 分析', description: '架构、段、节区、符号与 DWARF 能力', detail: '分析已有 ELF、AXF 或 OUT 构建产物，不重新编译；输出入口、内存布局、符号与源码定位能力证据。', category: 'analysis', keywords: ['ELF', 'AXF', 'DWARF', '符号', '地址'], requiresAgent: true, icon: FileSearch, component: lazy(() => import('./elf/ElfTool')) },
 ];
 
 export function findTool(id: string | undefined) { return id ? toolRegistry.find(tool => tool.id === id) ?? null : null; }

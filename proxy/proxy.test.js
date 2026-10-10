@@ -144,6 +144,7 @@ test('reports local agent version and capabilities', async () => {
   assert.ok(result.capabilities.includes('project-build'));
   assert.ok(result.capabilities.includes('local-picker'));
   assert.ok(result.capabilities.includes('local-file-read'));
+  assert.ok(result.capabilities.includes('elf-analysis'));
   assert.equal(response.headers.get('x-embedkit-protocol'), '1');
 });
 
@@ -190,6 +191,9 @@ test('reads selected files only through bounded revocable selection tokens', asy
 
     const oversized = await fetch(`${agentBaseUrl}/api/files/selections/${selected.selectionId}/chunk?length=${256 * 1024 + 1}`);
     assert.equal(oversized.status, 400);
+    const nonElf = await fetch(`${agentBaseUrl}/api/elf/analyze/${selected.selectionId}`);
+    assert.equal(nonElf.status, 400);
+    assert.match((await nonElf.json()).message, /ELF signature/);
     const revoked = await fetch(`${agentBaseUrl}/api/files/selections/${selected.selectionId}`, { method: 'DELETE' });
     assert.deepEqual(await revoked.json(), { revoked: true });
     assert.equal((await fetch(`${agentBaseUrl}/api/files/selections/${selected.selectionId}`)).status, 400);

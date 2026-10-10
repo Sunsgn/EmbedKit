@@ -8,6 +8,7 @@ import { spawn } from 'child_process';
 import { appendFile, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'path';
 import { URL, pathToFileURL } from 'url';
+import { analyzeElf } from './elf.js';
 
 const PORT = process.env.EMBEDKIT_PROXY_PORT || 9999;
 const HOST = process.env.EMBEDKIT_PROXY_HOST || '127.0.0.1';
@@ -117,6 +118,20 @@ async function readSelectedFileChunk(id, offsetValue, lengthValue) {
   const end = Math.min(info.size, offset + length), handle = await open(selection.path, 'r');
   try { const buffer = Buffer.alloc(end - offset), { bytesRead } = await handle.read(buffer, 0, buffer.length, offset); return { selectionId: id, offset, byteLength: bytesRead, size: info.size, eof: offset + bytesRead >= info.size, encoding: 'base64', data: buffer.subarray(0, bytesRead).toString('base64') }; }
   finally { await handle.close(); }
+}
+
+async function analyzeSelectedElf(id) {
+  const selection = getFileSelection(id, 'file'), info = await stat(selection.path);
+  if (!info.isFile() || info.size !== selection.size) throw new Error('Selected file changed after authorization');
+  const handle = await open(selection.path, 'r');
+  try {
+    return await analyzeElf({ size: info.size, read: async (offset, length) => {
+      if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0 || offset + length > info.size) throw new Error('ELF parser requested data outside the selected file');
+      const buffer = Buffer.alloc(length), { bytesRead } = await handle.read(buffer, 0, length, offset);
+      if (bytesRead !== length) throw new Error('Selected ELF file was truncated while reading');
+      return new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead);
+    } });
+  } finally { await handle.close(); }
 }
 
 function installAgentLogging() {
@@ -1090,7 +1105,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === '/api/agent/status' && req.method === 'GET') {
-    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: ['serial', 'tcp-client', 'tcp-server', 'udp-client', 'udp-server', 'session-restore', 'network-session-restore', 'structured-errors', 'project-build', 'local-picker', 'local-file-read'] });
+    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: ['serial', 'tcp-client', 'tcp-server', 'udp-client', 'udp-server', 'session-restore', 'network-session-restore', 'structured-errors', 'project-build', 'local-picker', 'local-file-read', 'elf-analysis'] });
     return;
   }
 
@@ -1110,6 +1125,13 @@ const server = http.createServer(async (req, res) => {
       const selection = getFileSelection(id), { path: _path, expiresAt, ...safe } = selection;
       jsonRes(res, 200, { ...safe, expiresAt: new Date(expiresAt).toISOString() });
     } catch (error) { jsonRes(res, 400, { error: error.message }); }
+    return;
+  }
+
+  const elfAnalysisMatch = pathname.match(/^\/api\/elf\/analyze\/([0-9a-f-]+)$/i);
+  if (elfAnalysisMatch && req.method === 'GET') {
+    try { jsonRes(res, 200, await analyzeSelectedElf(elfAnalysisMatch[1])); }
+    catch (error) { jsonRes(res, 400, { error: error.message }); }
     return;
   }
 
