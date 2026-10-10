@@ -23,6 +23,17 @@ function fixtureElf32() {
   return bytes;
 }
 
+function fixtureElf64(machine = 183) {
+  const bytes = new Uint8Array(0x400), view = new DataView(bytes.buffer), names = new TextEncoder().encode('\0.shstrtab\0.text\0.symtab\0.strtab\0'), symbols = new TextEncoder().encode('\0handler\0');
+  bytes.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1]); view.setUint16(16, 2, true); view.setUint16(18, machine, true); view.setUint32(20, 1, true); view.setBigUint64(24, 0x1000n, true); view.setBigUint64(40, 0x200n, true); view.setUint16(52, 64, true); view.setUint16(54, 56, true); view.setUint16(58, 64, true); view.setUint16(60, 5, true); view.setUint16(62, 1, true);
+  bytes.set(names, 0x80); bytes.set(symbols, 0xc0);
+  const section = (index, name, type, flags, address, offset, size, entrySize = 0, link = 0) => { const base = 0x200 + index * 64; view.setUint32(base, name, true); view.setUint32(base + 4, type, true); view.setBigUint64(base + 8, BigInt(flags), true); view.setBigUint64(base + 16, BigInt(address), true); view.setBigUint64(base + 24, BigInt(offset), true); view.setBigUint64(base + 32, BigInt(size), true); view.setUint32(base + 40, link, true); view.setBigUint64(base + 56, BigInt(entrySize), true); };
+  section(1, 1, 3, 0, 0, 0x80, names.length); section(2, 11, 1, 6, 0x1000, 0x100, 0x40); section(3, 17, 2, 0, 0, 0x140, 72, 24, 4); section(4, 25, 3, 0, 0, 0xc0, symbols.length);
+  const symbol = (offset, binding) => { view.setUint32(offset, 1, true); view.setUint8(offset + 4, (binding << 4) | 2); view.setUint16(offset + 6, 2, true); view.setBigUint64(offset + 8, 0x1000n, true); view.setBigUint64(offset + 16, 0x20n, true); };
+  symbol(0x158, 0); symbol(0x170, 1);
+  return bytes;
+}
+
 const source = bytes => ({ size: bytes.length, read: async (offset, length) => bytes.slice(offset, offset + length) });
 
 test('parses bounded ELF metadata, segments, symbols and DWARF evidence', async () => {
@@ -80,6 +91,14 @@ test('supports 64-bit big-endian headers and degrades unknown architectures expl
   assert.equal(result.entry, '0x1234567890');
   assert.equal(result.hasSymbols, false);
   assert.ok(result.warnings.some(item => /符号表/.test(item)));
+});
+
+test('parses ELF64 AArch64 and RISC-V symbols without merging duplicate local/global names', async () => {
+  const arm = await analyzeElf(source(fixtureElf64()));
+  assert.equal(arm.machine, 'AArch64'); assert.equal(arm.bits, 64); assert.equal(arm.namedSymbolCount, 2);
+  const located = lookupElfAddress(arm, '0x1010'); assert.equal(located.match, 'inside-symbol'); assert.equal(located.symbol.binding, 'GLOBAL'); assert.equal(located.symbol.offset, '0x10');
+  const riscV = await analyzeElf(source(fixtureElf64(243)));
+  assert.equal(riscV.machine, 'RISC-V'); assert.equal(riscV.symbolPreview.filter(item => item.name === 'handler').length, 2);
 });
 
 test('decompresses GNU and ELF compressed debug sections with declared-size checks', () => {
