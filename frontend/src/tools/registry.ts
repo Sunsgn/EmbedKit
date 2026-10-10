@@ -3,8 +3,6 @@ import { Activity, Binary, CircuitBoard, FileCode2, Gauge, Hash, Map as MapIcon,
 import type { ToolDefinition } from './types';
 
 const loadBasic = <K extends 'FloatConverter' | 'UartCalculator'>(name: K) => lazy(() => import('../features/toolbox/BasicTools').then(module => ({ default: module[name] })));
-const loadAdvanced = <K extends 'MapQuickTool'>(name: K) => lazy(() => import('../features/toolbox/AdvancedTools').then(module => ({ default: module[name] })));
-
 export const toolRegistry: ToolDefinition[] = [
   { apiVersion: 1, id: 'number', version: '1.0.0', title: '进制转换', description: '地址、寄存器和位掩码', detail: '支持任意长度整数及二、八、十、十六进制互转。', category: 'conversion', keywords: ['进制', '地址', '掩码'], requiresAgent: false, icon: Binary, component: lazy(() => import('./number/NumberTool')) },
   { apiVersion: 1, id: 'crc', version: '1.0.0', title: 'CRC 与字节序', description: '校验、HEX 与大小端', detail: 'CRC16-Modbus、CRC32、HEX 解析与大小端反转。', category: 'protocol', keywords: ['CRC', '校验', '字节序'], requiresAgent: false, icon: Hash, component: lazy(() => import('./crc/CrcTool')) },
@@ -15,7 +13,7 @@ export const toolRegistry: ToolDefinition[] = [
   { apiVersion: 1, id: 'adc', version: '1.0.0', title: 'ADC 与分压', description: '量化、电压和电阻分压', detail: '把 ADC 原始值换算为引脚电压、量程比例和分压前电压。', category: 'calculation', keywords: ['ADC', '分压', '电压'], requiresAgent: false, icon: Activity, component: lazy(() => import('./adc/AdcTool')) },
   { apiVersion: 1, id: 'ihex', version: '1.0.0', title: 'Intel HEX', description: '记录校验、地址与 BIN 导出', detail: '校验 Intel HEX 记录、解析扩展地址并生成空洞填充为 FF 的 BIN。', category: 'firmware', keywords: ['HEX', '固件', 'BIN'], requiresAgent: false, icon: FileCode2, component: lazy(() => import('./ihex/IntelHexTool')) },
   { apiVersion: 1, id: 'bin', version: '1.0.0', title: 'BIN 文件', description: '大小、CRC 和内容概览', detail: '在浏览器本地分析二进制文件的大小、CRC32、空白比例和头尾字节。', category: 'firmware', keywords: ['BIN', '固件', 'CRC'], requiresAgent: false, icon: Binary, component: lazy(() => import('./bin/BinaryTool')) },
-  { apiVersion: 1, id: 'map', version: '1.0.0', title: 'MAP 快速分析', description: '内存、模块、风险和优化', detail: '复用通用 MAP 解析器，快速查看格式、覆盖率、Flash/RAM 和优化建议。', category: 'analysis', keywords: ['MAP', '内存', '优化'], requiresAgent: false, icon: MapIcon, component: loadAdvanced('MapQuickTool') },
+  { apiVersion: 1, id: 'map', version: '1.0.0', title: 'MAP 快速分析', description: '内存、模块、风险和优化', detail: '复用通用 MAP 解析器，快速查看格式、覆盖率、Flash/RAM 和优化建议。', category: 'analysis', keywords: ['MAP', '内存', '优化'], requiresAgent: false, icon: MapIcon, component: lazy(() => import('./map/MapTool')) },
 ];
 
 export function findTool(id: string | undefined) { return id ? toolRegistry.find(tool => tool.id === id) ?? null : null; }
