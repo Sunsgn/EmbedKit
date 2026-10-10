@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Download, FileUp } from 'lucide-react';
-import { analyzeBinary, calculateAdc, formatHex, parseIntelHex } from '../../utils/embeddedTools';
+import { analyzeBinary, formatHex, parseIntelHex } from '../../utils/embeddedTools';
 import { analyzeMap } from '../../utils/mapAnalyzer';
 
 function Value({ label, value }: { label: string; value: string | number }) {
@@ -8,14 +8,7 @@ function Value({ label, value }: { label: string; value: string | number }) {
 }
 
 function ErrorText({ error }: { error: string }) { return error ? <p className="mb-3 rounded border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-300">{error}</p> : null; }
-const numberValue = (value: string) => Number(value);
 const formatSize = (value: number) => value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(2)} MiB` : value >= 1024 ? `${(value / 1024).toFixed(2)} KiB` : `${value} B`;
-
-export function AdcTool() {
-  const [bits, setBits] = useState('12'), [reference, setReference] = useState('3.3'), [raw, setRaw] = useState('2048'), [top, setTop] = useState('10000'), [bottom, setBottom] = useState('10000');
-  const result = useMemo(() => { try { return { value: calculateAdc(numberValue(bits), numberValue(reference), numberValue(raw), numberValue(top), numberValue(bottom)), error: '' }; } catch (reason) { return { value: null, error: reason instanceof Error ? reason.message : String(reason) }; } }, [bits, bottom, raw, reference, top]);
-  return <><div className="mb-3 grid grid-cols-2 gap-2"><label className="text-[11px] text-gray-500">ADC 位数<input type="number" value={bits} onChange={event => setBits(event.target.value)} className="field mt-1" /></label><label className="text-[11px] text-gray-500">参考电压 V<input type="number" step="any" value={reference} onChange={event => setReference(event.target.value)} className="field mt-1" /></label><label className="text-[11px] text-gray-500">原始值<input type="number" value={raw} onChange={event => setRaw(event.target.value)} className="field mt-1" /></label><span /><label className="text-[11px] text-gray-500">上拉电阻 Ω<input type="number" value={top} onChange={event => setTop(event.target.value)} className="field mt-1" /></label><label className="text-[11px] text-gray-500">下拉电阻 Ω<input type="number" value={bottom} onChange={event => setBottom(event.target.value)} className="field mt-1" /></label></div><ErrorText error={result.error} />{result.value && <div className="grid gap-2 sm:grid-cols-2"><Value label="满量程码" value={result.value.maxCode} /><Value label="LSB" value={`${(result.value.lsbVoltage * 1000).toFixed(6)} mV`} /><Value label="ADC 引脚电压" value={`${result.value.pinVoltage.toFixed(6)} V`} /><Value label="分压前电压" value={`${result.value.sourceVoltage.toFixed(6)} V`} /><Value label="量程比例" value={`${result.value.percent.toFixed(3)} %`} /></div>}</>;
-}
 
 function downloadBytes(bytes: Uint8Array, name: string) {
   const url = URL.createObjectURL(new Blob([Uint8Array.from(bytes)], { type: 'application/octet-stream' })), link = document.createElement('a');
