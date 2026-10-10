@@ -1,20 +1,56 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FileUp, Search } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { analyzeMap } from './map';
 import { lookupMapAddress, type MapAddressLookup } from '../../utils/mapAnalyzer';
+import { decodeLocalFileChunk, getLocalFileMetadata, readLocalFileChunk, revokeLocalPath } from '../../services/localFiles';
 
+const MAX_MAP_BYTES = 16 * 1024 * 1024;
+const MAP_CHUNK_BYTES = 256 * 1024;
 const formatSize = (value: number) => value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(2)} MiB` : value >= 1024 ? `${(value / 1024).toFixed(2)} KiB` : `${value} B`;
 const hex = (value: number) => `0x${value.toString(16).toUpperCase()}`;
 function Value({ label, value }: { label: string; value: string | number }) { return <div className="rounded-lg bg-[#0d1117] px-3 py-2"><span className="block text-[10px] text-gray-600">{label}</span><code className="mt-1 block break-all text-xs text-gray-200">{value}</code></div>; }
 
 export default function MapTool() {
+  const location = useLocation(), navigate = useNavigate(), consumedIncoming = useRef(false);
   const [source, setSource] = useState(''), [address, setAddress] = useState(''), [lookup, setLookup] = useState<MapAddressLookup | null>(null), [lookupError, setLookupError] = useState('');
+  const [fileName, setFileName] = useState(''), [error, setError] = useState(''), [progress, setProgress] = useState<number | null>(null);
   const analysis = useMemo(() => source.trim() ? analyzeMap(source) : null, [source]);
   const locate = () => { if (!analysis) return; try { setLookup(lookupMapAddress(analysis, address)); setLookupError(''); } catch (error) { setLookup(null); setLookupError(error instanceof Error ? error.message : String(error)); } };
+  const consumeSelection = useCallback(async (selectionId: string, incomingName: string) => {
+    setError(''); setLookup(null); setProgress(0);
+    try {
+      const metadata = await getLocalFileMetadata(selectionId);
+      if (metadata.size > MAX_MAP_BYTES) throw new Error(`MAP 文件超过 ${formatSize(MAX_MAP_BYTES)} 上限`);
+      const decoder = new TextDecoder('utf-8'), parts: string[] = []; let offset = 0;
+      while (offset < metadata.size) {
+        const chunk = await readLocalFileChunk(selectionId, offset, Math.min(MAP_CHUNK_BYTES, metadata.size - offset));
+        if (chunk.size !== metadata.size || chunk.offset !== offset || chunk.byteLength <= 0) throw new Error('MAP 文件分块读取结果不一致');
+        parts.push(decoder.decode(decodeLocalFileChunk(chunk), { stream: !chunk.eof }));
+        offset += chunk.byteLength; setProgress(metadata.size ? Math.round(offset / metadata.size * 100) : 100);
+        if (chunk.eof) break;
+      }
+      if (offset !== metadata.size) throw new Error('MAP 文件未完整读取');
+      setSource(parts.join('')); setFileName(incomingName || metadata.name); setProgress(100);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); setProgress(null); }
+    finally { await revokeLocalPath(selectionId).catch(() => undefined); }
+  }, []);
+  useEffect(() => {
+    const incoming = location.state as { selectionId?: string; fileName?: string; source?: string } | null;
+    if (consumedIncoming.current || !incoming?.selectionId || incoming.source !== 'build-artifact') return;
+    consumedIncoming.current = true; void consumeSelection(incoming.selectionId, incoming.fileName || 'MAP');
+    void navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+  }, [consumeSelection, location.pathname, location.search, location.state, navigate]);
+  const importBrowserFile = async (file?: File) => {
+    if (!file) return; setError(''); setLookup(null);
+    if (file.size > MAX_MAP_BYTES) { setError(`MAP 文件超过 ${formatSize(MAX_MAP_BYTES)} 上限`); return; }
+    try { setSource(await file.text()); setFileName(file.name); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+  };
   return <>
+    {(fileName || progress !== null) && <div className="mb-3 rounded border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-[11px] text-blue-300">{fileName || '正在读取 MAP'}{progress !== null && progress < 100 ? ` · ${progress}%` : ''}</div>}
+    {error && <div className="mb-3 rounded border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-300">{error}</div>}
     <label className="mb-3 block text-[11px] text-gray-500">MAP 内容<textarea value={source} onChange={event => { setSource(event.target.value); setLookup(null); }} rows={9} placeholder="粘贴 MAP 内容，或导入 .map 文件" className="field mt-1 resize-y font-mono" /></label>
-    <label className="mb-3 inline-flex cursor-pointer items-center gap-2 rounded border border-[#30363d] px-3 py-2 text-xs text-gray-400"><FileUp size={13} />导入 MAP 文件<input type="file" accept=".map,text/plain" className="hidden" onChange={event => { const file = event.target.files?.[0]; if (file) void file.text().then(value => { setSource(value); setLookup(null); }); }} /></label>
+    <label className="mb-3 inline-flex cursor-pointer items-center gap-2 rounded border border-[#30363d] px-3 py-2 text-xs text-gray-400"><FileUp size={13} />导入 MAP 文件<input type="file" accept=".map,text/plain" className="hidden" onChange={event => void importBrowserFile(event.target.files?.[0])} /></label>
     {analysis && <>
       <div className="grid gap-2 sm:grid-cols-2"><Value label="格式" value={analysis.formatLabel} /><Value label="覆盖率 / 置信度" value={`${analysis.coverage.score}% / ${analysis.coverage.confidence}`} /><Value label="Flash" value={formatSize(analysis.totals.flash)} /><Value label="RAM" value={formatSize(analysis.totals.ram)} /><Value label="模块 / 符号" value={`${analysis.modules.length} / ${analysis.symbols.length}`} /><Value label="优化机会" value={analysis.optimizations.length} /></div>
       {analysis.warnings.length > 0 && <div className="mt-3 rounded border border-yellow-500/20 bg-yellow-500/5 p-3 text-xs text-yellow-300">{analysis.warnings.join('；')}</div>}

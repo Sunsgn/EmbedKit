@@ -71,4 +71,17 @@ describe('ProjectBuildPanel capability-gated workflow', () => {
     await waitFor(() => expect(buildAgent.authorizeBuildArtifact).toHaveBeenCalledWith('build-elf', 0));
     expect(onArtifactAnalyze).toHaveBeenCalledWith(artifact, 'selection-elf');
   });
+
+  it('offers the same controlled authorization for a discovered MAP artifact', async () => {
+    const onArtifactAnalyze = vi.fn(), artifact = { name: 'app.map', path: 'D:\\firmware\\demo\\build\\app.map', type: 'map', size: 2048, modifiedAt: '2026-10-10T00:00:00.000Z' };
+    vi.mocked(buildAgent.createBuildJob).mockResolvedValue({ id: 'build-map', state: 'passed', exitCode: 0, startedAt: '', finishedAt: '', artifacts: [artifact], events: [] });
+    vi.mocked(buildAgent.authorizeBuildArtifact).mockResolvedValue({ cancelled: false, kind: 'file', name: 'app.map', selectionId: 'selection-map' });
+    render(<ProjectBuildPanel {...props} onArtifactAnalyze={onArtifactAnalyze} />);
+    fireEvent.change(screen.getByPlaceholderText(/my_project/), { target: { value: 'D:\\firmware\\demo' } });
+    await waitFor(() => expect(screen.getByRole('button', { name: '构建' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '构建' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'MAP 分析' }));
+    await waitFor(() => expect(buildAgent.authorizeBuildArtifact).toHaveBeenCalledWith('build-map', 0));
+    expect(onArtifactAnalyze).toHaveBeenCalledWith(artifact, 'selection-map');
+  });
 });
