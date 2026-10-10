@@ -6,9 +6,10 @@ export interface ArchitectureCallSite { name: string; line: number; order: numbe
 export interface ArchitectureNode { id: string; name: string; kind: ArchitectureNodeKind; file: string; line: number; evidence: string; calls: string[]; callSites: ArchitectureCallSite[] }
 export interface ArchitectureLayer { id: string; name: string; description: string; files: string[]; nodes: ArchitectureNode[] }
 export interface ArchitectureEdge { from: string; to: string; type: 'calls' | 'creates' | 'includes' }
-export interface ExecutionFlowStep { id: string; name: string; file: string; line: number; depth: number; relation: 'start' | 'call' | 'create' | 'external' | 'cycle'; control: 'sequence' | 'loop' | 'branch'; condition?: string; internal: boolean }
+export interface ExecutionFlowStep { id: string; name: string; file: string; line: number; depth: number; relation: 'start' | 'call' | 'create' | 'external' | 'cycle' | 'ambiguous'; control: 'sequence' | 'loop' | 'branch'; condition?: string; internal: boolean }
 export interface ExecutionFlow { id: string; title: string; context: 'startup' | 'task' | 'interrupt' | 'callback'; root: ArchitectureNode; steps: ExecutionFlowStep[]; confidence: 'high' | 'medium' | 'low'; notes: string[] }
 export interface ArchitectureCoverage { sourceFiles: number; parsedFunctions: number; callSites: number; resolvedCallSites: number; resolvedRate: number }
+export interface ArchitectureAmbiguity { name: string; definitions: Array<{ file: string; line: number }>; callSites: number }
 export interface ProjectArchitecture {
   runtime: string;
   confidence: 'high' | 'medium' | 'low';
@@ -23,6 +24,7 @@ export interface ProjectArchitecture {
   flows: ExecutionFlow[];
   unknownCalls: number;
   coverage: ArchitectureCoverage;
+  ambiguities: ArchitectureAmbiguity[];
 }
 
 const stripComments = (value: string) => value
@@ -50,7 +52,7 @@ function controlBlocks(body: string) {
   return blocks;
 }
 
-function flowFor(root: ArchitectureNode, context: ExecutionFlow['context'], definitions: Map<string, ArchitectureNode>, createdTasks: Map<string, string[]>): ExecutionFlow {
+function flowFor(root: ArchitectureNode, context: ExecutionFlow['context'], definitions: Map<string, ArchitectureNode>, createdTasks: Map<string, string[]>, ambiguousNames: Set<string>): ExecutionFlow {
   const steps: ExecutionFlowStep[] = [{ id: `${root.id}:start`, name: root.name, file: root.file, line: root.line, depth: 0, relation: 'start', control: 'sequence', internal: true }];
   const notes: string[] = [];
   const expand = (node: ArchitectureNode, depth: number, path: Set<string>) => {
@@ -70,6 +72,8 @@ function flowFor(root: ArchitectureNode, context: ExecutionFlow['context'], defi
         const cycle = path.has(target.id);
         steps.push({ id: `${node.id}:${site.order}:${target.id}`, name: target.name, file: target.file, line: target.line, depth: depth + 1, relation: cycle ? 'cycle' : 'call', control: site.control, condition: site.condition, internal: true });
         if (!cycle) expand(target, depth + 1, new Set([...path, target.id]));
+      } else if (ambiguousNames.has(site.name)) {
+        steps.push({ id: `${node.id}:${site.order}:ambiguous`, name: `${site.name} （多定义）`, file: node.file, line: site.line, depth: depth + 1, relation: 'ambiguous', control: site.control, condition: site.condition, internal: false });
       } else if (!/^[A-Z][A-Z0-9_]+$/.test(site.name)) {
         steps.push({ id: `${node.id}:${site.order}:external`, name: site.name, file: node.file, line: site.line, depth: depth + 1, relation: 'external', control: site.control, condition: site.condition, internal: false });
       }
@@ -77,6 +81,7 @@ function flowFor(root: ArchitectureNode, context: ExecutionFlow['context'], defi
   };
   expand(root, 0, new Set([root.id]));
   if (steps.some(step => step.relation === 'cycle')) notes.push('检测到递归或循环调用，已停止继续展开。');
+  if (steps.some(step => step.relation === 'ambiguous')) notes.push('同名函数存在多个定义，缺少编译单元和链接信息时不做猜测。');
   if (context === 'task') notes.push('该任务与其他任务并发执行，任务间先后顺序由调度器和同步对象决定。');
   if (context === 'interrupt') notes.push('中断触发时机由硬件决定，不属于主流程的固定顺序。');
   if (context === 'callback') notes.push('回调由外设、协议栈或事件循环触发，静态分析不能确定其运行时机和上下文。');
@@ -113,7 +118,8 @@ function runtimeOf(content: string) {
 export function analyzeProjectArchitecture(files: ArchitectureFile[]): ProjectArchitecture {
   const sources = files.filter(file => /\.(?:c|cc|cpp|h|hpp|s|S)$/i.test(file.name));
   const allContent = sources.map(file => file.content).join('\n');
-  const definitions = new Map<string, ArchitectureNode>();
+  const definitionCandidates = new Map<string, ArchitectureNode[]>(),
+    parsedNodes: ArchitectureNode[] = [];
   const bodies = new Map<string, string>();
   for (const file of sources) {
     const content = stripComments(file.content);
@@ -130,9 +136,19 @@ export function analyzeProjectArchitecture(files: ArchitectureFile[]): ProjectAr
         return { name: item[1], line: lineOf(content, start + 1 + offset), order, control: block?.control ?? 'sequence', condition: block?.condition } satisfies ArchitectureCallSite;
       });
       const node = { id: nodeId(file.path, name, line), name, kind, file: file.path, line, evidence: `${name}(...)`, calls: [...new Set(callSites.map(item => item.name))], callSites } satisfies ArchitectureNode;
-      definitions.set(name, node); bodies.set(name, body);
+      parsedNodes.push(node);
+      definitionCandidates.set(name, [...(definitionCandidates.get(name) ?? []), node]);
+      bodies.set(name, body);
     }
   }
+  const ambiguousNames = new Set(
+      [...definitionCandidates].filter(([, items]) => items.length > 1).map(([name]) => name),
+    ),
+    definitions = new Map(
+      [...definitionCandidates]
+        .filter(([, items]) => items.length === 1)
+        .map(([name, items]) => [name, items[0]]),
+    );
   const taskNames = new Set<string>();
   const taskPatterns = [
     /(?:xTaskCreate|xTaskCreateStatic|osThreadNew|osThreadCreate)\s*\(\s*&?([A-Za-z_]\w*)/g,
@@ -163,7 +179,7 @@ export function analyzeProjectArchitecture(files: ArchitectureFile[]): ProjectAr
     if (node && node.kind === 'module')
       definitions.set(name, { ...node, kind: 'callback' });
   }
-  const nodes = [...definitions.values()];
+  const nodes = parsedNodes.map(node => definitions.get(node.name) ?? node);
   const createdTasks = new Map<string, string[]>();
   for (const node of nodes) {
     const body = bodies.get(node.name) ?? '';
@@ -215,7 +231,7 @@ export function analyzeProjectArchitecture(files: ArchitectureFile[]): ProjectAr
     return { id, name, description, files: [...new Set(layerFiles.map(file => file.path))], nodes: layerNodes };
   }).filter(layer => layer.files.length || layer.nodes.length);
   const runtime = runtimeOf(files.map(file => `${file.path}\n${file.content}`).join('\n'));
-  const flows = [...entries.map(node => flowFor(node, 'startup' as const, definitions, createdTasks)), ...tasks.map(node => flowFor(node, 'task' as const, definitions, createdTasks)), ...interrupts.map(node => flowFor(node, 'interrupt' as const, definitions, createdTasks)), ...callbacks.map(node => flowFor(node, 'callback' as const, definitions, createdTasks))];
+  const flows = [...entries.map(node => flowFor(node, 'startup' as const, definitions, createdTasks, ambiguousNames)), ...tasks.map(node => flowFor(node, 'task' as const, definitions, createdTasks, ambiguousNames)), ...interrupts.map(node => flowFor(node, 'interrupt' as const, definitions, createdTasks, ambiguousNames)), ...callbacks.map(node => flowFor(node, 'callback' as const, definitions, createdTasks, ambiguousNames))];
   const callSites = nodes.flatMap(node => node.callSites),
     resolvedCallSites = callSites.filter(site => definitions.has(site.name)).length,
     coverage = {
@@ -224,8 +240,15 @@ export function analyzeProjectArchitecture(files: ArchitectureFile[]): ProjectAr
       callSites: callSites.length,
       resolvedCallSites,
       resolvedRate: callSites.length ? resolvedCallSites / callSites.length : 0,
-    };
-  const evidence = [runtime !== '未确定执行模型' ? `运行模型：${runtime}` : '', entries.length ? `入口 ${entries.map(item => item.name).join('、')}` : '', tasks.length ? `${tasks.length} 个任务/线程` : '', interrupts.length ? `${interrupts.length} 个中断` : '', callbacks.length ? `${callbacks.length} 个注册回调` : '', callSites.length ? `调用解析率 ${(coverage.resolvedRate * 100).toFixed(0)}%` : '', edges.length ? `${edges.length} 条静态依赖` : ''].filter(Boolean);
-  const score = (runtime !== '未确定执行模型' ? 25 : 0) + (entries.length ? 25 : 0) + (nodes.length >= 5 ? 20 : nodes.length ? 10 : 0) + (edges.length ? 20 : 0) + (layers.length >= 3 ? 10 : 0);
-  return { runtime, confidence: score >= 75 ? 'high' : score >= 45 ? 'medium' : 'low', evidence, entries, tasks, interrupts, callbacks, initChain, layers, edges, flows, unknownCalls, coverage };
+    },
+    ambiguities = [...definitionCandidates]
+      .filter(([, items]) => items.length > 1)
+      .map(([name, items]) => ({
+        name,
+        definitions: items.map(item => ({ file: item.file, line: item.line })),
+        callSites: callSites.filter(site => site.name === name).length,
+      }));
+  const evidence = [runtime !== '未确定执行模型' ? `运行模型：${runtime}` : '', entries.length ? `入口 ${entries.map(item => item.name).join('、')}` : '', tasks.length ? `${tasks.length} 个任务/线程` : '', interrupts.length ? `${interrupts.length} 个中断` : '', callbacks.length ? `${callbacks.length} 个注册回调` : '', ambiguities.length ? `${ambiguities.length} 个同名定义歧义` : '', callSites.length ? `调用解析率 ${(coverage.resolvedRate * 100).toFixed(0)}%` : '', edges.length ? `${edges.length} 条静态依赖` : ''].filter(Boolean);
+  const score = (runtime !== '未确定执行模型' ? 25 : 0) + (entries.length ? 25 : 0) + (nodes.length >= 5 ? 20 : nodes.length ? 10 : 0) + (edges.length ? 20 : 0) + (layers.length >= 3 ? 10 : 0) - Math.min(20, ambiguities.length * 5);
+  return { runtime, confidence: score >= 75 ? 'high' : score >= 45 ? 'medium' : 'low', evidence, entries, tasks, interrupts, callbacks, initChain, layers, edges, flows, unknownCalls, coverage, ambiguities };
 }

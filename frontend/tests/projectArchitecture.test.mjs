@@ -77,3 +77,25 @@ int main(void) { event_init(); event_loop(); }
   assert.equal(result.coverage.resolvedCallSites > 0, true);
   assert.equal(result.coverage.resolvedRate < 1, true);
 });
+
+test('keeps duplicate static function names ambiguous instead of linking the wrong file', () => {
+  const files = [
+    { name: 'main.c', path: '/app/main.c', content: `
+static void service(void) { board_poll(); }
+int main(void) { service(); }
+` },
+    { name: 'transport.c', path: '/net/transport.c', content: `
+static void service(void) { socket_poll(); }
+void transport_run(void) { service(); }
+` },
+  ];
+  const result = analyzeProjectArchitecture(files);
+  assert.equal(result.ambiguities.length, 1);
+  assert.equal(result.ambiguities[0].name, 'service');
+  assert.equal(result.ambiguities[0].definitions.length, 2);
+  assert.equal(result.coverage.parsedFunctions, 4);
+  const startup = result.flows.find(item => item.context === 'startup');
+  assert.equal(startup.steps.some(item => item.relation === 'ambiguous'), true);
+  assert.equal(startup.steps.some(item => item.name === 'socket_poll'), false);
+  assert.match(startup.notes.join(' '), /不做猜测/);
+});
