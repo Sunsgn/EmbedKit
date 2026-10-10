@@ -16,7 +16,13 @@ import {
   Usb,
   XCircle,
 } from "lucide-react";
-import { LOCAL_PROXY_BASE } from "../services/aiService";
+import { getAgentStatus } from "../services/agentClient";
+import {
+  closeNetworkSession,
+  openNetworkSession,
+  readNetworkSession,
+  sendNetworkData,
+} from "../services/networkAgent";
 import {
   listSerialSessions,
   readSerialSession,
@@ -334,9 +340,7 @@ export default function TestAutomationPage() {
       listTestRuns(),
       getProductSetting<string>("activeProjectId"),
       getProductSetting<string>("activeDeviceId"),
-      fetch(`${LOCAL_PROXY_BASE}/api/agent/status`)
-        .then((response) => (response.ok ? response.json() : null))
-        .catch(() => null),
+      getAgentStatus().catch(() => null),
       listDeviceProjects(),
     ]).then(([runs, projectId, deviceId, status, projects]) => {
       setRunHistory(runs);
@@ -447,11 +451,7 @@ export default function TestAutomationPage() {
       ...sessions.map(([channel, item]) => ({
         name: channel.toUpperCase(),
         run: async () => {
-          const response = await fetch(
-            `${LOCAL_PROXY_BASE}/api/network/sessions/${item.id}`,
-            { method: "DELETE" },
-          );
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          await closeNetworkSession(item.id);
         },
       })),
     ]);
@@ -582,20 +582,13 @@ export default function TestAutomationPage() {
     const existing = agentSessions.current.get(channel);
     if (existing) return existing;
     const config = networkConfigs[channel],
-      response = await fetch(`${LOCAL_PROXY_BASE}/api/network/sessions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: channel,
-          mode: config.mode,
-          host: config.host,
-          port: Number(config.port),
-          localPort: Number(config.localPort),
-        }),
+      result = await openNetworkSession({
+        type: channel,
+        mode: config.mode,
+        host: config.host,
+        port: Number(config.port),
+        localPort: Number(config.localPort),
       });
-    const result = (await response.json()) as { id?: string; error?: string };
-    if (!response.ok || !result.id)
-      throw new Error(result.error || "无法创建网络会话");
     const runtime = { id: result.id, after: 0 };
     agentSessions.current.set(channel, runtime);
     addRunLog(
@@ -606,18 +599,7 @@ export default function TestAutomationPage() {
   };
   const pollAgent = async (channel: "tcp" | "udp") => {
     const runtime = await ensureAgent(channel);
-    const response = await fetch(
-      `${LOCAL_PROXY_BASE}/api/network/sessions/${runtime.id}?after=${runtime.after}`,
-    );
-    if (!response.ok) throw new Error("读取网络会话失败");
-    const result = (await response.json()) as {
-      events: Array<{
-        id: number;
-        direction: string;
-        text: string;
-        hex: string;
-      }>;
-    };
+    const result = await readNetworkSession(runtime.id, runtime.after);
     for (const event of result.events) {
       runtime.after = Math.max(runtime.after, event.id);
       if (event.direction === "rx") {
@@ -662,18 +644,7 @@ export default function TestAutomationPage() {
       } else (await ensureWebSocket()).send(data);
     } else {
       const runtime = await ensureAgent(step.channel);
-      const response = await fetch(
-        `${LOCAL_PROXY_BASE}/api/network/sessions/${runtime.id}/send`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ encoding: step.hex ? "hex" : "text", data }),
-        },
-      );
-      if (!response.ok) {
-        const result = (await response.json()) as { error?: string };
-        throw new Error(result.error || "发送失败");
-      }
+      await sendNetworkData(runtime.id, data, step.hex ? "hex" : "text");
     }
     addRunLog("tx", `${channelLabels[step.channel]} → ${step.data}`);
   };
