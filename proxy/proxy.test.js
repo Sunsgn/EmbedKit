@@ -2,13 +2,29 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import net from 'node:net';
 import dgram from 'node:dgram';
-import { once } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { resolve } from 'node:path';
-import { createBuildCommand, decodeNetworkPayload, isAllowedOrigin, receiveSerialData, startServer, validateHostAndPort, validateProxyTarget, validateSerialOptions } from './proxy.js';
+import { configureSerialAdapter, createBuildCommand, decodeNetworkPayload, isAllowedOrigin, receiveSerialData, startServer, validateHostAndPort, validateProxyTarget, validateSerialOptions } from './proxy.js';
+
+class VirtualSerialPort extends EventEmitter {
+  constructor(options) { super(); this.options = options; this.isOpen = false; this.signals = { dtr: false, rts: false }; }
+  open(callback) { this.isOpen = true; queueMicrotask(() => callback()); }
+  close(callback) { this.isOpen = false; queueMicrotask(() => { this.emit('close'); callback?.(); }); }
+  write(payload, callback) { const copy = Buffer.from(payload); queueMicrotask(() => { this.emit('data', copy); callback(); }); }
+  drain(callback) { queueMicrotask(() => callback()); }
+  set(signals, callback) { this.signals = { ...this.signals, ...signals }; queueMicrotask(() => callback()); }
+  update(options, callback) { this.options = { ...this.options, ...options }; queueMicrotask(() => callback()); }
+}
+
+const virtualSerialAdapter = {
+  list: async () => [{ path: 'VIRTUAL0', manufacturer: 'EmbedKit', serialNumber: 'EK-LOOP-1', friendlyName: 'EmbedKit Virtual Loopback' }],
+  create: options => new VirtualSerialPort(options),
+};
 
 let agent;
 let agentBaseUrl;
 test.before(async () => {
+  configureSerialAdapter(virtualSerialAdapter);
   agent = startServer({ detectAi: false, restoreSerial: false, port: 0 });
   await once(agent, 'listening');
   const address = agent.address();
@@ -17,6 +33,7 @@ test.before(async () => {
 });
 test.after(async () => {
   await new Promise(resolve => agent.close(resolve));
+  configureSerialAdapter(null);
 });
 
 test('allows the development and deployed frontend origins', () => {
@@ -87,6 +104,31 @@ test('lists serial ports through the local agent', async () => {
   assert.equal(response.status, 200);
   const result = await response.json();
   assert.ok(Array.isArray(result.ports));
+  assert.equal(result.ports[0].path, 'VIRTUAL0');
+});
+
+test('runs a complete virtual serial session through the Local Agent API', async () => {
+  const createdResponse = await fetch(`${agentBaseUrl}/api/serial/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: 'VIRTUAL0', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false, frameMode: 'raw' }) });
+  assert.equal(createdResponse.status, 201);
+  const created = await createdResponse.json();
+  assert.equal(created.state, 'connected');
+
+  const sendResponse = await fetch(`${agentBaseUrl}/api/serial/sessions/${created.id}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ encoding: 'hex', data: 'DE AD BE EF' }) });
+  assert.equal(sendResponse.status, 200);
+  const current = await (await fetch(`${agentBaseUrl}/api/serial/sessions/${created.id}`)).json();
+  assert.equal(current.txBytes, 4);
+  assert.equal(current.rxBytes, 4);
+  assert.ok(current.events.some(event => event.direction === 'tx' && event.hex === 'DE AD BE EF'));
+  assert.ok(current.events.some(event => event.direction === 'rx' && event.hex === 'DE AD BE EF'));
+
+  const signals = await fetch(`${agentBaseUrl}/api/serial/sessions/${created.id}/signals`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dtr: true, rts: true }) });
+  assert.equal(signals.status, 200);
+  const config = await fetch(`${agentBaseUrl}/api/serial/sessions/${created.id}/config`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ baudRate: 921600 }) });
+  assert.equal(config.status, 200);
+  assert.equal((await config.json()).baudRate, 921600);
+
+  const closed = await fetch(`${agentBaseUrl}/api/serial/sessions/${created.id}`, { method: 'DELETE' });
+  assert.equal(closed.status, 200);
 });
 
 test('reports local agent version and capabilities', async () => {

@@ -24,6 +24,17 @@ const NETWORK_STATE_FILE = process.env.EMBEDKIT_NETWORK_STATE_FILE || join(proce
 const AGENT_LOG_FILE = process.env.EMBEDKIT_AGENT_LOG_FILE || join(process.cwd(), '.embedkit-state', 'agent.log');
 const AGENT_LOG_MAX_BYTES = Number(process.env.EMBEDKIT_AGENT_LOG_MAX_BYTES || 1024 * 1024);
 let agentLoggingInstalled = false, logWriteQueue = Promise.resolve();
+const systemSerialAdapter = {
+  list: () => SerialPort.list(),
+  create: options => new SerialPort(options),
+};
+let serialAdapter = systemSerialAdapter;
+
+export function configureSerialAdapter(adapter) {
+  if (adapter == null) { serialAdapter = systemSerialAdapter; return; }
+  if (typeof adapter.list !== 'function' || typeof adapter.create !== 'function') throw new Error('Serial adapter must provide list() and create()');
+  serialAdapter = adapter;
+}
 
 function installAgentLogging() {
   if (agentLoggingInstalled) return;
@@ -247,7 +258,7 @@ export function receiveSerialData(session, data) {
 }
 
 async function listSerialPorts() {
-  return (await SerialPort.list()).map(port => ({ path: port.path, manufacturer: port.manufacturer || '', serialNumber: port.serialNumber || '', vendorId: port.vendorId || '', productId: port.productId || '', pnpId: port.pnpId || '', friendlyName: port.friendlyName || port.path }));
+  return (await serialAdapter.list()).map(port => ({ path: port.path, manufacturer: port.manufacturer || '', serialNumber: port.serialNumber || '', vendorId: port.vendorId || '', productId: port.productId || '', pnpId: port.pnpId || '', friendlyName: port.friendlyName || port.path }));
 }
 
 async function createSerialSession(input) {
@@ -260,7 +271,7 @@ async function createSerialSession(input) {
     return { session: existing, reused: true };
   }
   if (serialSessions.size >= MAX_SERIAL_SESSIONS) throw new Error(`At most ${MAX_SERIAL_SESSIONS} serial sessions may be open`);
-  const id = randomUUID(), port = new SerialPort({ path: options.path, baudRate: options.baudRate, dataBits: options.dataBits, stopBits: options.stopBits, parity: options.parity, rtscts: options.flowControl === 'hardware', autoOpen: false });
+  const id = randomUUID(), port = serialAdapter.create({ path: options.path, baudRate: options.baudRate, dataBits: options.dataBits, stopBits: options.stopBits, parity: options.parity, rtscts: options.flowControl === 'hardware', autoOpen: false });
   const session = { id, ...options, state: 'connecting', events: [], lastEventId: 0, rxBytes: 0, txBytes: 0, openedAt: new Date().toISOString(), port, rxBuffer: Buffer.alloc(0), rxTimer: null };
   serialSessions.set(id, session); pushSerialEvent(session, 'system', `正在打开 ${options.path} · ${options.baudRate} ${options.dataBits}${options.parity === 'none' ? 'N' : options.parity[0].toUpperCase()}${options.stopBits}`);
   port.on('data', data => receiveSerialData(session, data));
