@@ -3,7 +3,7 @@ import { toolRegistry, validateToolRegistry } from './registry';
 
 describe('tool registry', () => {
   it('uses stable unique ids and the supported contract version', () => {
-    expect(toolRegistry).toHaveLength(14);
+    expect(toolRegistry).toHaveLength(15);
     expect(validateToolRegistry()).toEqual([]);
   });
 

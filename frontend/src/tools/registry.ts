@@ -1,5 +1,5 @@
 import { lazy } from 'react';
-import { Activity, Binary, Braces, Bug, CircuitBoard, FileCode2, FileDigit, Gauge, Hash, Map as MapIcon, Network, Replace, Timer } from 'lucide-react';
+import { Activity, Binary, Braces, Bug, CircuitBoard, FileCode2, FileDigit, Files, Gauge, Hash, Map as MapIcon, Network, Replace, Timer } from 'lucide-react';
 import type { ToolDefinition } from './types';
 
 const loadBasic = <K extends 'FloatConverter' | 'UartCalculator'>(name: K) => lazy(() => import('../features/toolbox/BasicTools').then(module => ({ default: module[name] })));
@@ -18,6 +18,7 @@ export const toolRegistry: ToolDefinition[] = [
   { apiVersion: 1, id: 'frame', version: '1.0.0', title: '自定义协议帧', description: '字段模板、生成、解析与错误定位', detail: '配置帧头、命令、长度和校验规则，生成或解析自定义二进制协议帧。', category: 'protocol', keywords: ['协议帧', 'SUM8', 'XOR8', 'CRC'], requiresAgent: false, icon: Braces, component: lazy(() => import('./frame/FrameTool')) },
   { apiVersion: 1, id: 'hardfault', version: '1.0.0', title: 'Cortex-M HardFault', description: '堆栈、SCB 状态与故障证据', detail: '解析异常堆栈和 CFSR/HFSR，提取故障地址、原因证据与 ELF 定位输入。', category: 'analysis', keywords: ['HardFault', 'CFSR', 'HFSR', '堆栈'], requiresAgent: false, icon: Bug, component: lazy(() => import('./hardfault/HardFaultTool')) },
   { apiVersion: 1, id: 'srec', version: '1.0.0', title: 'Motorola SREC', description: '记录校验、地址与 BIN 导出', detail: '解析 S1/S2/S3 数据及计数、终止记录，校验并导出空洞填充为 FF 的 BIN。', category: 'firmware', keywords: ['SREC', 'S19', 'Motorola', '固件'], requiresAgent: false, icon: FileDigit, component: lazy(() => import('./srec/SrecTool')) },
+  { apiVersion: 1, id: 'firmware', version: '1.0.0', title: '固件合并与比较', description: '基地址、重叠策略与差异区间', detail: '按基地址合并 BIN 分段，检查冲突并比较连续差异区间、大小与 CRC32。', category: 'firmware', keywords: ['固件', '合并', '比较', 'BIN'], requiresAgent: false, icon: Files, component: lazy(() => import('./firmware/FirmwareTool')) },
 ];
 
 export function findTool(id: string | undefined) { return id ? toolRegistry.find(tool => tool.id === id) ?? null : null; }
