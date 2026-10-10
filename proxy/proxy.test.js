@@ -4,7 +4,7 @@ import net from 'node:net';
 import dgram from 'node:dgram';
 import { EventEmitter, once } from 'node:events';
 import { resolve } from 'node:path';
-import { configureSerialAdapter, createBuildCommand, decodeNetworkPayload, isAllowedOrigin, receiveSerialData, startServer, validateHostAndPort, validateProxyTarget, validateSerialOptions } from './proxy.js';
+import { configureFilePickerAdapter, configureSerialAdapter, createBuildCommand, decodeNetworkPayload, isAllowedOrigin, receiveSerialData, startServer, validateHostAndPort, validateProxyTarget, validateSerialOptions } from './proxy.js';
 
 class VirtualSerialPort extends EventEmitter {
   constructor(options) { super(); this.options = options; this.isOpen = false; this.signals = { dtr: false, rts: false }; }
@@ -34,6 +34,7 @@ test.before(async () => {
 test.after(async () => {
   await new Promise(resolve => agent.close(resolve));
   configureSerialAdapter(null);
+  configureFilePickerAdapter(null);
 });
 
 test('allows the development and deployed frontend origins', () => {
@@ -141,7 +142,27 @@ test('reports local agent version and capabilities', async () => {
   assert.ok(result.capabilities.includes('network-session-restore'));
   assert.ok(result.capabilities.includes('structured-errors'));
   assert.ok(result.capabilities.includes('project-build'));
+  assert.ok(result.capabilities.includes('local-picker'));
   assert.equal(response.headers.get('x-embedkit-protocol'), '1');
+});
+
+test('opens a controlled system picker and validates the selected path type', async () => {
+  configureFilePickerAdapter({ select: async ({ kind }) => kind === 'directory' ? { path: process.cwd() } : { cancelled: true } });
+  try {
+    const selectedResponse = await fetch(`${agentBaseUrl}/api/files/select`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'directory', path: 'C:\\must-not-be-used' }) });
+    assert.equal(selectedResponse.status, 200);
+    const selected = await selectedResponse.json();
+    assert.equal(selected.cancelled, false);
+    assert.equal(selected.path, resolve(process.cwd()));
+    assert.equal(selected.kind, 'directory');
+
+    const cancelledResponse = await fetch(`${agentBaseUrl}/api/files/select`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'file' }) });
+    assert.deepEqual(await cancelledResponse.json(), { cancelled: true, kind: 'file' });
+
+    const invalidResponse = await fetch(`${agentBaseUrl}/api/files/select`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'device' }) });
+    assert.equal(invalidResponse.status, 400);
+    assert.equal((await invalidResponse.json()).code, 'INVALID_REQUEST');
+  } finally { configureFilePickerAdapter(null); }
 });
 
 test('detects a local project build environment', async () => {

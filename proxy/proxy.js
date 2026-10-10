@@ -29,11 +29,65 @@ const systemSerialAdapter = {
   create: options => new SerialPort(options),
 };
 let serialAdapter = systemSerialAdapter;
+let filePickerActive = false;
+
+function runPickerProcess(executable, args) {
+  return new Promise((resolvePicker, reject) => {
+    const child = spawn(executable, args, { windowsHide: false, shell: false });
+    let stdout = '', stderr = '', finished = false;
+    const timer = setTimeout(() => { if (!finished) child.kill(); }, 5 * 60 * 1000);
+    const finish = (error, value) => { if (finished) return; finished = true; clearTimeout(timer); if (error) reject(error); else resolvePicker(value); };
+    child.stdout.on('data', data => { stdout += data.toString(); });
+    child.stderr.on('data', data => { stderr += data.toString(); });
+    child.on('error', error => finish(error));
+    child.on('close', code => {
+      const path = stdout.trim();
+      if (path) finish(null, { cancelled: false, path });
+      else if (code === 0 || code === 1) finish(null, { cancelled: true });
+      else finish(new Error(stderr.trim() || `System picker exited with code ${code}`));
+    });
+  });
+}
+
+const systemFilePickerAdapter = {
+  select: ({ kind }) => {
+    if (process.platform === 'win32') {
+      const script = kind === 'directory'
+        ? "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description='Select an embedded project directory'; if($d.ShowDialog() -eq 'OK'){[Console]::Out.Write($d.SelectedPath)}"
+        : "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.OpenFileDialog; $d.Title='Select an embedded development file'; $d.Filter='Embedded files|*.map;*.elf;*.axf;*.out;*.bin;*.hex;*.srec;*.s19|All files|*.*'; if($d.ShowDialog() -eq 'OK'){[Console]::Out.Write($d.FileName)}";
+      return runPickerProcess('powershell.exe', ['-NoProfile', '-STA', '-Command', script]);
+    }
+    if (process.platform === 'darwin') return runPickerProcess('osascript', ['-e', kind === 'directory' ? 'POSIX path of (choose folder with prompt "Select an embedded project directory")' : 'POSIX path of (choose file with prompt "Select an embedded development file")']);
+    return runPickerProcess('zenity', ['--file-selection', ...(kind === 'directory' ? ['--directory'] : []), '--title', kind === 'directory' ? 'Select an embedded project directory' : 'Select an embedded development file']);
+  },
+};
+let filePickerAdapter = systemFilePickerAdapter;
 
 export function configureSerialAdapter(adapter) {
   if (adapter == null) { serialAdapter = systemSerialAdapter; return; }
   if (typeof adapter.list !== 'function' || typeof adapter.create !== 'function') throw new Error('Serial adapter must provide list() and create()');
   serialAdapter = adapter;
+}
+
+export function configureFilePickerAdapter(adapter) {
+  if (adapter == null) { filePickerAdapter = systemFilePickerAdapter; return; }
+  if (typeof adapter.select !== 'function') throw new Error('File picker adapter must provide select()');
+  filePickerAdapter = adapter;
+}
+
+async function selectLocalPath(options = {}) {
+  const kind = options.kind === 'file' ? 'file' : options.kind === 'directory' ? 'directory' : '';
+  if (!kind) throw new Error('Picker kind must be file or directory');
+  if (filePickerActive) throw new Error('A system file picker is already open');
+  filePickerActive = true;
+  try {
+    const result = await filePickerAdapter.select({ kind });
+    if (result?.cancelled || !result?.path) return { cancelled: true, kind };
+    if (!isAbsolute(result.path) || /[\0\r\n]/.test(result.path)) throw new Error('System picker returned an invalid path');
+    const path = resolve(result.path), info = await stat(path);
+    if (kind === 'directory' ? !info.isDirectory() : !info.isFile()) throw new Error(`Selected path is not a ${kind}`);
+    return { cancelled: false, kind, path, name: path.split(/[\\/]/).filter(Boolean).pop() || path };
+  } finally { filePickerActive = false; }
 }
 
 function installAgentLogging() {
@@ -1006,7 +1060,13 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === '/api/agent/status' && req.method === 'GET') {
-    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: ['serial', 'tcp-client', 'tcp-server', 'udp-client', 'udp-server', 'session-restore', 'network-session-restore', 'structured-errors', 'project-build'] });
+    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: ['serial', 'tcp-client', 'tcp-server', 'udp-client', 'udp-server', 'session-restore', 'network-session-restore', 'structured-errors', 'project-build', 'local-picker'] });
+    return;
+  }
+
+  if (pathname === '/api/files/select' && req.method === 'POST') {
+    try { jsonRes(res, 200, await selectLocalPath(await readJSONBody(req))); }
+    catch (error) { jsonRes(res, 400, { error: error.message }); }
     return;
   }
 

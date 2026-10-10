@@ -3,9 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import ProjectBuildPanel from './ProjectBuildPanel';
 import * as agentClient from '../../services/agentClient';
 import * as buildAgent from '../../services/buildAgent';
+import * as localFiles from '../../services/localFiles';
 
 vi.mock('../../services/agentClient', () => ({ getAgentStatus: vi.fn(), hasAgentCapability: vi.fn() }));
 vi.mock('../../services/buildAgent', () => ({ createBuildJob: vi.fn(), detectBuildEnvironment: vi.fn(), readBuildJob: vi.fn(), stopBuildJob: vi.fn() }));
+vi.mock('../../services/localFiles', () => ({ selectLocalDirectory: vi.fn() }));
 
 const status = { available: true, name: 'EmbedKit Local Agent', version: '1.0.0', protocolVersion: 1, uptimeSeconds: 1, capabilities: ['project-build'], serialSessions: 0, networkSessions: 0, buildJobs: 0 };
 const props = { onClose: vi.fn(), onDiagnostic: vi.fn() };
@@ -42,5 +44,18 @@ describe('ProjectBuildPanel capability-gated workflow', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '构建' }));
     await waitFor(() => expect(buildAgent.createBuildJob).toHaveBeenCalledWith(expect.objectContaining({ rootPath: 'D:\\firmware\\demo', system: 'cmake', buildDir: 'out', toolPath: 'cmake', action: 'build' })));
+  });
+
+  it('uses the system directory picker and immediately detects the selected project', async () => {
+    vi.mocked(localFiles.selectLocalDirectory).mockResolvedValue({ cancelled: false, kind: 'directory', path: 'D:\\firmware\\picked', name: 'picked' });
+    vi.mocked(buildAgent.detectBuildEnvironment).mockResolvedValue({ rootPath: 'D:\\firmware\\picked', system: 'ninja', buildDir: '.', projectFiles: ['build.ninja'], tools: [{ executable: 'ninja', available: true, version: '1.12' }] });
+
+    render(<ProjectBuildPanel {...props} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '选择目录' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: '选择目录' }));
+
+    await waitFor(() => expect(buildAgent.detectBuildEnvironment).toHaveBeenCalledWith('D:\\firmware\\picked'));
+    expect(screen.getByDisplayValue('D:\\firmware\\picked')).toBeVisible();
+    expect(await screen.findByText(/build\.ninja/)).toBeVisible();
   });
 });
