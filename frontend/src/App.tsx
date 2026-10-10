@@ -8,6 +8,7 @@ const EditorPage = lazy(() => import('./pages/EditorPage'));
 const CommunicationPage = lazy(() => import('./pages/CommunicationPage'));
 const TestAutomationPage = lazy(() => import('./pages/TestAutomationPage'));
 const ToolboxPage = lazy(() => import('./pages/ToolboxPage'));
+const ToolWorkspacePage = lazy(() => import('./pages/ToolWorkspacePage'));
 const ChipLibPage = lazy(() => import('./pages/ChipLibPage'));
 const TutorialPage = lazy(() => import('./pages/TutorialPage'));
 const AiPage = lazy(() => import('./pages/AiPage'));
@@ -62,7 +63,7 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (value: bo
         {navSections.map((section) => <section key={section.title}>
           <h2 className="mb-1.5 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-gray-600">{section.title}</h2>
           <div className="space-y-1">{section.items.map(({ icon: Icon, label, path, aliases = [] }) => {
-            const active = location.pathname === path || aliases.includes(location.pathname);
+            const active = location.pathname === path || aliases.includes(location.pathname) || (path !== '/' && location.pathname.startsWith(`${path}/`));
             return <button key={path} onClick={() => { navigate(path); setIsOpen(false); }} className={`group relative flex w-full items-center gap-3 overflow-hidden rounded-xl px-3 py-2.5 text-sm transition-all ${active ? 'bg-gradient-to-r from-blue-500/15 to-purple-500/[0.06] font-medium text-blue-300 shadow-sm shadow-black/10' : 'text-gray-400 hover:bg-[#1c2128] hover:text-white'}`}>{active && <span className="absolute inset-y-2 left-0 w-0.5 rounded-r bg-blue-400" />}<span className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors ${active ? 'bg-blue-500/15 text-blue-400' : 'bg-transparent group-hover:bg-white/[0.04]'}`}><Icon size={16} /></span>{label}</button>;
           })}</div>
         </section>)}
@@ -87,6 +88,7 @@ function AppShell() {
         <Route path="/tests" element={<TestAutomationPage />} />
         <Route path="/serial" element={<Navigate to="/communication" replace />} />
         <Route path="/toolbox" element={<ToolboxPage />} />
+        <Route path="/toolbox/:toolId" element={<ToolWorkspacePage />} />
         <Route path="/resources" element={<ChipLibPage />} />
         <Route path="/components" element={<Navigate to="/resources" replace />} />
         <Route path="/chips" element={<Navigate to="/resources" replace />} />
