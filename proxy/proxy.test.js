@@ -143,6 +143,7 @@ test('reports local agent version and capabilities', async () => {
   assert.ok(result.capabilities.includes('structured-errors'));
   assert.ok(result.capabilities.includes('project-build'));
   assert.ok(result.capabilities.includes('local-picker'));
+  assert.ok(result.capabilities.includes('local-file-read'));
   assert.equal(response.headers.get('x-embedkit-protocol'), '1');
 });
 
@@ -162,6 +163,36 @@ test('opens a controlled system picker and validates the selected path type', as
     const invalidResponse = await fetch(`${agentBaseUrl}/api/files/select`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'device' }) });
     assert.equal(invalidResponse.status, 400);
     assert.equal((await invalidResponse.json()).code, 'INVALID_REQUEST');
+  } finally { configureFilePickerAdapter(null); }
+});
+
+test('reads selected files only through bounded revocable selection tokens', async () => {
+  const selectedPath = resolve(process.cwd(), 'package.json');
+  configureFilePickerAdapter({ select: async () => ({ path: selectedPath }) });
+  try {
+    const selectedResponse = await fetch(`${agentBaseUrl}/api/files/select`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'file' }) });
+    assert.equal(selectedResponse.status, 200);
+    const selected = await selectedResponse.json();
+    assert.ok(selected.selectionId);
+    assert.equal(selected.path, selectedPath);
+
+    const metadataResponse = await fetch(`${agentBaseUrl}/api/files/selections/${selected.selectionId}`);
+    assert.equal(metadataResponse.status, 200);
+    const metadata = await metadataResponse.json();
+    assert.equal(metadata.name, 'package.json');
+    assert.equal(metadata.path, undefined);
+
+    const chunkResponse = await fetch(`${agentBaseUrl}/api/files/selections/${selected.selectionId}/chunk?offset=0&length=32`);
+    assert.equal(chunkResponse.status, 200);
+    const chunk = await chunkResponse.json();
+    assert.equal(chunk.byteLength, 32);
+    assert.match(Buffer.from(chunk.data, 'base64').toString('utf8'), /^\s*\{/);
+
+    const oversized = await fetch(`${agentBaseUrl}/api/files/selections/${selected.selectionId}/chunk?length=${256 * 1024 + 1}`);
+    assert.equal(oversized.status, 400);
+    const revoked = await fetch(`${agentBaseUrl}/api/files/selections/${selected.selectionId}`, { method: 'DELETE' });
+    assert.deepEqual(await revoked.json(), { revoked: true });
+    assert.equal((await fetch(`${agentBaseUrl}/api/files/selections/${selected.selectionId}`)).status, 400);
   } finally { configureFilePickerAdapter(null); }
 });
 

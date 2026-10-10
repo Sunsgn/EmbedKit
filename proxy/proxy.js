@@ -5,7 +5,7 @@ import dgram from 'dgram';
 import { SerialPort } from 'serialport';
 import { randomUUID } from 'crypto';
 import { spawn } from 'child_process';
-import { appendFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'fs/promises';
+import { appendFile, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'path';
 import { URL, pathToFileURL } from 'url';
 
@@ -19,6 +19,10 @@ const MAX_NETWORK_EVENTS = 2000;
 const MAX_SERIAL_SESSIONS = 16;
 const MAX_BUILD_JOBS = 8;
 const MAX_BUILD_EVENTS = 5000;
+const MAX_FILE_SELECTIONS = 32;
+const MAX_SELECTED_FILE_BYTES = Number(process.env.EMBEDKIT_MAX_SELECTED_FILE_BYTES || 512 * 1024 * 1024);
+const MAX_FILE_CHUNK_BYTES = 256 * 1024;
+const FILE_SELECTION_TTL_MS = 15 * 60 * 1000;
 const SERIAL_STATE_FILE = process.env.EMBEDKIT_SERIAL_STATE_FILE || join(process.cwd(), '.embedkit-state', 'serial-sessions.json');
 const NETWORK_STATE_FILE = process.env.EMBEDKIT_NETWORK_STATE_FILE || join(process.cwd(), '.embedkit-state', 'network-sessions.json');
 const AGENT_LOG_FILE = process.env.EMBEDKIT_AGENT_LOG_FILE || join(process.cwd(), '.embedkit-state', 'agent.log');
@@ -86,8 +90,33 @@ async function selectLocalPath(options = {}) {
     if (!isAbsolute(result.path) || /[\0\r\n]/.test(result.path)) throw new Error('System picker returned an invalid path');
     const path = resolve(result.path), info = await stat(path);
     if (kind === 'directory' ? !info.isDirectory() : !info.isFile()) throw new Error(`Selected path is not a ${kind}`);
-    return { cancelled: false, kind, path, name: path.split(/[\\/]/).filter(Boolean).pop() || path };
+    if (kind === 'file' && info.size > MAX_SELECTED_FILE_BYTES) throw new Error(`Selected file exceeds ${MAX_SELECTED_FILE_BYTES} bytes`);
+    const now = Date.now(), selectionId = randomUUID();
+    for (const [id, selection] of fileSelections) if (selection.expiresAt <= now) fileSelections.delete(id);
+    while (fileSelections.size >= MAX_FILE_SELECTIONS) fileSelections.delete(fileSelections.keys().next().value);
+    const selection = { id: selectionId, kind, path, name: path.split(/[\\/]/).filter(Boolean).pop() || path, size: kind === 'file' ? info.size : undefined, modifiedAt: info.mtime.toISOString(), expiresAt: now + FILE_SELECTION_TTL_MS };
+    fileSelections.set(selectionId, selection);
+    return { cancelled: false, kind, path, name: selection.name, selectionId, size: selection.size, modifiedAt: selection.modifiedAt, expiresAt: new Date(selection.expiresAt).toISOString() };
   } finally { filePickerActive = false; }
+}
+
+function getFileSelection(id, requiredKind) {
+  const selection = fileSelections.get(id);
+  if (!selection || selection.expiresAt <= Date.now()) { fileSelections.delete(id); throw new Error('File selection is missing or expired'); }
+  if (requiredKind && selection.kind !== requiredKind) throw new Error(`Selection is not a ${requiredKind}`);
+  return selection;
+}
+
+async function readSelectedFileChunk(id, offsetValue, lengthValue) {
+  const selection = getFileSelection(id, 'file'), info = await stat(selection.path);
+  if (!info.isFile() || info.size !== selection.size) throw new Error('Selected file changed after authorization');
+  const offset = Number(offsetValue ?? 0), length = Number(lengthValue ?? MAX_FILE_CHUNK_BYTES);
+  if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('Chunk offset must be a non-negative integer');
+  if (!Number.isSafeInteger(length) || length < 1 || length > MAX_FILE_CHUNK_BYTES) throw new Error(`Chunk length must be between 1 and ${MAX_FILE_CHUNK_BYTES}`);
+  if (offset > info.size) throw new Error('Chunk offset exceeds file size');
+  const end = Math.min(info.size, offset + length), handle = await open(selection.path, 'r');
+  try { const buffer = Buffer.alloc(end - offset), { bytesRead } = await handle.read(buffer, 0, buffer.length, offset); return { selectionId: id, offset, byteLength: bytesRead, size: info.size, eof: offset + bytesRead >= info.size, encoding: 'base64', data: buffer.subarray(0, bytesRead).toString('base64') }; }
+  finally { await handle.close(); }
 }
 
 function installAgentLogging() {
@@ -213,6 +242,7 @@ async function readJSONBody(req) {
 const networkSessions = new Map();
 const serialSessions = new Map();
 const buildJobs = new Map();
+const fileSelections = new Map();
 let restoringSerialSessions = false;
 
 async function persistSerialSessions() {
@@ -1060,13 +1090,26 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === '/api/agent/status' && req.method === 'GET') {
-    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: ['serial', 'tcp-client', 'tcp-server', 'udp-client', 'udp-server', 'session-restore', 'network-session-restore', 'structured-errors', 'project-build', 'local-picker'] });
+    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: ['serial', 'tcp-client', 'tcp-server', 'udp-client', 'udp-server', 'session-restore', 'network-session-restore', 'structured-errors', 'project-build', 'local-picker', 'local-file-read'] });
     return;
   }
 
   if (pathname === '/api/files/select' && req.method === 'POST') {
     try { jsonRes(res, 200, await selectLocalPath(await readJSONBody(req))); }
     catch (error) { jsonRes(res, 400, { error: error.message }); }
+    return;
+  }
+
+  const fileSelectionMatch = pathname.match(/^\/api\/files\/selections\/([0-9a-f-]+)(?:\/(chunk))?$/i);
+  if (fileSelectionMatch) {
+    try {
+      const id = fileSelectionMatch[1], operation = fileSelectionMatch[2];
+      if (req.method === 'DELETE' && !operation) { jsonRes(res, 200, { revoked: fileSelections.delete(id) }); return; }
+      if (req.method !== 'GET') { jsonRes(res, 405, { error: 'Unsupported operation for file selection' }); return; }
+      if (operation === 'chunk') { jsonRes(res, 200, await readSelectedFileChunk(id, requestUrl.searchParams.get('offset'), requestUrl.searchParams.get('length'))); return; }
+      const selection = getFileSelection(id), { path: _path, expiresAt, ...safe } = selection;
+      jsonRes(res, 200, { ...safe, expiresAt: new Date(expiresAt).toISOString() });
+    } catch (error) { jsonRes(res, 400, { error: error.message }); }
     return;
   }
 
