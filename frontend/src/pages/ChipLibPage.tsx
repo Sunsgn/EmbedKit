@@ -3,6 +3,7 @@ import { BookOpen, Boxes, CheckCircle, Cpu, ExternalLink, FileText, Filter, Info
 import { chips } from '../data/chips';
 import { components } from '../data/components';
 import { LOCAL_PROXY_BASE } from '../services/aiService';
+import KnowledgeSourcePanel from '../features/resources/KnowledgeSourcePanel';
 
 interface CatalogItem {
   id: string;
@@ -127,6 +128,7 @@ export default function ChipLibPage() {
   return <div className="h-full overflow-y-auto p-4 scrollbar-thin lg:p-6"><div className="mx-auto max-w-[1500px]">
     <header className="mb-6 flex flex-wrap items-end justify-between gap-3"><div><h1 className="flex items-center gap-2 text-2xl font-bold"><Boxes className="text-blue-400" />资料中心</h1><p className="mt-1 text-sm text-gray-400">查询芯片与元器件参数、数据手册、参考手册、CAD 模型和采购资料</p></div><div className="flex gap-2 text-xs text-gray-500"><span className="rounded-full border border-[#30363d] bg-[#161b22] px-3 py-1">{catalog.length} 个本地型号</span><span className="rounded-full border border-[#30363d] bg-[#161b22] px-3 py-1">{categories.length} 个分类</span></div></header>
 
+    <KnowledgeSourcePanel />
     <section className="mb-5 rounded-xl border border-[#30363d] bg-[#161b22] p-4">
       <div className="grid gap-3 md:grid-cols-[minmax(280px,1fr)_220px_220px]">
         <label className="relative"><Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索型号、参数或用途，例如 BME280、RS485、10k、去耦…" className="w-full rounded-lg border border-[#30363d] bg-[#0d1117] py-2.5 pl-10 pr-4 text-sm outline-none placeholder:text-gray-600 focus:border-blue-500" /></label>
