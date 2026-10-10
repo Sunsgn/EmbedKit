@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter } from 'react-router-dom';
 import ElfTool from './ElfTool';
 import { analyzeSelectedElf, lookupElfAddress } from '../../services/elfAgent';
 import { revokeLocalPath, selectLocalFile } from '../../services/localFiles';
@@ -8,6 +9,7 @@ vi.mock('../../services/elfAgent', () => ({ analyzeSelectedElf: vi.fn(), lookupE
 vi.mock('../../services/localFiles', () => ({ revokeLocalPath: vi.fn(), selectLocalFile: vi.fn() }));
 
 describe('ElfTool real artifact workflow', () => {
+  const renderTool = (entry = '/toolbox/elf') => render(<MemoryRouter initialEntries={[entry]}><ElfTool /></MemoryRouter>);
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(selectLocalFile).mockResolvedValue({ cancelled: false, kind: 'file', name: 'app.axf', path: 'D:\\build\\app.axf', selectionId: 'selection-1' });
@@ -17,7 +19,7 @@ describe('ElfTool real artifact workflow', () => {
   });
 
   it('selects, analyzes, displays evidence, and revokes the file token', async () => {
-    render(<ElfTool />);
+    renderTool();
     fireEvent.click(screen.getByRole('button', { name: '选择 ELF / AXF / OUT' }));
 
     await waitFor(() => expect(analyzeSelectedElf).toHaveBeenCalledWith('selection-1'));
@@ -37,9 +39,16 @@ describe('ElfTool real artifact workflow', () => {
 
   it('keeps the workspace unchanged when selection is cancelled', async () => {
     vi.mocked(selectLocalFile).mockResolvedValue({ cancelled: true, kind: 'file' });
-    render(<ElfTool />);
+    renderTool();
     fireEvent.click(screen.getByRole('button', { name: '选择 ELF / AXF / OUT' }));
     await waitFor(() => expect(selectLocalFile).toHaveBeenCalled());
     expect(analyzeSelectedElf).not.toHaveBeenCalled();
+  });
+
+  it('preserves a HardFault address passed through the independent tool route', async () => {
+    renderTool('/toolbox/elf?address=0x0800ABCD&source=hardfault');
+    fireEvent.click(screen.getByRole('button', { name: '选择 ELF / AXF / OUT' }));
+    await waitFor(() => expect(analyzeSelectedElf).toHaveBeenCalled());
+    expect(screen.getByPlaceholderText('例如 0x08000108')).toHaveValue('0x0800ABCD');
   });
 });

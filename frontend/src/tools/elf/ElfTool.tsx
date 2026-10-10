@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Download, FileSearch, Search } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import { analyzeSelectedElf, lookupElfAddress, type ElfAddressLookup, type ElfAnalysis } from '../../services/elfAgent';
 import { revokeLocalPath, selectLocalFile } from '../../services/localFiles';
 
@@ -7,9 +8,10 @@ const size = (value: number) => value >= 1024 * 1024 ? `${(value / 1024 / 1024).
 function Value({ label, value }: { label: string; value: string | number }) { return <div className="rounded-lg bg-[#0d1117] px-3 py-2"><span className="block text-[10px] text-gray-600">{label}</span><code className="mt-1 block break-all text-xs text-gray-200">{value}</code></div>; }
 
 export default function ElfTool() {
+  const [searchParams] = useSearchParams();
   const [analysis, setAnalysis] = useState<ElfAnalysis | null>(null);
   const [fileName, setFileName] = useState('');
-  const [address, setAddress] = useState('');
+  const [address, setAddress] = useState(() => searchParams.get('address') || '');
   const [lookup, setLookup] = useState<ElfAddressLookup | null>(null);
   const [busy, setBusy] = useState(false);
   const [lookupBusy, setLookupBusy] = useState(false);
@@ -24,7 +26,7 @@ export default function ElfTool() {
       setFileName(selected.name || 'ELF');
       try {
         const result = await analyzeSelectedElf(selected.selectionId);
-        setAnalysis(result); setAddress(result.entry);
+        setAnalysis(result); setAddress(current => current || result.entry);
       } finally { await revokeLocalPath(selected.selectionId).catch(() => undefined); }
     } catch (reason) { setAnalysis(null); setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setBusy(false); }
