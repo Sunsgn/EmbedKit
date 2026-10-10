@@ -12,6 +12,9 @@ test('detects multiple execution models without assuming FreeRTOS', () => {
     ['int main(void) { OSTaskCreate(AppTask, 0, stack, 5); OSStart(); }', 'ucos'],
     ['pthread_create(&thread, 0, worker, 0);', 'posix'],
     ['LOS_KernelInit(); LOS_TaskCreate(&id, &init);', 'liteos'],
+    ['void setup(void) { board_init(); } void loop(void) { poll(); }', 'arduino'],
+    ['int main(void) { for (;;) { logic_process(); } }', 'bare-metal'],
+    ['void init(void) { register_rx_callback(on_rx); }', 'event-driven'],
   ];
   for (const [source, expected] of cases) assert.equal(detectExecutionModel(source).id, expected);
 });

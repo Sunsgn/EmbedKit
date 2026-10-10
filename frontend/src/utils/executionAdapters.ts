@@ -5,6 +5,7 @@ export interface TaskApiSpec { api: RegExp; entry: number; name?: number; stack?
 interface ExecutionAdapter { id: string; label: string; family: ExecutionFamily; signals: Array<{ pattern: RegExp; evidence: string; score: number }> }
 
 export const EXECUTION_ADAPTERS: ExecutionAdapter[] = [
+  { id: 'arduino', label: 'Arduino 协作式主循环', family: 'event-driven', signals: [{ pattern: /\bvoid\s+setup\s*\([^)]*\)\s*\{[\s\S]*\bvoid\s+loop\s*\(/i, evidence: '发现 setup/loop 入口', score: 80 }] },
   { id: 'esp-idf', label: 'ESP-IDF / FreeRTOS', family: 'rtos', signals: [{ pattern: /\bapp_main\s*\(/, evidence: '发现 app_main', score: 70 }, { pattern: /idf_component_register|ESP-IDF/i, evidence: '发现 ESP-IDF 工程特征', score: 50 }] },
   { id: 'freertos', label: 'FreeRTOS', family: 'rtos', signals: [{ pattern: /FreeRTOS|vTaskStartScheduler/, evidence: '发现 FreeRTOS 调度器', score: 70 }, { pattern: /\bxTaskCreate(?:Static)?\s*\(/, evidence: '发现 FreeRTOS 任务创建', score: 45 }] },
   { id: 'cmsis-rtos', label: 'CMSIS-RTOS', family: 'rtos', signals: [{ pattern: /\bosKernelStart\s*\(/, evidence: '发现 CMSIS-RTOS 内核启动', score: 70 }, { pattern: /\bosThread(?:New|Create)\s*\(/, evidence: '发现 CMSIS-RTOS 线程创建', score: 45 }] },
@@ -44,7 +45,7 @@ export function detectExecutionModel(content: string): ExecutionModel {
   }).filter(item => item.score > 0).sort((a, b) => b.score - a.score);
   const best = ranked[0];
   if (best) return { id: best.adapter.id, label: best.adapter.label, family: best.adapter.family, confidence: best.score >= 80 ? 'high' : best.score >= 50 ? 'medium' : 'low', evidence: best.evidence };
-  if (/\bwhile\s*\(\s*(?:1|true|;;)\s*\)/i.test(content)) return { id: 'bare-metal', label: '裸机主循环', family: 'bare-metal', confidence: 'medium', evidence: ['发现永久主循环'] };
-  if (/\b(?:dispatch|event_loop|process_event|state_machine)\s*\(/i.test(content)) return { id: 'event-driven', label: '事件驱动/协作调度', family: 'event-driven', confidence: 'low', evidence: ['发现事件分发特征'] };
+  if (/\bwhile\s*\(\s*(?:1|true)\s*\)|\bfor\s*\(\s*;\s*;\s*\)/i.test(content)) return { id: 'bare-metal', label: '裸机主循环', family: 'bare-metal', confidence: 'medium', evidence: ['发现永久主循环'] };
+  if (/\b(?:dispatch|event_loop|process_event|state_machine|register_\w+_callback|set_\w+_callback)\s*\(/i.test(content)) return { id: 'event-driven', label: '事件驱动/协作调度', family: 'event-driven', confidence: 'low', evidence: ['发现事件分发或回调注册特征'] };
   return { id: 'unknown', label: '未确定执行模型', family: 'unknown', confidence: 'low', evidence: ['未命中已注册的执行模型适配器'] };
 }

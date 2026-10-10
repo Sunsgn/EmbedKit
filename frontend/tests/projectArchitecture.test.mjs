@@ -57,3 +57,23 @@ int main(void) { service(); }
   assert.equal(startup.steps.find(item => item.name === 'retry')?.control, 'branch');
   assert.equal(startup.steps.some(item => item.relation === 'cycle'), true);
 });
+
+test('recovers registered callbacks as asynchronous flows with coverage', () => {
+  const files = [{ name: 'events.c', path: '/app/events.c', content: `
+void decode_packet(void) { validate_crc(); }
+void on_rx(void) { decode_packet(); }
+void event_init(void) { register_rx_callback(on_rx); }
+int main(void) { event_init(); event_loop(); }
+` }];
+  const result = analyzeProjectArchitecture(files);
+  assert.equal(result.runtime, '事件驱动/协作调度');
+  assert.equal(result.callbacks.some(item => item.name === 'on_rx'), true);
+  const callback = result.flows.find(item => item.context === 'callback');
+  assert.equal(callback.root.name, 'on_rx');
+  assert.equal(callback.steps.some(item => item.name === 'decode_packet'), true);
+  assert.match(callback.notes.join(' '), /静态分析不能确定/);
+  assert.equal(result.coverage.sourceFiles, 1);
+  assert.equal(result.coverage.parsedFunctions, 4);
+  assert.equal(result.coverage.resolvedCallSites > 0, true);
+  assert.equal(result.coverage.resolvedRate < 1, true);
+});
