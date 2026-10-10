@@ -1,5 +1,5 @@
 import { lazy } from 'react';
-import { Activity, Binary, Braces, Bug, CircuitBoard, FileCode2, FileDigit, Files, Gauge, Hash, Map as MapIcon, Microchip, Network, Replace, Timer } from 'lucide-react';
+import { Activity, Binary, Braces, Bug, Bus, CircuitBoard, FileCode2, FileDigit, Files, Gauge, Hash, Map as MapIcon, Microchip, Network, Replace, Timer } from 'lucide-react';
 import type { ToolDefinition } from './types';
 
 const loadBasic = <K extends 'FloatConverter' | 'UartCalculator'>(name: K) => lazy(() => import('../features/toolbox/BasicTools').then(module => ({ default: module[name] })));
@@ -20,6 +20,7 @@ export const toolRegistry: ToolDefinition[] = [
   { apiVersion: 1, id: 'srec', version: '1.0.0', title: 'Motorola SREC', description: '记录校验、地址与 BIN 导出', detail: '解析 S1/S2/S3 数据及计数、终止记录，校验并导出空洞填充为 FF 的 BIN。', category: 'firmware', keywords: ['SREC', 'S19', 'Motorola', '固件'], requiresAgent: false, icon: FileDigit, component: lazy(() => import('./srec/SrecTool')) },
   { apiVersion: 1, id: 'firmware', version: '1.0.0', title: '固件合并与比较', description: '基地址、重叠策略与差异区间', detail: '按基地址合并 BIN 分段，检查冲突并比较连续差异区间、大小与 CRC32。', category: 'firmware', keywords: ['固件', '合并', '比较', 'BIN'], requiresAgent: false, icon: Files, component: lazy(() => import('./firmware/FirmwareTool')) },
   { apiVersion: 1, id: 'svd', version: '1.0.0', title: 'CMSIS-SVD 寄存器', description: '外设、寄存器、字段与地址', detail: '本地解析 SVD，检索寄存器与字段，计算绝对地址和位掩码并导出结果。', category: 'analysis', keywords: ['SVD', 'CMSIS', '寄存器', '位域'], requiresAgent: false, icon: Microchip, component: lazy(() => import('./svd/SvdTool')) },
+  { apiVersion: 1, id: 'dbc', version: '1.0.0', title: 'CAN DBC 解码', description: '消息、信号、位序与物理值', detail: '本地导入 DBC，检索消息和信号，按 Intel/Motorola 位序解码帧并导出结果。', category: 'protocol', keywords: ['CAN', 'DBC', '信号', 'Motorola'], requiresAgent: false, icon: Bus, component: lazy(() => import('./dbc/DbcTool')) },
 ];
 
 export function findTool(id: string | undefined) { return id ? toolRegistry.find(tool => tool.id === id) ?? null : null; }
