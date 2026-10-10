@@ -556,11 +556,25 @@ export function createBuildCommand(options = {}) {
   return { rootPath, buildPath, executable, args, system, action, configuration };
 }
 
+export function parseBuildDiagnostic(line) {
+  const patterns = [
+    /^(.*?):(\d+)(?::(\d+))?:\s*(fatal error|error|warning|note|remark):\s*(.*)$/i,
+    /^(.+?)\((\d+)(?:,(\d+))?\)\s*:\s*(?:fatal\s+)?(error|warning|note|remark)(?:\s+[A-Z]+\d+)?\s*:\s*(.*)$/i,
+    /^"(.+?)",\s*(\d+)(?:\s+column\s+(\d+))?\s*:\s*(fatal error|error|warning|note|remark)(?:\[[^\]]+\])?\s*:\s*(.*)$/i,
+  ];
+  for (const pattern of patterns) {
+    const match = String(line).match(pattern);
+    if (!match) continue;
+    const level = match[4].toLowerCase();
+    return { file: match[1], line: Number(match[2]), column: Number(match[3] || 1), severity: level.includes('error') ? 'error' : level === 'warning' ? 'warning' : 'note', message: match[5] };
+  }
+  return null;
+}
+
 function pushBuildEvent(job, stream, text) {
   for (const line of String(text).replace(/\r/g, '').split('\n').filter(Boolean)) {
     job.lastEventId += 1;
-    const match = line.match(/^(.*?):(\d+)(?::(\d+))?:\s*(fatal error|error|warning|note):\s*(.*)$/i);
-    job.events.push({ id: job.lastEventId, timestamp: new Date().toISOString(), stream, text: line, diagnostic: match ? { file: match[1], line: Number(match[2]), column: Number(match[3] || 1), severity: /error/i.test(match[4]) ? 'error' : /warning/i.test(match[4]) ? 'warning' : 'note', message: match[5] } : undefined });
+    job.events.push({ id: job.lastEventId, timestamp: new Date().toISOString(), stream, text: line, diagnostic: parseBuildDiagnostic(line) || undefined });
   }
   if (job.events.length > MAX_BUILD_EVENTS) job.events.splice(0, job.events.length - MAX_BUILD_EVENTS);
 }

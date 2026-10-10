@@ -20,6 +20,8 @@ Optional comma-separated settings:
 
 For a custom local server, add its origin explicitly instead of enabling arbitrary URL forwarding.
 
+Build output diagnostics are normalized for GCC/Clang `file:line:column`, Keil/Arm Compiler and MSVC `file(line,column)`, and IAR quoted-file formats. Only lines with explicit file and line evidence become source-navigation diagnostics; linker summaries and ordinary log lines remain plain output.
+
 ## Controlled local path selection
 
 `POST /api/files/select` accepts only `{ "kind": "file" }` or `{ "kind": "directory" }`. It opens the operating-system picker and returns the path explicitly selected by the user. A caller cannot submit a path for the Agent to approve, and the Agent validates that the selected result exists and matches the requested type.

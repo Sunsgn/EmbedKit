@@ -6,7 +6,7 @@ import { EventEmitter, once } from 'node:events';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { configureFilePickerAdapter, configureSerialAdapter, createBuildCommand, decodeNetworkPayload, isAllowedOrigin, receiveSerialData, startServer, validateHostAndPort, validateProxyTarget, validateSerialOptions } from './proxy.js';
+import { configureFilePickerAdapter, configureSerialAdapter, createBuildCommand, decodeNetworkPayload, isAllowedOrigin, parseBuildDiagnostic, receiveSerialData, startServer, validateHostAndPort, validateProxyTarget, validateSerialOptions } from './proxy.js';
 
 class VirtualSerialPort extends EventEmitter {
   constructor(options) { super(); this.options = options; this.isOpen = false; this.signals = { dtr: false, rts: false }; }
@@ -87,6 +87,14 @@ test('creates shell-free build commands and confines build directories', () => {
   assert.deepEqual(command.args.slice(0, 2), ['--build', resolve(rootPath, 'build')]);
   assert.ok(command.args.includes('Release'));
   assert.throws(() => createBuildCommand({ rootPath, system: 'cmake', buildDir: '..' }), /inside the project/);
+});
+
+test('parses GCC, Keil, IAR, and MSVC build diagnostics for source navigation', () => {
+  assert.deepEqual(parseBuildDiagnostic('src/main.c:42:7: error: unknown identifier'), { file: 'src/main.c', line: 42, column: 7, severity: 'error', message: 'unknown identifier' });
+  assert.deepEqual(parseBuildDiagnostic('Drivers\\uart.c(18): warning: #177-D: variable was declared but never referenced'), { file: 'Drivers\\uart.c', line: 18, column: 1, severity: 'warning', message: '#177-D: variable was declared but never referenced' });
+  assert.deepEqual(parseBuildDiagnostic('"D:\\fw\\startup.c",123  column 9: Error[Pe020]: identifier is undefined'), { file: 'D:\\fw\\startup.c', line: 123, column: 9, severity: 'error', message: 'identifier is undefined' });
+  assert.deepEqual(parseBuildDiagnostic('app.cpp(55,3): error C2065: undeclared identifier'), { file: 'app.cpp', line: 55, column: 3, severity: 'error', message: 'undeclared identifier' });
+  assert.equal(parseBuildDiagnostic('region FLASH overflowed by 128 bytes'), null);
 });
 
 test('validates serial session settings', () => {
