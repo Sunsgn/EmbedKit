@@ -3,7 +3,9 @@ import test from 'node:test';
 import net from 'node:net';
 import dgram from 'node:dgram';
 import { EventEmitter, once } from 'node:events';
-import { resolve } from 'node:path';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { configureFilePickerAdapter, configureSerialAdapter, createBuildCommand, decodeNetworkPayload, isAllowedOrigin, receiveSerialData, startServer, validateHostAndPort, validateProxyTarget, validateSerialOptions } from './proxy.js';
 
 class VirtualSerialPort extends EventEmitter {
@@ -20,6 +22,18 @@ const virtualSerialAdapter = {
   list: async () => [{ path: 'VIRTUAL0', manufacturer: 'EmbedKit', serialNumber: 'EK-LOOP-1', friendlyName: 'EmbedKit Virtual Loopback' }],
   create: options => new VirtualSerialPort(options),
 };
+
+function elfWithMainSymbol() {
+  const bytes = Buffer.alloc(0x380), view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength), sectionNames = Buffer.from('\0.shstrtab\0.text\0.symtab\0.strtab\0'), symbolNames = Buffer.from('\0main\0');
+  bytes.set([0x7f, 0x45, 0x4c, 0x46, 1, 1, 1]);
+  view.setUint16(16, 2, true); view.setUint16(18, 40, true); view.setUint32(20, 1, true); view.setUint32(24, 0x08000101, true);
+  view.setUint32(32, 0x200, true); view.setUint16(40, 52, true); view.setUint16(46, 40, true); view.setUint16(48, 5, true); view.setUint16(50, 1, true);
+  bytes.set(sectionNames, 0x80); bytes.set(symbolNames, 0xc0);
+  const section = (index, name, type, flags, address, offset, size, entrySize = 0, link = 0) => { const base = 0x200 + index * 40; view.setUint32(base, name, true); view.setUint32(base + 4, type, true); view.setUint32(base + 8, flags, true); view.setUint32(base + 12, address, true); view.setUint32(base + 16, offset, true); view.setUint32(base + 20, size, true); view.setUint32(base + 24, link, true); view.setUint32(base + 36, entrySize, true); };
+  section(1, 1, 3, 0, 0, 0x80, sectionNames.length); section(2, 11, 1, 6, 0x08000100, 0x100, 32); section(3, 17, 2, 0, 0, 0x120, 32, 16, 4); section(4, 25, 3, 0, 0, 0xc0, symbolNames.length);
+  view.setUint32(0x130, 1, true); view.setUint32(0x134, 0x08000101, true); view.setUint32(0x138, 12, true); view.setUint8(0x13c, 0x12); view.setUint16(0x13e, 2, true);
+  return bytes;
+}
 
 let agent;
 let agentBaseUrl;
@@ -198,6 +212,21 @@ test('reads selected files only through bounded revocable selection tokens', asy
     assert.deepEqual(await revoked.json(), { revoked: true });
     assert.equal((await fetch(`${agentBaseUrl}/api/files/selections/${selected.selectionId}`)).status, 400);
   } finally { configureFilePickerAdapter(null); }
+});
+
+test('analyzes authorized ELF symbols and resolves a Thumb fault address after revoking the file token', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'embedkit-elf-')), selectedPath = join(directory, 'app.axf');
+  await writeFile(selectedPath, elfWithMainSymbol());
+  configureFilePickerAdapter({ select: async () => ({ path: selectedPath }) });
+  try {
+    const selected = await (await fetch(`${agentBaseUrl}/api/files/select`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'file' }) })).json();
+    const analyzedResponse = await fetch(`${agentBaseUrl}/api/elf/analyze/${selected.selectionId}`), analyzed = await analyzedResponse.json();
+    assert.equal(analyzedResponse.status, 200); assert.equal(analyzed.namedSymbolCount, 1); assert.ok(analyzed.analysisId); assert.equal(analyzed.symbols, undefined);
+    await fetch(`${agentBaseUrl}/api/files/selections/${selected.selectionId}`, { method: 'DELETE' });
+    const lookupResponse = await fetch(`${agentBaseUrl}/api/elf/analyses/${analyzed.analysisId}/lookup?address=0x08000109`), lookup = await lookupResponse.json();
+    assert.equal(lookupResponse.status, 200); assert.equal(lookup.match, 'inside-symbol'); assert.equal(lookup.symbol.name, 'main'); assert.equal(lookup.symbol.offset, '0x8'); assert.equal(lookup.thumbBitCleared, true);
+    assert.equal((await fetch(`${agentBaseUrl}/api/elf/analyses/${analyzed.analysisId}/lookup?address=main%2B4`)).status, 400);
+  } finally { configureFilePickerAdapter(null); await rm(directory, { recursive: true, force: true }); }
 });
 
 test('detects a local project build environment', async () => {

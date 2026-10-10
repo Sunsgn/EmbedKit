@@ -8,7 +8,7 @@ import { spawn } from 'child_process';
 import { appendFile, mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'path';
 import { URL, pathToFileURL } from 'url';
-import { analyzeElf } from './elf.js';
+import { analyzeElf, lookupElfAddress } from './elf.js';
 
 const PORT = process.env.EMBEDKIT_PROXY_PORT || 9999;
 const HOST = process.env.EMBEDKIT_PROXY_HOST || '127.0.0.1';
@@ -24,6 +24,8 @@ const MAX_FILE_SELECTIONS = 32;
 const MAX_SELECTED_FILE_BYTES = Number(process.env.EMBEDKIT_MAX_SELECTED_FILE_BYTES || 512 * 1024 * 1024);
 const MAX_FILE_CHUNK_BYTES = 256 * 1024;
 const FILE_SELECTION_TTL_MS = 15 * 60 * 1000;
+const ELF_ANALYSIS_TTL_MS = 15 * 60 * 1000;
+const MAX_ELF_ANALYSES = 8;
 const SERIAL_STATE_FILE = process.env.EMBEDKIT_SERIAL_STATE_FILE || join(process.cwd(), '.embedkit-state', 'serial-sessions.json');
 const NETWORK_STATE_FILE = process.env.EMBEDKIT_NETWORK_STATE_FILE || join(process.cwd(), '.embedkit-state', 'network-sessions.json');
 const AGENT_LOG_FILE = process.env.EMBEDKIT_AGENT_LOG_FILE || join(process.cwd(), '.embedkit-state', 'agent.log');
@@ -125,13 +127,25 @@ async function analyzeSelectedElf(id) {
   if (!info.isFile() || info.size !== selection.size) throw new Error('Selected file changed after authorization');
   const handle = await open(selection.path, 'r');
   try {
-    return await analyzeElf({ size: info.size, read: async (offset, length) => {
+    const analysis = await analyzeElf({ size: info.size, read: async (offset, length) => {
       if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0 || offset + length > info.size) throw new Error('ELF parser requested data outside the selected file');
       const buffer = Buffer.alloc(length), { bytesRead } = await handle.read(buffer, 0, length, offset);
       if (bytesRead !== length) throw new Error('Selected ELF file was truncated while reading');
       return new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead);
     } });
+    const now = Date.now(), analysisId = randomUUID();
+    for (const [cachedId, cached] of elfAnalyses) if (cached.expiresAt <= now) elfAnalyses.delete(cachedId);
+    while (elfAnalyses.size >= MAX_ELF_ANALYSES) elfAnalyses.delete(elfAnalyses.keys().next().value);
+    elfAnalyses.set(analysisId, { analysis, expiresAt: now + ELF_ANALYSIS_TTL_MS });
+    const { symbols: _symbols, ...publicAnalysis } = analysis;
+    return { ...publicAnalysis, analysisId, expiresAt: new Date(now + ELF_ANALYSIS_TTL_MS).toISOString() };
   } finally { await handle.close(); }
+}
+
+function lookupAnalyzedElf(id, address) {
+  const cached = elfAnalyses.get(id);
+  if (!cached || cached.expiresAt <= Date.now()) { elfAnalyses.delete(id); throw new Error('ELF analysis is missing or expired; select the file again'); }
+  return lookupElfAddress(cached.analysis, address);
 }
 
 function installAgentLogging() {
@@ -258,6 +272,7 @@ const networkSessions = new Map();
 const serialSessions = new Map();
 const buildJobs = new Map();
 const fileSelections = new Map();
+const elfAnalyses = new Map();
 let restoringSerialSessions = false;
 
 async function persistSerialSessions() {
@@ -1131,6 +1146,13 @@ const server = http.createServer(async (req, res) => {
   const elfAnalysisMatch = pathname.match(/^\/api\/elf\/analyze\/([0-9a-f-]+)$/i);
   if (elfAnalysisMatch && req.method === 'GET') {
     try { jsonRes(res, 200, await analyzeSelectedElf(elfAnalysisMatch[1])); }
+    catch (error) { jsonRes(res, 400, { error: error.message }); }
+    return;
+  }
+
+  const elfLookupMatch = pathname.match(/^\/api\/elf\/analyses\/([0-9a-f-]+)\/lookup$/i);
+  if (elfLookupMatch && req.method === 'GET') {
+    try { jsonRes(res, 200, lookupAnalyzedElf(elfLookupMatch[1], requestUrl.searchParams.get('address'))); }
     catch (error) { jsonRes(res, 400, { error: error.message }); }
     return;
   }
