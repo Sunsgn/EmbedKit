@@ -34,6 +34,10 @@ import type { TestRunRecord, TestStepRun } from "../types/product";
 import { formatHex, parseHexBytes } from "../utils/embeddedTools";
 import {
   applySharedFlowChannel,
+  cleanupFlowResources,
+  moveFlowStep as reorderFlowStep,
+  orderedFlowSteps,
+  removeFlowStep,
   requiredFlowChannels,
   resolvedFlowStep,
   sharedFlowChannel,
@@ -427,22 +431,44 @@ export default function TestAutomationPage() {
     [addRunLog],
   );
 
-  const closeResources = useCallback(async () => {
-    stopRequested.current = true;
-    ws.current?.close();
+  const releaseResources = useCallback(async (stop: boolean, report: boolean) => {
+    if (stop) stopRequested.current = true;
+    const socket = ws.current,
+      sessions = [...agentSessions.current.entries()];
     ws.current = null;
     for (const runtime of serials.current.values()) runtime.polling = false;
     serials.current.clear();
-    setSerialNames({});
-    await Promise.all(
-      [...agentSessions.current.values()].map((item) =>
-        fetch(`${LOCAL_PROXY_BASE}/api/network/sessions/${item.id}`, {
-          method: "DELETE",
-        }).catch(() => undefined),
-      ),
-    );
     agentSessions.current.clear();
-  }, []);
+    if (report) setSerialNames({});
+    const failures = await cleanupFlowResources([
+      ...(socket
+        ? [{ name: "WebSocket", run: () => socket.close() }]
+        : []),
+      ...sessions.map(([channel, item]) => ({
+        name: channel.toUpperCase(),
+        run: async () => {
+          const response = await fetch(
+            `${LOCAL_PROXY_BASE}/api/network/sessions/${item.id}`,
+            { method: "DELETE" },
+          );
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        },
+      })),
+    ]);
+    if (report) {
+      if (failures.length)
+        failures.forEach((failure) =>
+          addRunLog("fail", `${failure.name} 资源清理失败：${failure.error}`),
+        );
+      else if (socket || sessions.length)
+        addRunLog("pass", "测试创建的网络资源已释放");
+    }
+    return failures;
+  }, [addRunLog]);
+  const closeResources = useCallback(
+    async () => releaseResources(true, false),
+    [releaseResources],
+  );
   useEffect(
     () => () => {
       void closeResources();
@@ -771,7 +797,7 @@ export default function TestAutomationPage() {
         !serials.current.has(channel)
       )
         await bindSerial(channel);
-    for (const step of selectedCase.steps) {
+    for (const step of orderedFlowSteps(selectedCase.steps)) {
       const stage = step.stage ?? "test";
       if ((haltMain || stopRequested.current) && stage !== "teardown") {
         aborted ||= stopRequested.current;
@@ -912,6 +938,26 @@ export default function TestAutomationPage() {
       }
       executingTeardown.current = false;
     }
+    const cleanupStarted = Date.now(),
+      cleanupFailures = await releaseResources(false, true);
+    if (cleanupFailures.length) {
+      failed += 1;
+      const cleanupFinished = Date.now();
+      stepRuns.push({
+        id: "__resource-cleanup__",
+        name: "资源清理",
+        type: "cleanup",
+        channel: cleanupFailures.map((item) => item.name).join(","),
+        status: "failed",
+        startedAt: new Date(cleanupStarted).toISOString(),
+        finishedAt: new Date(cleanupFinished).toISOString(),
+        durationMs: cleanupFinished - cleanupStarted,
+        retries: 0,
+        error: cleanupFailures
+          .map((item) => `${item.name}: ${item.error}`)
+          .join("; "),
+      });
+    }
     const finished = Date.now(),
       duration = finished - started,
       status =
@@ -956,9 +1002,12 @@ export default function TestAutomationPage() {
         text,
       })),
     };
-    await saveTestRun(record);
-    setRunHistory((previous) => [record, ...previous]);
-    setRunning(false);
+    try {
+      await saveTestRun(record);
+      setRunHistory((previous) => [record, ...previous]);
+    } finally {
+      setRunning(false);
+    }
   };
   const stopRun = () => {
     stopRequested.current = true;
@@ -1038,7 +1087,7 @@ export default function TestAutomationPage() {
   };
   const deleteStep = (id: string) => {
     if (!selectedCase) return;
-    const remaining = selectedCase.steps.filter((step) => step.id !== id);
+    const result = removeFlowStep(selectedCase.steps, id, selectedStepId);
     setSuites((previous) =>
       previous.map((suite) =>
         suite.id !== selectedSuite.id
@@ -1047,21 +1096,18 @@ export default function TestAutomationPage() {
               ...suite,
               cases: suite.cases.map((item) =>
                 item.id === selectedCase.id
-                  ? { ...item, steps: remaining }
+                  ? { ...item, steps: result.steps }
                   : item,
               ),
             },
       ),
     );
-    setSelectedStepId(remaining[0]?.id ?? "");
+    setSelectedStepId(result.selectedId);
   };
   const moveStep = (id: string, offset: number) => {
     if (!selectedCase) return;
-    const steps = [...selectedCase.steps],
-      index = steps.findIndex((step) => step.id === id),
-      next = index + offset;
-    if (index < 0 || next < 0 || next >= steps.length) return;
-    [steps[index], steps[next]] = [steps[next], steps[index]];
+    const steps = reorderFlowStep(selectedCase.steps, id, offset);
+    if (steps === selectedCase.steps) return;
     setSuites((previous) =>
       previous.map((suite) =>
         suite.id !== selectedSuite.id
