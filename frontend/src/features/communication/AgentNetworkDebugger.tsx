@@ -1,12 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Plus, Search, Send, Server, Trash2, Unplug, X } from 'lucide-react';
-import { LOCAL_PROXY_BASE } from '../../services/aiService';
+import { closeNetworkSession, getNetworkStatus, listNetworkSessions, openNetworkSession, readNetworkSession, sendNetworkData, type NetworkAgentEvent as EventItem, type NetworkAgentSession as AgentSession, type NetworkMode as Mode, type NetworkProtocol as Protocol } from '../../services/networkAgent';
 
-type Protocol = 'tcp' | 'udp';
-type Mode = 'client' | 'server';
 type Role = 'tcp-client' | 'tcp-server' | 'udp-client' | 'udp-server';
-interface EventItem { id: number; timestamp: string; direction: 'rx' | 'tx' | 'system'; text: string; hex: string; byteLength: number; peer?: string }
-interface AgentSession { id: string; type: Protocol; mode?: Mode; host: string; port: number; localAddress: string; state: 'connecting' | 'connected' | 'error' | 'closed'; rxBytes: number; txBytes: number; clientCount?: number; events: EventItem[] }
 interface Session extends Omit<AgentSession, 'events'> { logs: EventItem[] }
 interface History { data: string; hex: boolean }
 
@@ -36,8 +32,8 @@ export default function AgentNetworkDebugger() {
   useEffect(() => { localStorage.setItem(HISTORY_KEY, JSON.stringify(history)); }, [history]);
   useEffect(() => {
     let stopped = false;
-    const check = async () => { try { const response = await fetch(`${LOCAL_PROXY_BASE}/api/network/status`); if (!stopped) setAvailable(response.ok); } catch { if (!stopped) setAvailable(false); } };
-    const restore = async () => { try { const response = await fetch(`${LOCAL_PROXY_BASE}/api/network/sessions`); if (!response.ok) return; const result = await response.json() as { sessions: AgentSession[] }; if (stopped) return; const restored = result.sessions.map(item => ({ ...item, logs: item.events })); restored.forEach(item => { const latest = item.logs[item.logs.length - 1]?.id ?? 0; lastIds.current.set(item.id, latest); }); setSessions(restored); setActiveId(current => current ?? restored[0]?.id ?? null); } catch { /* Agent 状态轮询会显示离线 */ } };
+    const check = async () => { try { await getNetworkStatus(); if (!stopped) setAvailable(true); } catch { if (!stopped) setAvailable(false); } };
+    const restore = async () => { try { const result = await listNetworkSessions(); if (stopped) return; const restored = result.map(item => ({ ...item, logs: item.events })); restored.forEach(item => { const latest = item.logs[item.logs.length - 1]?.id ?? 0; lastIds.current.set(item.id, latest); }); setSessions(restored); setActiveId(current => current ?? restored[0]?.id ?? null); } catch { /* Agent 状态轮询会显示离线 */ } };
     void restore();
     void check(); const timer = window.setInterval(() => void check(), 3000);
     return () => { stopped = true; clearInterval(timer); };
@@ -48,9 +44,7 @@ export default function AgentNetworkDebugger() {
     const poll = async () => {
       await Promise.all(sessionRef.current.map(async item => {
         try {
-          const response = await fetch(`${LOCAL_PROXY_BASE}/api/network/sessions/${item.id}?after=${lastIds.current.get(item.id) ?? 0}`);
-          if (!response.ok) throw new Error('网络会话已不存在');
-          const current = await response.json() as AgentSession;
+          const current = await readNetworkSession(item.id, lastIds.current.get(item.id) ?? 0);
           if (stopped) return;
           if (current.events.length) lastIds.current.set(item.id, current.events[current.events.length - 1].id);
           setSessions(all => all.map(old => old.id === item.id ? { ...current, logs: [...old.logs, ...current.events].slice(-2000) } : old));
@@ -64,23 +58,20 @@ export default function AgentNetworkDebugger() {
   const create = async () => {
     setError('');
     try {
-      const response = await fetch(`${LOCAL_PROXY_BASE}/api/network/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: protocol, mode, host, port: Number(port), localPort: Number(localPort) }) });
-      const data = await response.json() as AgentSession & { error?: string };
-      if (!response.ok) throw new Error(data.error || '创建会话失败');
+      const data = await openNetworkSession({ type: protocol, mode, host, port: Number(port), localPort: Number(localPort) });
       if (data.events.length) lastIds.current.set(data.id, data.events[data.events.length - 1].id);
       const created: Session = { id: data.id, type: data.type, mode: data.mode, host: data.host, port: data.port, localAddress: data.localAddress, state: data.state, rxBytes: data.rxBytes, txBytes: data.txBytes, clientCount: data.clientCount, logs: data.events };
       setSessions(all => [...all, created]); setActiveId(data.id);
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
   };
   const close = useCallback(async (id: string) => {
-    await fetch(`${LOCAL_PROXY_BASE}/api/network/sessions/${id}`, { method: 'DELETE' }).catch(() => undefined); lastIds.current.delete(id); setCycle(false);
+    await closeNetworkSession(id).catch(() => undefined); lastIds.current.delete(id); setCycle(false);
     setSessions(all => { const remaining = all.filter(item => item.id !== id); setActiveId(current => current === id ? remaining[0]?.id ?? null : current); setLeftId(current => current === id ? remaining[0]?.id ?? null : current); setRightId(current => current === id ? remaining[1]?.id ?? remaining[0]?.id ?? null : current); if (remaining.length < 2) setSplit(false); return remaining; });
   }, []);
   const send = useCallback(async (data: string, encoding: 'text' | 'hex', clear: boolean) => {
     const target = sessionRef.current.find(item => item.id === activeId); if (!target || !data) return;
     try {
-      const response = await fetch(`${LOCAL_PROXY_BASE}/api/network/sessions/${target.id}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ encoding, data }) });
-      const result = await response.json() as { error?: string }; if (!response.ok) throw new Error(result.error || '发送失败');
+      await sendNetworkData(target.id, data, encoding);
       setHistory(all => [{ data, hex: encoding === 'hex' }, ...all.filter(item => item.data !== data || item.hex !== (encoding === 'hex'))].slice(0, 30)); if (clear) setInput('');
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); setCycle(false); }
   }, [activeId]);
