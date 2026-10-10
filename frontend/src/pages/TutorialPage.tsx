@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import {
   BookOpen,
   ExternalLink,
@@ -30,6 +30,12 @@ import { roadmapPhases } from '../data/roadmap';
 import { lessonGuides } from '../data/lessonGuides';
 import { topicLessons } from '../data/topicLessons';
 import type { RoadmapModule, ExternalResource } from '../types';
+import {
+  moduleCompletion,
+  parseLearningProgress,
+  updateModuleProgress,
+  type ModuleLearningProgress,
+} from '../utils/learningProgress';
 import Editor from '@monaco-editor/react';
 
 /* ── icon mapper ── */
@@ -193,10 +199,11 @@ function ResourceCard({ resource }: { resource: ExternalResource }) {
 }
 
 /* ── module detail panel ── */
-function ModuleDetail({ module, onClose }: { module: RoadmapModule; onClose: () => void }) {
+function ModuleDetail({ module, progress, onProgressChange, onClose }: { module: RoadmapModule; progress?: ModuleLearningProgress; onProgressChange: (patch: Partial<Pick<ModuleLearningProgress, 'checklist' | 'evidence'>>) => void; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   const [expandedTopic, setExpandedTopic] = useState<number | null>(null);
   const lessonGuide = lessonGuides[module.id];
+  const completion = moduleCompletion(progress, lessonGuide?.checklist ?? []);
 
   const handleCopy = () => {
     if (module.codeExample) {
@@ -266,12 +273,18 @@ function ModuleDetail({ module, onClose }: { module: RoadmapModule; onClose: () 
                 <div className="rounded-xl border border-purple-500/20 bg-purple-500/5 p-4">
                   <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-purple-400"><CheckCircle2 size={14} />完成标准</h3>
                   <ul className="space-y-1.5">
-                    {lessonGuide.checklist.map((item) => <li key={item} className="flex gap-2 text-xs leading-5 text-gray-400"><span className="text-purple-400">✓</span>{item}</li>)}
+                    {lessonGuide.checklist.map((item) => <li key={item}><label className="flex cursor-pointer gap-2 text-xs leading-5 text-gray-400"><input type="checkbox" checked={progress?.checklist.includes(item) ?? false} onChange={event => onProgressChange({ checklist: event.target.checked ? [...new Set([...(progress?.checklist ?? []), item])] : (progress?.checklist ?? []).filter(value => value !== item) })} className="mt-1 accent-purple-500" /><span>{item}</span></label></li>)}
                   </ul>
                 </div>
               </div>
             </div>
           )}
+
+          <section className={`mb-6 rounded-xl border p-4 ${completion.complete ? 'border-green-500/30 bg-green-500/5' : 'border-[#30363d] bg-[#0d1117]'}`}>
+            <div className="flex items-center gap-2"><CheckCircle2 size={14} className={completion.complete ? 'text-green-400' : 'text-gray-600'} /><b className="text-sm text-gray-300">{completion.complete ? '本模块已通过实践验收' : '实践证据与进度'}</b><span className="ml-auto text-[10px] text-gray-500">{completion.checked}/{completion.total} 项完成标准</span></div>
+            <p className="mt-2 text-[11px] leading-5 text-gray-500">记录仓库路径、测试报告、串口日志或实物照片位置。只有完成全部标准且留下证据才计为学会。</p>
+            <textarea value={progress?.evidence ?? ''} onChange={event => onProgressChange({ evidence: event.target.value })} placeholder="例：records/uart-loopback.json；实物验证日期与现象…" className="mt-2 min-h-20 w-full resize-y rounded border border-[#30363d] bg-[#111820] p-2 text-xs text-gray-300 outline-none focus:border-blue-500/50" />
+          </section>
 
           {/* Topics */}
           <div className="mb-6">
@@ -837,6 +850,12 @@ export default function TutorialPage() {
   const [selectedModule, setSelectedModule] = useState<RoadmapModule | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'cards' | 'roadmap'>('roadmap');
+  const [learningProgress, setLearningProgress] = useState(() =>
+    parseLearningProgress(localStorage.getItem('embedkit-learning-progress')),
+  );
+  useEffect(() => {
+    localStorage.setItem('embedkit-learning-progress', JSON.stringify(learningProgress));
+  }, [learningProgress]);
 
   const filteredPhases = useMemo(() => {
     if (!searchQuery.trim()) return roadmapPhases;
@@ -881,6 +900,14 @@ export default function TutorialPage() {
     (sum, p) => sum + p.modules.reduce((s, m) => s + m.resources.length, 0),
     0
   );
+  const completedModules = roadmapPhases
+    .flatMap((phase) => phase.modules)
+    .filter((module) =>
+      moduleCompletion(
+        learningProgress.modules[module.id],
+        lessonGuides[module.id]?.checklist ?? [],
+      ).complete,
+    ).length;
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -894,7 +921,7 @@ export default function TutorialPage() {
             <div>
               <h1 className="text-lg font-bold text-white">嵌入式开发学习路线</h1>
               <p className="text-xs text-gray-400">
-                {roadmapPhases.length} 个阶段 · {totalModules} 个模块 · {totalResources} 个学习资源
+                {roadmapPhases.length} 个阶段 · {totalModules} 个模块 · {completedModules} 个已实践验收 · {totalResources} 个学习资源
               </p>
             </div>
           </div>
@@ -1081,7 +1108,16 @@ export default function TutorialPage() {
 
       {/* Module Detail Modal */}
       {selectedModule && (
-        <ModuleDetail module={selectedModule} onClose={() => setSelectedModule(null)} />
+        <ModuleDetail
+          module={selectedModule}
+          progress={learningProgress.modules[selectedModule.id]}
+          onProgressChange={(patch) =>
+            setLearningProgress((current) =>
+              updateModuleProgress(current, selectedModule.id, patch),
+            )
+          }
+          onClose={() => setSelectedModule(null)}
+        />
       )}
     </div>
   );
