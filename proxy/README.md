@@ -22,6 +22,8 @@ For a custom local server, add its origin explicitly instead of enabling arbitra
 
 Build output diagnostics are normalized for GCC/Clang `file:line:column`, Keil/Arm Compiler and MSVC `file(line,column)`, and IAR quoted-file formats. Only lines with explicit file and line evidence become source-navigation diagnostics; linker summaries and ordinary log lines remain plain output.
 
+The test suite also builds a minimal public C source with an installed GNU toolchain, generates real MAP/ELF/BIN/Intel HEX artifacts in a temporary directory, analyzes them, and removes them. It never downloads a compiler or commits generated firmware. See `docs/TOOLCHAIN_ARTIFACT_FIXTURES.md` for platform and proprietary-toolchain boundaries.
+
 ## Controlled local path selection
 
 `POST /api/files/select` accepts only `{ "kind": "file" }` or `{ "kind": "directory" }`. It opens the operating-system picker and returns the path explicitly selected by the user. A caller cannot submit a path for the Agent to approve, and the Agent validates that the selected result exists and matches the requested type.
