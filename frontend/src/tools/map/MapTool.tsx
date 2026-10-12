@@ -1,35 +1,51 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { FileUp, Search } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { analyzeMap } from './map';
-import { lookupMapAddress, type MapAddressLookup } from '../../utils/mapAnalyzer';
+import { lookupMapAddress, type MapAddressLookup, type MapAnalysis } from '../../utils/mapAnalyzer';
 import { readLocalFileBytes, revokeLocalPath } from '../../services/localFiles';
+import { analyzeMapInBackground, MAX_MAP_ANALYSIS_BYTES, type MapAnalysisResult } from '../../services/mapAnalysisWorker';
 import { parseBuildArtifactRouteState, routeStateContext, saveBuildAnalysisRecord, type BuildAnalysisContext } from '../../services/buildAnalysisRecords';
 import BuildAnalysisAssociation from '../../features/project/BuildAnalysisAssociation';
 
-const MAX_MAP_BYTES = 16 * 1024 * 1024;
+const MAX_MAP_BYTES = MAX_MAP_ANALYSIS_BYTES;
 const formatSize = (value: number) => value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(2)} MiB` : value >= 1024 ? `${(value / 1024).toFixed(2)} KiB` : `${value} B`;
 const hex = (value: number) => `0x${value.toString(16).toUpperCase()}`;
 function Value({ label, value }: { label: string; value: string | number }) { return <div className="rounded-lg bg-[#0d1117] px-3 py-2"><span className="block text-[10px] text-gray-600">{label}</span><code className="mt-1 block break-all text-xs text-gray-200">{value}</code></div>; }
 
 export default function MapTool() {
-  const location = useLocation(), navigate = useNavigate(), consumedIncoming = useRef(false);
+  const location = useLocation(), navigate = useNavigate(), consumedIncoming = useRef(false), activeAnalysis = useRef<AbortController | null>(null), skipNextSourceAnalysis = useRef(false);
   const [source, setSource] = useState(''), [address, setAddress] = useState(''), [lookup, setLookup] = useState<MapAddressLookup | null>(null), [lookupError, setLookupError] = useState('');
   const [fileName, setFileName] = useState(''), [error, setError] = useState(''), [progress, setProgress] = useState<number | null>(null);
+  const [analysis, setAnalysis] = useState<MapAnalysis | null>(null), [analyzing, setAnalyzing] = useState(false), [execution, setExecution] = useState<MapAnalysisResult['execution'] | null>(null);
   const [associationContext, setAssociationContext] = useState<BuildAnalysisContext | null>(null), [associationRevision, setAssociationRevision] = useState(0);
-  const analysis = useMemo(() => source.trim() ? analyzeMap(source) : null, [source]);
+  const analyze = useCallback(async (text: string, controller: AbortController) => {
+    setAnalyzing(true); setError(''); setLookup(null);
+    try { const result = await analyzeMapInBackground(text, { signal: controller.signal }); setAnalysis(result.analysis); setExecution(result.execution); return result.analysis; }
+    finally { if (activeAnalysis.current === controller) { activeAnalysis.current = null; setAnalyzing(false); } }
+  }, []);
+  useEffect(() => {
+    if (skipNextSourceAnalysis.current) { skipNextSourceAnalysis.current = false; return; }
+    activeAnalysis.current?.abort();
+    activeAnalysis.current = null;
+    if (!source.trim()) return;
+    const controller = new AbortController(); activeAnalysis.current = controller;
+    const timer = window.setTimeout(() => { void analyze(source, controller).catch(reason => { if (reason instanceof DOMException && reason.name === 'AbortError') return; setAnalysis(null); setError(reason instanceof Error ? reason.message : String(reason)); }); }, 180);
+    return () => { clearTimeout(timer); controller.abort(); if (activeAnalysis.current === controller) activeAnalysis.current = null; };
+  }, [analyze, source]);
+  useEffect(() => () => activeAnalysis.current?.abort(), []);
   const locate = () => { if (!analysis) return; try { setLookup(lookupMapAddress(analysis, address)); setLookupError(''); } catch (error) { setLookup(null); setLookupError(error instanceof Error ? error.message : String(error)); } };
   const consumeSelection = useCallback(async (selectionId: string, incomingName: string, context: BuildAnalysisContext | null = null) => {
     setAssociationContext(context);
     setError(''); setLookup(null); setProgress(0);
     try {
       const { metadata, bytes } = await readLocalFileBytes(selectionId, MAX_MAP_BYTES, setProgress);
-      const text = new TextDecoder('utf-8').decode(bytes), parsed = analyzeMap(text);
+      const text = new TextDecoder('utf-8').decode(bytes), controller = new AbortController(); activeAnalysis.current?.abort(); activeAnalysis.current = controller;
+      const parsed = await analyze(text, controller); skipNextSourceAnalysis.current = true;
       setSource(text); setFileName(incomingName || metadata.name); setProgress(100);
       if (context) { saveBuildAnalysisRecord(context, 'map', { summary: { format: parsed.formatLabel, coverage: parsed.coverage.score, confidence: parsed.coverage.confidence, flash: parsed.totals.flash, ram: parsed.totals.ram, modules: parsed.modules.length, symbols: parsed.symbols.length, optimizations: parsed.optimizations.length, warnings: parsed.warnings.length } }); setAssociationRevision(value => value + 1); }
     } catch (reason) { const message = reason instanceof Error ? reason.message : String(reason); setError(message); setProgress(null); if (context) { saveBuildAnalysisRecord(context, 'map', { error: message }); setAssociationRevision(value => value + 1); } }
     finally { await revokeLocalPath(selectionId).catch(() => undefined); }
-  }, []);
+  }, [analyze]);
   useEffect(() => {
     const incoming = parseBuildArtifactRouteState(location.state);
     if (consumedIncoming.current || !incoming) return;
@@ -43,9 +59,9 @@ export default function MapTool() {
   };
   return <>
     <BuildAnalysisAssociation context={associationContext} revision={associationRevision} />
-    {(fileName || progress !== null) && <div className="mb-3 rounded border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-[11px] text-blue-300">{fileName || '正在读取 MAP'}{progress !== null && progress < 100 ? ` · ${progress}%` : ''}</div>}
+    {(fileName || progress !== null || analyzing) && <div className="mb-3 flex items-center gap-2 rounded border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-[11px] text-blue-300"><span className="min-w-0 flex-1 truncate">{fileName || 'MAP 内容'}{progress !== null && progress < 100 ? ` · 读取 ${progress}%` : analyzing ? ' · 后台分析中…' : execution === 'worker' ? ' · Web Worker 已完成' : execution === 'main-thread-fallback' ? ' · 兼容模式已完成' : ''}</span>{analyzing && <button onClick={() => activeAnalysis.current?.abort()} className="rounded border border-blue-400/30 px-2 py-1">取消</button>}</div>}
     {error && <div className="mb-3 rounded border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-300">{error}</div>}
-    <label className="mb-3 block text-[11px] text-gray-500">MAP 内容<textarea value={source} onChange={event => { setSource(event.target.value); setLookup(null); }} rows={9} placeholder="粘贴 MAP 内容，或导入 .map 文件" className="field mt-1 resize-y font-mono" /></label>
+    <label className="mb-3 block text-[11px] text-gray-500">MAP 内容<textarea value={source} onChange={event => { const next = event.target.value; setSource(next); setLookup(null); if (!next.trim()) { setAnalysis(null); setExecution(null); setAnalyzing(false); } }} rows={9} placeholder="粘贴 MAP 内容，或导入 .map 文件" className="field mt-1 resize-y font-mono" /></label>
     <label className="mb-3 inline-flex cursor-pointer items-center gap-2 rounded border border-[#30363d] px-3 py-2 text-xs text-gray-400"><FileUp size={13} />导入 MAP 文件<input type="file" accept=".map,text/plain" className="hidden" onChange={event => void importBrowserFile(event.target.files?.[0])} /></label>
     {analysis && <>
       <div className="grid gap-2 sm:grid-cols-2"><Value label="格式" value={analysis.formatLabel} /><Value label="覆盖率 / 置信度" value={`${analysis.coverage.score}% / ${analysis.coverage.confidence}`} /><Value label="Flash" value={formatSize(analysis.totals.flash)} /><Value label="RAM" value={formatSize(analysis.totals.ram)} /><Value label="模块 / 符号" value={`${analysis.modules.length} / ${analysis.symbols.length}`} /><Value label="优化机会" value={analysis.optimizations.length} /></div>

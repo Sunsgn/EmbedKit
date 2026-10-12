@@ -20,9 +20,10 @@ describe('MAP address workflow', () => {
     vi.mocked(readLocalFileBytes).mockResolvedValue({ metadata: { id: 'selection-map', kind: 'file', name: 'firmware.map', size: map.length, modifiedAt: '', expiresAt: '' }, bytes: new TextEncoder().encode(map) });
     vi.mocked(revokeLocalPath).mockResolvedValue({ revoked: true });
   });
-  it('locates an address with MAP evidence and offers explicit ELF refinement', () => {
+  it('locates an address with MAP evidence and offers explicit ELF refinement', async () => {
     render(<MemoryRouter><MapTool /></MemoryRouter>);
     fireEvent.change(screen.getByPlaceholderText('粘贴 MAP 内容，或导入 .map 文件'), { target: { value: map } });
+    expect(await screen.findByText('GNU ld / LLVM lld / ESP-IDF')).toBeVisible();
     fireEvent.change(screen.getByPlaceholderText('例如 0x08001234'), { target: { value: '0x08000008' } });
     fireEvent.click(screen.getByRole('button', { name: 'MAP 定位' }));
     expect(screen.getByText('main + 0x8')).toBeVisible();
@@ -30,21 +31,21 @@ describe('MAP address workflow', () => {
     expect(screen.getByRole('link', { name: '用 ELF 深度定位' })).toHaveAttribute('href', '/toolbox/elf?address=0x08000008&source=map');
   });
 
-  it('reports invalid addresses without hiding the MAP analysis', () => {
+  it('reports invalid addresses without hiding the MAP analysis', async () => {
     render(<MemoryRouter><MapTool /></MemoryRouter>);
     fireEvent.change(screen.getByPlaceholderText('粘贴 MAP 内容，或导入 .map 文件'), { target: { value: map } });
+    expect(await screen.findByText('GNU ld / LLVM lld / ESP-IDF')).toBeVisible();
     fireEvent.change(screen.getByPlaceholderText('例如 0x08001234'), { target: { value: 'main+4' } });
     fireEvent.click(screen.getByRole('button', { name: 'MAP 定位' }));
     expect(screen.getByText(/地址必须/)).toBeVisible();
-    expect(screen.getByText('GNU ld / LLVM lld / ESP-IDF')).toBeVisible();
   });
 
   it('reads, analyzes, and revokes an authorized build MAP artifact', async () => {
     render(<MemoryRouter initialEntries={[{ pathname: '/toolbox/map', state: { selectionId: 'selection-map', fileName: 'firmware.map', source: 'build-artifact', buildId: 'build-map', artifactIndex: 0, artifactType: 'map', size: map.length, modifiedAt: '2026-10-12T00:00:00.000Z' } }]}><MapTool /></MemoryRouter>);
     await waitFor(() => expect(readLocalFileBytes).toHaveBeenCalledWith('selection-map', 16 * 1024 * 1024, expect.any(Function)));
     await waitFor(() => expect(revokeLocalPath).toHaveBeenCalledWith('selection-map'));
-    expect(await screen.findByText('firmware.map')).toBeVisible();
-    expect(screen.getByText('GNU ld / LLVM lld / ESP-IDF')).toBeVisible();
+    expect(await screen.findByText(/firmware\.map/)).toBeVisible();
+    expect(await screen.findByText('GNU ld / LLVM lld / ESP-IDF')).toBeVisible();
     expect(screen.getByText('当前产物已记录')).toBeVisible();
   });
 
