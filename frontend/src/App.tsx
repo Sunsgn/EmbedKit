@@ -1,6 +1,7 @@
-import { lazy, Suspense, useState, type ComponentType } from 'react';
+import { lazy, Suspense, useEffect, useState, type ComponentType } from 'react';
 import { HashRouter as Router, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { BookOpen, Boxes, BrainCircuit, Code2, Cpu, DatabaseBackup, FlaskConical, Gauge, HardDrive, Menu, Radio, Wrench, X } from 'lucide-react';
+import { BookOpen, Boxes, BrainCircuit, Code2, Cpu, DatabaseBackup, FlaskConical, Gauge, HardDrive, Menu, Radio, RefreshCw, WifiOff, Wrench, X } from 'lucide-react';
+import { activatePwaUpdate, subscribePwaUpdate } from './services/pwa';
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const DeviceProjectsPage = lazy(() => import('./pages/DeviceProjectsPage'));
@@ -82,10 +83,14 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (value: bo
 
 function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [online, setOnline] = useState(() => navigator.onLine), [updateAvailable, setUpdateAvailable] = useState(false);
+  useEffect(() => { const connected = () => setOnline(true), disconnected = () => setOnline(false); window.addEventListener('online', connected); window.addEventListener('offline', disconnected); const unsubscribe = subscribePwaUpdate(setUpdateAvailable); return () => { window.removeEventListener('online', connected); window.removeEventListener('offline', disconnected); unsubscribe(); }; }, []);
   return <div className="flex h-screen bg-[#0d1117]">
     <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
     <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_80%_-20%,rgba(59,130,246,0.08),transparent_36%),#0d1117]">
       <header className="flex h-13 shrink-0 items-center border-b border-[#30363d]/80 bg-[#161b22]/95 px-4 shadow-sm shadow-black/20 backdrop-blur lg:hidden"><button onClick={() => setSidebarOpen(true)} className="rounded-lg p-1.5 text-gray-400 hover:bg-white/5 hover:text-white" aria-label="打开菜单"><Menu size={20} /></button><span className="ml-3 text-sm font-semibold">EmbedKit</span><span className="ml-2 rounded bg-blue-500/10 px-1.5 py-0.5 text-[9px] text-blue-400">WORKBENCH</span></header>
+      {!online && <div className="flex shrink-0 items-center justify-center gap-2 border-b border-yellow-500/20 bg-yellow-500/10 px-3 py-1.5 text-[10px] text-yellow-300"><WifiOff size={12} />离线模式：浏览器工具和已缓存资料可用；Local Agent 与联网来源按当前连接状态工作。</div>}
+      {updateAvailable && <div className="flex shrink-0 items-center justify-center gap-2 border-b border-blue-500/20 bg-blue-500/10 px-3 py-1.5 text-[10px] text-blue-300">发现新版本<button onClick={activatePwaUpdate} className="flex items-center gap-1 rounded border border-blue-500/30 px-2 py-0.5"><RefreshCw size={10} />更新并重载</button></div>}
       <div className="min-h-0 flex-1 overflow-hidden"><Suspense fallback={<LoadingPage />}><Routes>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/devices" element={<DeviceProjectsPage />} />
