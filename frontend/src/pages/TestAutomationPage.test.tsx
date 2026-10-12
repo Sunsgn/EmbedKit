@@ -49,7 +49,7 @@ describe('TestAutomationPage centralized Agent workflow', () => {
     await waitFor(() => expect(openNetworkSession).toHaveBeenCalledWith({ type: 'tcp', mode: 'client', host: '127.0.0.1', port: 9000, localPort: 0 }));
     expect(sendNetworkData).toHaveBeenCalledWith('network-1', 'PING', 'text');
     await waitFor(() => expect(closeNetworkSession).toHaveBeenCalledWith('network-1'));
-    await waitFor(() => expect(saveTestRun).toHaveBeenCalledWith(expect.objectContaining({ caseName: '发送与清理', status: 'passed', agentVersion: '1.0.0', passed: 1, failed: 0 })));
+    await waitFor(() => expect(saveTestRun).toHaveBeenCalledWith(expect.objectContaining({ schemaVersion: 2, caseName: '发送与清理', status: 'passed', agentVersion: '1.0.0', passed: 1, failed: 0, communications: [expect.objectContaining({ transport: 'tcp', sessionId: 'network-1', txBytes: 4, rxBytes: 0 })] })));
     expect(screen.getByText(/测试创建的网络资源已释放/)).toBeVisible();
   });
 
@@ -59,5 +59,76 @@ describe('TestAutomationPage centralized Agent workflow', () => {
     await waitFor(() => expect(getAgentStatus).toHaveBeenCalled());
     expect(screen.getByRole('button', { name: '运行流程' })).toBeEnabled();
     expect(screen.getByText('发送 PING')).toBeVisible();
+  });
+
+  it('optionally snapshots a real firmware fingerprint and selected device', async () => {
+    localStorage.setItem(
+      'embedkit.build-analysis-records',
+      JSON.stringify([
+        {
+          schemaVersion: 1,
+          id: 'build-1:0',
+          buildId: 'build-1',
+          artifactIndex: 0,
+          fileName: 'release.bin',
+          artifactType: 'bin',
+          size: 128,
+          modifiedAt: '2026-10-12T00:00:00.000Z',
+          sha256: 'a'.repeat(64),
+          kind: 'bin',
+          status: 'passed',
+          analyzedAt: '2026-10-12T00:01:00.000Z',
+        },
+      ]),
+    );
+    vi.mocked(getProductSetting).mockImplementation(async (key) =>
+      key === 'activeProjectId'
+        ? 'project-1'
+        : key === 'activeDeviceId'
+          ? 'device-1'
+          : null,
+    );
+    vi.mocked(listDeviceProjects).mockResolvedValue([
+      {
+        id: 'project-1',
+        name: '控制器',
+        productModel: 'EK-1',
+        chipModel: '',
+        description: '',
+        tags: [],
+        devices: [
+          {
+            id: 'device-1',
+            name: '样机 A',
+            serialNumber: 'SN001',
+            hardwareVersion: '1.0',
+            firmwareVersion: '2.0',
+            channels: [],
+          },
+        ],
+        createdAt: '2026-10-12T00:00:00.000Z',
+        updatedAt: '2026-10-12T00:00:00.000Z',
+      },
+    ]);
+
+    render(<TestAutomationPage />);
+    await waitFor(() => expect(screen.getByText('控制器 / 样机 A')).toBeVisible());
+    fireEvent.change(screen.getByLabelText('已计算固件指纹'), {
+      target: { value: 'build-1:0' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '运行流程' }));
+
+    await waitFor(() =>
+      expect(saveTestRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          device: expect.objectContaining({ serialNumber: 'SN001' }),
+          firmware: expect.objectContaining({
+            buildId: 'build-1',
+            artifactName: 'release.bin',
+            sha256: 'a'.repeat(64),
+          }),
+        }),
+      ),
+    );
   });
 });

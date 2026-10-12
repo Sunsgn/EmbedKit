@@ -36,7 +36,18 @@ import {
   listTestRuns,
   saveTestRun,
 } from "../services/productStorage";
-import type { TestRunRecord, TestStepRun } from "../types/product";
+import {
+  createTestRunEvidence,
+  createTestRunJsonReport,
+  TEST_RUN_OBSERVED_LIMIT,
+} from "../services/testRunEvidence";
+import { listBuildAnalysisRecords } from "../services/buildAnalysisRecords";
+import type {
+  TestCommunicationEvidence,
+  TestDeviceEvidence,
+  TestRunRecord,
+  TestStepRun,
+} from "../types/product";
 import { formatHex, parseHexBytes } from "../utils/embeddedTools";
 import {
   applySharedFlowChannel,
@@ -113,6 +124,7 @@ interface Incoming {
   text: string;
   hex: string;
 }
+type SessionEvidence = TestCommunicationEvidence;
 interface SerialRuntime {
   id: string;
   after: number;
@@ -307,14 +319,22 @@ export default function TestAutomationPage() {
     [showHistory, setShowHistory] = useState(false),
     [agentVersion, setAgentVersion] = useState("unknown"),
     [activeProjectId, setActiveProjectId] = useState(""),
-    [activeDeviceId, setActiveDeviceId] = useState("");
+    [activeDeviceId, setActiveDeviceId] = useState(""),
+    [deviceEvidence, setDeviceEvidence] = useState<TestDeviceEvidence | null>(
+      null,
+    ),
+    [firmwareChoices] = useState(() =>
+      listBuildAnalysisRecords().filter((item) => Boolean(item.sha256)),
+    ),
+    [selectedFirmwareId, setSelectedFirmwareId] = useState("");
   const logSeq = useRef(0),
     stopRequested = useRef(false),
     executingTeardown = useRef(false),
     incoming = useRef<Incoming[]>([]),
     cursors = useRef<Partial<Record<Channel, number>>>({}),
     runtimeVariables = useRef<FlowVariable[]>([]),
-    runLogsRef = useRef<RunLog[]>([]);
+    runLogsRef = useRef<RunLog[]>([]),
+    sessionEvidence = useRef(new Map<Channel, SessionEvidence>());
   const serials = useRef(new Map<Channel, SerialRuntime>()),
     ws = useRef<WebSocket | null>(null),
     agentSessions = useRef(new Map<Channel, { id: string; after: number }>());
@@ -354,6 +374,13 @@ export default function TestAutomationPage() {
           project?.devices.find((item) => item.id === deviceId) ??
           project?.devices[0];
       if (!device) return;
+      setDeviceEvidence({
+        projectName: project?.name ?? "",
+        deviceName: device.name,
+        serialNumber: device.serialNumber,
+        hardwareVersion: device.hardwareVersion,
+        firmwareVersion: device.firmwareVersion,
+      });
       setConfiguredSerialPaths(
         device.channels
           .filter(
@@ -427,6 +454,8 @@ export default function TestAutomationPage() {
     (channel: Channel, bytes: Uint8Array, text?: string) => {
       const value = text ?? new TextDecoder().decode(bytes);
       incoming.current.push({ channel, text: value, hex: formatHex(bytes) });
+      const evidence = sessionEvidence.current.get(channel);
+      if (evidence) evidence.rxBytes += bytes.byteLength;
       addRunLog(
         "rx",
         `${channelLabels[channel]} ← ${value || formatHex(bytes)}`,
@@ -532,6 +561,14 @@ export default function TestAutomationPage() {
         polling: false,
       };
       serials.current.set(channel, runtime);
+      sessionEvidence.current.set(channel, {
+        channel,
+        transport: "serial",
+        sessionId: selected.id,
+        endpoint: selected.path,
+        rxBytes: 0,
+        txBytes: 0,
+      });
       setSerialNames((previous) => ({
         ...previous,
         [channel]: `${selected.path} · ${selected.baudRate} baud`,
@@ -558,6 +595,14 @@ export default function TestAutomationPage() {
       socket.onopen = () => {
         window.clearTimeout(timer);
         ws.current = socket;
+        sessionEvidence.current.set("websocket", {
+          channel: "websocket",
+          transport: "websocket",
+          sessionId: crypto.randomUUID(),
+          endpoint: wsUrl,
+          rxBytes: 0,
+          txBytes: 0,
+        });
         addRunLog("pass", `WebSocket 已连接 ${wsUrl}`);
         resolve(socket);
       };
@@ -591,6 +636,14 @@ export default function TestAutomationPage() {
       });
     const runtime = { id: result.id, after: 0 };
     agentSessions.current.set(channel, runtime);
+    sessionEvidence.current.set(channel, {
+      channel,
+      transport: channel,
+      sessionId: result.id,
+      endpoint: `${config.mode}:${config.host}:${config.port}`,
+      rxBytes: 0,
+      txBytes: 0,
+    });
     addRunLog(
       "pass",
       `${channel.toUpperCase()} ${config.mode === "server" ? "已监听" : "已连接"} ${config.host}:${config.port}`,
@@ -646,6 +699,8 @@ export default function TestAutomationPage() {
       const runtime = await ensureAgent(step.channel);
       await sendNetworkData(runtime.id, data, step.hex ? "hex" : "text");
     }
+    const evidence = sessionEvidence.current.get(step.channel);
+    if (evidence) evidence.txBytes += bytes.byteLength;
     addRunLog("tx", `${channelLabels[step.channel]} → ${step.data}`);
   };
   const waitForInput = async (
@@ -750,6 +805,7 @@ export default function TestAutomationPage() {
     executingTeardown.current = false;
     incoming.current = [];
     cursors.current = {};
+    sessionEvidence.current.clear();
     runtimeVariables.current = (selectedSuite.variables ?? []).map((item) => ({
       ...item,
     }));
@@ -768,6 +824,19 @@ export default function TestAutomationPage() {
         !serials.current.has(channel)
       )
         await bindSerial(channel);
+    for (const channel of requiredChannels) {
+      if (sessionEvidence.current.has(channel)) continue;
+      const runtime = serials.current.get(channel);
+      if (runtime)
+        sessionEvidence.current.set(channel, {
+          channel,
+          transport: "serial",
+          sessionId: runtime.id,
+          endpoint: runtime.path,
+          rxBytes: 0,
+          txBytes: 0,
+        });
+    }
     for (const step of orderedFlowSteps(selectedCase.steps)) {
       const stage = step.stage ?? "test";
       if ((haltMain || stopRequested.current) && stage !== "teardown") {
@@ -790,7 +859,8 @@ export default function TestAutomationPage() {
       const executionStep = resolvedFlowStep(selectedCase, step),
         stepStarted = Date.now(),
         stepStartedAt = new Date(stepStarted).toISOString();
-      let attempts = 0;
+      let attempts = 0,
+        observedEvidence = "";
       setStatuses((previous) => ({ ...previous, [step.id]: "running" }));
       addRunLog(
         "info",
@@ -813,6 +883,7 @@ export default function TestAutomationPage() {
                 executionStep.expected || "OK",
                 executionStep.failurePattern || "ERROR|FAIL",
               );
+              observedEvidence = response;
               captureResponse(executionStep, response);
             } else if (executionStep.type === "send")
               await sendData(executionStep);
@@ -853,7 +924,10 @@ export default function TestAutomationPage() {
               )
                 throw new Error("人工确认未通过");
             } else
-              await waitForInput(executionStep, executionStep.type === "match");
+              observedEvidence = await waitForInput(
+                executionStep,
+                executionStep.type === "match",
+              );
             lastError = undefined;
             break;
           } catch (reason) {
@@ -878,6 +952,23 @@ export default function TestAutomationPage() {
           finishedAt: new Date(finished).toISOString(),
           durationMs: finished - stepStarted,
           retries: attempts,
+          evidence:
+            executionStep.type === "manual"
+              ? {
+                  source: "manual-confirmation",
+                  observed: "操作人员确认通过",
+                }
+              : {
+                  source: observedEvidence
+                    ? "device-response"
+                    : "runtime",
+                  ...(executionStep.expected
+                    ? { expected: executionStep.expected }
+                    : {}),
+                  ...(observedEvidence
+                    ? { observed: observedEvidence }
+                    : {}),
+                },
         });
         setStatuses((previous) => ({ ...previous, [step.id]: "passed" }));
         addRunLog("pass", `${step.name} · 通过`);
@@ -897,6 +988,35 @@ export default function TestAutomationPage() {
           durationMs: finished - stepStarted,
           retries: attempts,
           error: message,
+          evidence: {
+            source:
+              executionStep.type === "manual"
+                ? "manual-confirmation"
+                : observedEvidence ||
+                    incoming.current.some(
+                      (item) => item.channel === executionStep.channel,
+                    )
+                  ? "device-response"
+                  : "runtime",
+            ...(executionStep.expected || executionStep.type === "match"
+              ? {
+                  expected:
+                    executionStep.expected || executionStep.data || "",
+                }
+              : {}),
+            observed:
+              executionStep.type === "manual"
+                ? "操作人员确认未通过"
+                : incoming.current
+                    .filter((item) => item.channel === executionStep.channel)
+                    .slice(-20)
+                    .map((item) =>
+                      executionStep.hex ? item.hex : item.text,
+                    )
+                    .join(executionStep.hex ? " " : "")
+                    .slice(-TEST_RUN_OBSERVED_LIMIT),
+            timeoutMs: executionStep.timeoutMs,
+          },
         });
         setStatuses((previous) => ({ ...previous, [step.id]: "failed" }));
         addRunLog("fail", `${step.name} · ${message}`);
@@ -909,7 +1029,10 @@ export default function TestAutomationPage() {
       }
       executingTeardown.current = false;
     }
-    const cleanupStarted = Date.now(),
+    const communications = [...sessionEvidence.current.values()].map(
+        (item) => ({ ...item }),
+      ),
+      cleanupStarted = Date.now(),
       cleanupFailures = await releaseResources(false, true);
     if (cleanupFailures.length) {
       failed += 1;
@@ -946,33 +1069,58 @@ export default function TestAutomationPage() {
           ? `执行失败 · ${duration} ms`
           : `全部通过 · ${duration} ms`,
     );
-    const record: TestRunRecord = {
-      id: crypto.randomUUID(),
-      projectId: activeProjectId,
-      deviceId: activeDeviceId,
-      suiteId: selectedSuite.id,
-      suiteName: selectedSuite.name,
-      caseId: selectedCase.id,
-      caseName: selectedCase.name,
-      status,
-      startedAt,
-      finishedAt: new Date(finished).toISOString(),
-      durationMs: duration,
-      passed,
-      failed,
-      agentVersion,
-      environment: Object.fromEntries(
-        runtimeVariables.current
-          .filter((variable) => !variable.secret)
-          .map((variable) => [variable.name, variable.value]),
+    const selectedFirmware = firmwareChoices.find(
+        (item) => item.id === selectedFirmwareId && item.sha256,
       ),
-      steps: stepRuns,
-      logs: runLogsRef.current.map(({ time, level, text }) => ({
-        time,
-        level,
-        text,
-      })),
-    };
+      secretValues = runtimeVariables.current
+        .filter((variable) => variable.secret)
+        .map((variable) => variable.value),
+      record = createTestRunEvidence(
+        {
+          schemaVersion: 2,
+          id: crypto.randomUUID(),
+          projectId: activeProjectId,
+          deviceId: activeDeviceId,
+          suiteId: selectedSuite.id,
+          suiteName: selectedSuite.name,
+          caseId: selectedCase.id,
+          caseName: selectedCase.name,
+          status,
+          startedAt,
+          finishedAt: new Date(finished).toISOString(),
+          durationMs: duration,
+          passed,
+          failed,
+          agentVersion,
+          ...(deviceEvidence ? { device: deviceEvidence } : {}),
+          ...(selectedFirmware
+            ? {
+                firmware: {
+                  buildId: selectedFirmware.buildId,
+                  artifactName: selectedFirmware.fileName,
+                  artifactType: selectedFirmware.artifactType,
+                  size: selectedFirmware.size,
+                  modifiedAt: selectedFirmware.modifiedAt,
+                  sha256: selectedFirmware.sha256!,
+                  analyzedAt: selectedFirmware.analyzedAt,
+                },
+              }
+            : {}),
+          communications,
+          environment: Object.fromEntries(
+            runtimeVariables.current
+              .filter((variable) => !variable.secret)
+              .map((variable) => [variable.name, variable.value]),
+          ),
+          steps: stepRuns,
+          logs: runLogsRef.current.map(({ time, level, text }) => ({
+            time,
+            level,
+            text,
+          })),
+        },
+        secretValues,
+      );
     try {
       await saveTestRun(record);
       setRunHistory((previous) => [record, ...previous]);
@@ -1396,7 +1544,7 @@ export default function TestAutomationPage() {
     const rows = run.steps
         .map(
           (step) =>
-            `<tr><td>${escapeMarkup(step.name)}</td><td>${escapeMarkup(typeLabels[step.type as StepType] ?? step.type)}</td><td>${escapeMarkup(channelLabels[step.channel as Channel] ?? step.channel)}</td><td>${escapeMarkup(step.status)}</td><td>${step.durationMs} ms</td><td>${escapeMarkup(step.error)}</td></tr>`,
+            `<tr><td>${escapeMarkup(step.name)}</td><td>${escapeMarkup(typeLabels[step.type as StepType] ?? step.type)}</td><td>${escapeMarkup(channelLabels[step.channel as Channel] ?? step.channel)}</td><td>${escapeMarkup(step.status)}</td><td>${step.durationMs} ms</td><td>${escapeMarkup(step.evidence?.source ?? "无")}</td><td>${escapeMarkup(step.evidence?.observed ?? step.error)}</td></tr>`,
         )
         .join(""),
       environment = Object.entries(run.environment)
@@ -1411,7 +1559,19 @@ export default function TestAutomationPage() {
             `${escapeMarkup(log.time)} [${escapeMarkup(log.level)}] ${escapeMarkup(log.text)}`,
         )
         .join("\n"),
-      html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>EmbedKit 测试报告</title><style>body{font:14px sans-serif;margin:32px;color:#222}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:8px;text-align:left}th{background:#f5f5f5}.passed{color:#16803c}.failed,.error{color:#c62828}pre{white-space:pre-wrap;background:#f5f5f5;padding:12px}</style></head><body><h1>EmbedKit 测试报告</h1><p>套件：${escapeMarkup(run.suiteName)} · 流程：${escapeMarkup(run.caseName)}</p><p>设备项目：${escapeMarkup(run.projectId || "未关联")} · 设备：${escapeMarkup(run.deviceId || "未关联")} · Agent：${escapeMarkup(run.agentVersion)}</p><p>开始：${escapeMarkup(new Date(run.startedAt).toLocaleString())} · 耗时：${run.durationMs} ms</p><p class="${run.status}">结果：${escapeMarkup(run.status)} · 通过 ${run.passed} · 失败 ${run.failed}</p><h2>运行环境</h2><ul>${environment || "<li>无公开变量</li>"}</ul><h2>步骤</h2><table><tr><th>步骤</th><th>类型</th><th>通道</th><th>结果</th><th>耗时</th><th>失败原因</th></tr>${rows}</table><h2>执行日志</h2><pre>${logs}</pre></body></html>`;
+      device = run.device
+        ? `${escapeMarkup(run.device.projectName)} / ${escapeMarkup(run.device.deviceName)} · SN ${escapeMarkup(run.device.serialNumber || "未填写")} · HW ${escapeMarkup(run.device.hardwareVersion || "未填写")} · FW ${escapeMarkup(run.device.firmwareVersion || "未填写")}`
+        : "未关联设备快照",
+      firmware = run.firmware
+        ? `${escapeMarkup(run.firmware.artifactName)} · SHA-256 ${escapeMarkup(run.firmware.sha256)}`
+        : "未关联已计算的固件指纹",
+      communications = (run.communications ?? [])
+        .map(
+          (item) =>
+            `<li>${escapeMarkup(item.channel)} · ${escapeMarkup(item.transport)} · ${escapeMarkup(item.endpoint)} · RX ${item.rxBytes} / TX ${item.txBytes} 字节 · 会话 ${escapeMarkup(item.sessionId)}</li>`,
+        )
+        .join(""),
+      html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>EmbedKit 测试报告</title><style>body{font:14px sans-serif;margin:32px;color:#222}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:8px;text-align:left}th{background:#f5f5f5}.passed{color:#16803c}.failed,.error{color:#c62828}pre{white-space:pre-wrap;background:#f5f5f5;padding:12px}</style></head><body><h1>EmbedKit 真实设备测试报告</h1><p>套件：${escapeMarkup(run.suiteName)} · 流程：${escapeMarkup(run.caseName)}</p><p>设备：${device}</p><p>固件：${firmware}</p><p>Agent：${escapeMarkup(run.agentVersion)} · 开始：${escapeMarkup(new Date(run.startedAt).toLocaleString())} · 耗时：${run.durationMs} ms</p><p class="${run.status}">结果：${escapeMarkup(run.status)} · 通过 ${run.passed} · 失败 ${run.failed}</p><h2>证据说明</h2><p>设备响应来自通信会话；人工确认仅代表操作人员确认；设备、固件与端点快照只用于追溯，不单独证明测试通过。</p><h2>通信会话</h2><ul>${communications || "<li>本次流程未建立通信会话</li>"}</ul><h2>运行环境</h2><ul>${environment || "<li>无公开变量</li>"}</ul><h2>步骤</h2><table><tr><th>步骤</th><th>类型</th><th>通道</th><th>结果</th><th>耗时</th><th>证据类型</th><th>观测/失败</th></tr>${rows}</table><h2>执行日志</h2><pre>${logs}</pre></body></html>`;
     downloadText(
       `embedkit-report-${run.id}.html`,
       html,
@@ -1422,7 +1582,7 @@ export default function TestAutomationPage() {
     if (run)
       downloadText(
         `embedkit-run-${run.id}.json`,
-        JSON.stringify(run, null, 2),
+        JSON.stringify(createTestRunJsonReport(run), null, 2),
         "application/json;charset=utf-8",
       );
   };
@@ -2267,6 +2427,41 @@ export default function TestAutomationPage() {
                 </label>
               </section>
             )}
+            <section className="shrink-0 rounded-xl border border-[#30363d] bg-[#0d1117] px-3 py-2">
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="min-w-0 text-[10px] text-gray-500">
+                  <b className="block text-[11px] text-gray-300">
+                    验收对象（可选）
+                  </b>
+                  <span className="block truncate">
+                    {deviceEvidence
+                      ? `${deviceEvidence.projectName} / ${deviceEvidence.deviceName}`
+                      : "未关联设备项目，仍可独立运行"}
+                  </span>
+                </div>
+                <label className="min-w-0 text-[10px] text-gray-500">
+                  已计算固件指纹
+                  <select
+                    value={selectedFirmwareId}
+                    onChange={(event) =>
+                      setSelectedFirmwareId(event.target.value)
+                    }
+                    disabled={running}
+                    className="field"
+                  >
+                    <option value="">不关联固件（仍可运行）</option>
+                    {firmwareChoices.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.fileName} · {item.sha256?.slice(0, 12)}…
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <p className="mt-1 text-[9px] text-gray-600">
+                仅接受真实计算的 SHA-256；文件名不会被当作固件版本证明。
+              </p>
+            </section>
             <section className="shrink-0 rounded-xl border border-[#30363d] bg-[#0d1117]">
               <div className="border-b border-[#30363d] bg-[#111820] px-3 py-2 text-xs font-semibold text-gray-300">
                 通道配置

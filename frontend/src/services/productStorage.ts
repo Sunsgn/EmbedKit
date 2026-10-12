@@ -1,4 +1,5 @@
 import type { DeviceProject, TestRunRecord } from '../types/product';
+import { normalizeTestRunRecord } from './testRunEvidence';
 
 const DATABASE = 'embedkit-product';
 const VERSION = 1;
@@ -54,7 +55,7 @@ async function remove(storeName: string, key: IDBValidKey): Promise<void> {
 export async function listDeviceProjects() { return (await readAll<DeviceProject>(PROJECTS)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)); }
 export async function saveDeviceProject(project: DeviceProject) { await put(PROJECTS, { ...project, updatedAt: new Date().toISOString() }); }
 export async function deleteDeviceProject(id: string) { await remove(PROJECTS, id); }
-export async function listTestRuns() { return (await readAll<TestRunRecord>(RUNS)).sort((a, b) => b.startedAt.localeCompare(a.startedAt)); }
+export async function listTestRuns() { return (await readAll<TestRunRecord>(RUNS)).map(normalizeTestRunRecord).sort((a, b) => b.startedAt.localeCompare(a.startedAt)); }
 export async function saveTestRun(run: TestRunRecord) { await put(RUNS, run); }
 export async function deleteTestRun(id: string) { await remove(RUNS, id); }
 export async function setProductSetting<T>(key: string, value: T) { await put(SETTINGS, { key, value }); }

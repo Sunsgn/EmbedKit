@@ -69,9 +69,43 @@ export interface TestStepRun {
   durationMs: number;
   retries: number;
   error?: string;
+  evidence?: {
+    source: 'device-response' | 'manual-confirmation' | 'runtime';
+    expected?: string;
+    observed?: string;
+    timeoutMs?: number;
+  };
+}
+
+export interface TestDeviceEvidence {
+  projectName: string;
+  deviceName: string;
+  serialNumber: string;
+  hardwareVersion: string;
+  firmwareVersion: string;
+}
+
+export interface TestFirmwareEvidence {
+  buildId: string;
+  artifactName: string;
+  artifactType: string;
+  size: number;
+  modifiedAt: string;
+  sha256: string;
+  analyzedAt: string;
+}
+
+export interface TestCommunicationEvidence {
+  channel: string;
+  transport: ChannelKind;
+  sessionId: string;
+  endpoint: string;
+  rxBytes: number;
+  txBytes: number;
 }
 
 export interface TestRunRecord {
+  schemaVersion?: 2;
   id: string;
   projectId: string;
   deviceId: string;
@@ -86,6 +120,9 @@ export interface TestRunRecord {
   passed: number;
   failed: number;
   agentVersion: string;
+  device?: TestDeviceEvidence;
+  firmware?: TestFirmwareEvidence;
+  communications?: TestCommunicationEvidence[];
   environment: Record<string, string>;
   steps: TestStepRun[];
   logs: Array<{ time: string; level: string; text: string }>;
