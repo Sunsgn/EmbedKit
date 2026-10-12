@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState, type ComponentType } from 'react';
 import { HashRouter as Router, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { BookOpen, Boxes, BrainCircuit, Code2, Cpu, DatabaseBackup, FlaskConical, Gauge, HardDrive, Menu, Radio, RefreshCw, WifiOff, Wrench, X } from 'lucide-react';
+import { BookOpen, Boxes, BrainCircuit, Code2, Cpu, DatabaseBackup, FlaskConical, Gauge, HardDrive, Menu, MonitorCog, Radio, RefreshCw, WifiOff, Wrench, X } from 'lucide-react';
 import { activatePwaUpdate, subscribePwaUpdate } from './services/pwa';
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
@@ -14,6 +14,7 @@ const ChipLibPage = lazy(() => import('./pages/ChipLibPage'));
 const TutorialPage = lazy(() => import('./pages/TutorialPage'));
 const AiPage = lazy(() => import('./pages/AiPage'));
 const DataManagementPage = lazy(() => import('./pages/DataManagementPage'));
+const LocalAgentPage = lazy(() => import('./pages/LocalAgentPage'));
 
 interface NavItem {
   icon: ComponentType<{ size?: number }>;
@@ -45,6 +46,7 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
   {
     title: '系统',
     items: [
+      { icon: MonitorCog, label: '本地助手', path: '/agent' },
       { icon: DatabaseBackup, label: '数据管理', path: '/data' },
     ],
   },
@@ -107,6 +109,7 @@ function AppShell() {
         <Route path="/learn" element={<TutorialPage />} />
         <Route path="/tutorials" element={<Navigate to="/learn" replace />} />
         <Route path="/ai" element={<AiPage />} />
+        <Route path="/agent" element={<LocalAgentPage />} />
         <Route path="/data" element={<DataManagementPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes></Suspense></div>
