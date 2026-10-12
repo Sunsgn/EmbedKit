@@ -53,10 +53,11 @@ describe('ElfTool real artifact workflow', () => {
   });
 
   it('automatically consumes and revokes an authorized build artifact token', async () => {
-    render(<MemoryRouter initialEntries={[{ pathname: '/toolbox/elf', state: { selectionId: 'build-selection', fileName: 'firmware.axf', source: 'build-artifact' } }]}><ElfTool /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={[{ pathname: '/toolbox/elf', state: { selectionId: 'build-selection', fileName: 'firmware.axf', source: 'build-artifact', buildId: 'build-1', artifactIndex: 0, artifactType: 'axf', size: 4096, modifiedAt: '2026-10-12T00:00:00.000Z' } }]}><ElfTool /></MemoryRouter>);
     await waitFor(() => expect(analyzeSelectedElf).toHaveBeenCalledWith('build-selection'));
     await waitFor(() => expect(revokeLocalPath).toHaveBeenCalledWith('build-selection'));
     expect(await screen.findByText('firmware.axf')).toBeVisible();
     expect(screen.getByText('Arm (40)')).toBeVisible();
+    expect(screen.getByText('当前产物已记录')).toBeVisible();
   });
 });

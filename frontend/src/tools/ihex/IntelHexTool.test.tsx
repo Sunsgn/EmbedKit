@@ -15,11 +15,12 @@ describe('IntelHexTool authorized build artifact workflow', () => {
   });
 
   it('loads, validates, and revokes an authorized build HEX artifact', async () => {
-    render(<MemoryRouter initialEntries={[{ pathname: '/toolbox/ihex', state: { selectionId: 'selection-hex', fileName: 'release.hex', source: 'build-artifact' } }]}><IntelHexTool /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={[{ pathname: '/toolbox/ihex', state: { selectionId: 'selection-hex', fileName: 'release.hex', source: 'build-artifact', buildId: 'build-hex', artifactIndex: 0, artifactType: 'hex', size: hex.length, modifiedAt: '2026-10-12T00:00:00.000Z' } }]}><IntelHexTool /></MemoryRouter>);
     await waitFor(() => expect(readLocalFileBytes).toHaveBeenCalledWith('selection-hex', 16 * 1024 * 1024, expect.any(Function)));
     await waitFor(() => expect(revokeLocalPath).toHaveBeenCalledWith('selection-hex'));
     expect(screen.getByText('release.hex')).toBeVisible();
     expect(screen.getByText('3 / 1')).toBeVisible();
     expect(screen.getByText('已发现')).toBeVisible();
+    expect(screen.getByText('当前产物已记录')).toBeVisible();
   });
 });

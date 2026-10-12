@@ -3,6 +3,9 @@ import { Download, FileUp, Plus, Trash2 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import ToolResultRow from "../../features/toolbox/ToolResultRow";
 import { readLocalFileBytes, revokeLocalPath } from "../../services/localFiles";
+import { parseBuildArtifactRouteState, routeStateContext, saveBuildAnalysisRecord, type BuildAnalysisContext } from "../../services/buildAnalysisRecords";
+import BuildAnalysisAssociation from "../../features/project/BuildAnalysisAssociation";
+import { crc32 } from "../../utils/embeddedTools";
 import { compareFirmware, mergeFirmware, type OverlapPolicy } from "./firmware";
 
 interface SegmentRow {
@@ -39,6 +42,7 @@ export default function FirmwareTool() {
     [leftId, setLeftId] = useState(1),
     [rightId, setRightId] = useState(2);
   const [loadError, setLoadError] = useState(''), [progress, setProgress] = useState<number | null>(null), [importedBuild, setImportedBuild] = useState(false);
+  const [associationContext, setAssociationContext] = useState<BuildAnalysisContext | null>(null), [associationRevision, setAssociationRevision] = useState(0);
   const loaded = useMemo(
     () =>
       segments.filter(
@@ -95,16 +99,17 @@ export default function FirmwareTool() {
     setSegments((current) =>
       current.map((item) => (item.id === id ? { ...item, ...change } : item)),
     );
-  const consumeSelection = useCallback(async (selectionId: string, name: string) => {
+  const consumeSelection = useCallback(async (selectionId: string, name: string, context: BuildAnalysisContext | null = null) => {
+    setAssociationContext(context);
     setLoadError(''); setProgress(0);
-    try { const result = await readLocalFileBytes(selectionId, MAX_BIN_BYTES, setProgress); setSegments(current => current.map((item, index) => index === 0 ? { ...item, name: name || result.metadata.name, bytes: result.bytes } : item)); setImportedBuild(true); setProgress(100); }
-    catch (reason) { setLoadError(reason instanceof Error ? reason.message : String(reason)); setProgress(null); }
+    try { const result = await readLocalFileBytes(selectionId, MAX_BIN_BYTES, setProgress); setSegments(current => current.map((item, index) => index === 0 ? { ...item, name: name || result.metadata.name, bytes: result.bytes } : item)); setImportedBuild(true); setProgress(100); if (context) { saveBuildAnalysisRecord(context, 'bin', { summary: { bytes: result.bytes.length, crc32: crc(crc32(result.bytes)), baseAddressKnown: false } }); setAssociationRevision(value => value + 1); } }
+    catch (reason) { const message = reason instanceof Error ? reason.message : String(reason); setLoadError(message); setProgress(null); if (context) { saveBuildAnalysisRecord(context, 'bin', { error: message }); setAssociationRevision(value => value + 1); } }
     finally { await revokeLocalPath(selectionId).catch(() => undefined); }
   }, []);
   useEffect(() => {
-    const incoming = location.state as { selectionId?: string; fileName?: string; source?: string } | null;
-    if (consumedIncoming.current || !incoming?.selectionId || incoming.source !== 'build-artifact') return;
-    consumedIncoming.current = true; void consumeSelection(incoming.selectionId, incoming.fileName || 'firmware.bin');
+    const incoming = parseBuildArtifactRouteState(location.state);
+    if (consumedIncoming.current || !incoming) return;
+    consumedIncoming.current = true; void consumeSelection(incoming.selectionId, incoming.fileName || 'firmware.bin', routeStateContext(incoming));
     void navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
   }, [consumeSelection, location.pathname, location.search, location.state, navigate]);
   const choose = async (id: number, file?: File) => {
@@ -129,6 +134,7 @@ export default function FirmwareTool() {
     setSegments((current) => current.filter((item) => item.id !== id));
   return (
     <>
+      <BuildAnalysisAssociation context={associationContext} revision={associationRevision} />
       <div className="mb-3 flex items-center justify-between">
         <p className="text-xs text-gray-500">
           可添加任意数量 BIN 分段；所有数据仅在浏览器内处理。

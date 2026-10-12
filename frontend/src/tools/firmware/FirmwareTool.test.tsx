@@ -14,10 +14,11 @@ describe('FirmwareTool authorized build artifact workflow', () => {
   });
 
   it('loads a build BIN into the first segment, requires base-address confirmation, and revokes access', async () => {
-    render(<MemoryRouter initialEntries={[{ pathname: '/toolbox/firmware', state: { selectionId: 'selection-bin', fileName: 'release.bin', source: 'build-artifact' } }]}><FirmwareTool /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={[{ pathname: '/toolbox/firmware', state: { selectionId: 'selection-bin', fileName: 'release.bin', source: 'build-artifact', buildId: 'build-bin', artifactIndex: 0, artifactType: 'bin', size: 4, modifiedAt: '2026-10-12T00:00:00.000Z' } }]}><FirmwareTool /></MemoryRouter>);
     await waitFor(() => expect(readLocalFileBytes).toHaveBeenCalledWith('selection-bin', 32 * 1024 * 1024, expect.any(Function)));
     await waitFor(() => expect(revokeLocalPath).toHaveBeenCalledWith('selection-bin'));
     expect(screen.getByText(/release\.bin（4 B）/)).toBeVisible();
     expect(screen.getByText(/BIN 不包含加载地址，请确认/)).toBeVisible();
+    expect(screen.getByText('当前产物已记录')).toBeVisible();
   });
 });

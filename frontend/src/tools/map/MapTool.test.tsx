@@ -40,18 +40,20 @@ describe('MAP address workflow', () => {
   });
 
   it('reads, analyzes, and revokes an authorized build MAP artifact', async () => {
-    render(<MemoryRouter initialEntries={[{ pathname: '/toolbox/map', state: { selectionId: 'selection-map', fileName: 'firmware.map', source: 'build-artifact' } }]}><MapTool /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={[{ pathname: '/toolbox/map', state: { selectionId: 'selection-map', fileName: 'firmware.map', source: 'build-artifact', buildId: 'build-map', artifactIndex: 0, artifactType: 'map', size: map.length, modifiedAt: '2026-10-12T00:00:00.000Z' } }]}><MapTool /></MemoryRouter>);
     await waitFor(() => expect(readLocalFileBytes).toHaveBeenCalledWith('selection-map', 16 * 1024 * 1024, expect.any(Function)));
     await waitFor(() => expect(revokeLocalPath).toHaveBeenCalledWith('selection-map'));
     expect(await screen.findByText('firmware.map')).toBeVisible();
     expect(screen.getByText('GNU ld / LLVM lld / ESP-IDF')).toBeVisible();
+    expect(screen.getByText('当前产物已记录')).toBeVisible();
   });
 
   it('rejects oversized authorized MAP files and still revokes the token', async () => {
     vi.mocked(readLocalFileBytes).mockRejectedValue(new Error('文件大小 16777217 B 超过 16777216 B 上限'));
-    render(<MemoryRouter initialEntries={[{ pathname: '/toolbox/map', state: { selectionId: 'selection-map', fileName: 'huge.map', source: 'build-artifact' } }]}><MapTool /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={[{ pathname: '/toolbox/map', state: { selectionId: 'selection-map', fileName: 'huge.map', source: 'build-artifact', buildId: 'build-map', artifactIndex: 1, artifactType: 'map', size: 16 * 1024 * 1024 + 1, modifiedAt: '2026-10-12T00:00:00.000Z' } }]}><MapTool /></MemoryRouter>);
     expect(await screen.findByText(/超过.*上限/)).toBeVisible();
     expect(readLocalFileBytes).toHaveBeenCalled();
     await waitFor(() => expect(revokeLocalPath).toHaveBeenCalledWith('selection-map'));
+    expect(screen.getByText('当前产物分析失败')).toBeVisible();
   });
 });

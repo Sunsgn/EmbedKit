@@ -4,6 +4,7 @@ import ProjectBuildPanel from './ProjectBuildPanel';
 import * as agentClient from '../../services/agentClient';
 import * as buildAgent from '../../services/buildAgent';
 import * as localFiles from '../../services/localFiles';
+import { saveBuildAnalysisRecord } from '../../services/buildAnalysisRecords';
 
 vi.mock('../../services/agentClient', () => ({ getAgentStatus: vi.fn(), hasAgentCapability: vi.fn() }));
 vi.mock('../../services/buildAgent', () => ({ authorizeBuildArtifact: vi.fn(), createBuildJob: vi.fn(), detectBuildEnvironment: vi.fn(), hashBuildArtifact: vi.fn(), readBuildJob: vi.fn(), stopBuildJob: vi.fn() }));
@@ -70,7 +71,7 @@ describe('ProjectBuildPanel capability-gated workflow', () => {
     fireEvent.click(screen.getByRole('button', { name: '构建' }));
     const analyze = await screen.findByRole('button', { name: 'ELF 分析' }); fireEvent.click(analyze);
     await waitFor(() => expect(buildAgent.authorizeBuildArtifact).toHaveBeenCalledWith('build-elf', 0));
-    expect(onArtifactAnalyze).toHaveBeenCalledWith(artifact, 'selection-elf');
+    expect(onArtifactAnalyze).toHaveBeenCalledWith(artifact, 'selection-elf', { buildId: 'build-elf', artifactIndex: 0 });
   });
 
   it('offers the same controlled authorization for a discovered MAP artifact', async () => {
@@ -83,7 +84,7 @@ describe('ProjectBuildPanel capability-gated workflow', () => {
     fireEvent.click(screen.getByRole('button', { name: '构建' }));
     fireEvent.click(await screen.findByRole('button', { name: 'MAP 分析' }));
     await waitFor(() => expect(buildAgent.authorizeBuildArtifact).toHaveBeenCalledWith('build-map', 0));
-    expect(onArtifactAnalyze).toHaveBeenCalledWith(artifact, 'selection-map');
+    expect(onArtifactAnalyze).toHaveBeenCalledWith(artifact, 'selection-map', { buildId: 'build-map', artifactIndex: 0 });
   });
 
   it.each([['bin', 'BIN 工具'], ['hex', 'HEX 工具']])('authorizes a discovered %s artifact before opening its tool', async (type, label) => {
@@ -95,7 +96,7 @@ describe('ProjectBuildPanel capability-gated workflow', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '构建' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: '构建' })); fireEvent.click(await screen.findByRole('button', { name: label }));
     await waitFor(() => expect(buildAgent.authorizeBuildArtifact).toHaveBeenCalledWith(`build-${type}`, 0));
-    expect(onArtifactAnalyze).toHaveBeenCalledWith(artifact, `selection-${type}`);
+    expect(onArtifactAnalyze).toHaveBeenCalledWith(artifact, `selection-${type}`, { buildId: `build-${type}`, artifactIndex: 0 });
   });
 
   it('computes an artifact hash on demand without reading its content in the browser', async () => {
@@ -107,5 +108,27 @@ describe('ProjectBuildPanel capability-gated workflow', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'SHA-256' }));
     await waitFor(() => expect(buildAgent.hashBuildArtifact).toHaveBeenCalledWith('build-hash', 0));
     expect(await screen.findByText('SHA 0123456789ab…')).toBeVisible();
+  });
+
+  it('restores the last build and verified hashes after returning from an analysis tool', async () => {
+    const artifact = { name: 'app.elf', path: 'D:\\firmware\\demo\\build\\app.elf', type: 'elf', size: 4096, modifiedAt: '2026-10-10T00:00:00.000Z' };
+    localStorage.setItem('embedkit.project-build-last-job', JSON.stringify({ version: 1, id: 'build-restored', hashes: { 0: 'a'.repeat(64), bad: 'unsafe' } }));
+    saveBuildAnalysisRecord({ buildId: 'build-restored', artifactIndex: 0, fileName: 'app.elf', artifactType: 'elf', size: 4096, modifiedAt: artifact.modifiedAt }, 'elf', { summary: { machine: 'Arm' } });
+    vi.mocked(buildAgent.readBuildJob).mockResolvedValue({ id: 'build-restored', state: 'passed', exitCode: 0, startedAt: '', finishedAt: '', artifacts: [artifact], events: [] });
+    render(<ProjectBuildPanel {...props} onArtifactAnalyze={vi.fn()} />);
+    await waitFor(() => expect(buildAgent.readBuildJob).toHaveBeenCalledWith('build-restored'));
+    expect(await screen.findByText('app.elf')).toBeVisible();
+    expect(screen.getByText('SHA aaaaaaaaaaaa…')).toBeVisible();
+    expect(screen.getByText('已分析')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'ELF 分析' })).toBeEnabled();
+  });
+
+  it('drops an expired build reference without blocking independent analysis', async () => {
+    localStorage.setItem('embedkit.project-build-last-job', JSON.stringify({ version: 1, id: 'expired-job', hashes: {} }));
+    vi.mocked(buildAgent.readBuildJob).mockRejectedValue(new Error('Build job not found'));
+    render(<ProjectBuildPanel {...props} />);
+    expect(await screen.findByText(/上次构建任务已失效/)).toBeVisible();
+    expect(localStorage.getItem('embedkit.project-build-last-job')).toBeNull();
+    expect(screen.getByPlaceholderText(/my_project/)).toBeEnabled();
   });
 });

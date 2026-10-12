@@ -3,6 +3,8 @@ import { Download, FileSearch, Search } from 'lucide-react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { analyzeSelectedElf, lookupElfAddress, type ElfAddressLookup, type ElfAnalysis } from '../../services/elfAgent';
 import { revokeLocalPath, selectLocalFile } from '../../services/localFiles';
+import { parseBuildArtifactRouteState, routeStateContext, saveBuildAnalysisRecord, type BuildAnalysisContext } from '../../services/buildAnalysisRecords';
+import BuildAnalysisAssociation from '../../features/project/BuildAnalysisAssociation';
 
 const size = (value: number) => value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(2)} MiB` : value >= 1024 ? `${(value / 1024).toFixed(2)} KiB` : `${value} B`;
 function Value({ label, value }: { label: string; value: string | number }) { return <div className="rounded-lg bg-[#0d1117] px-3 py-2"><span className="block text-[10px] text-gray-600">{label}</span><code className="mt-1 block break-all text-xs text-gray-200">{value}</code></div>; }
@@ -18,21 +20,23 @@ export default function ElfTool() {
   const [lookupBusy, setLookupBusy] = useState(false);
   const [error, setError] = useState('');
   const [lookupError, setLookupError] = useState('');
+  const [associationContext, setAssociationContext] = useState<BuildAnalysisContext | null>(null), [associationRevision, setAssociationRevision] = useState(0);
 
-  const consumeSelection = useCallback(async (selectionId: string, name: string) => {
+  const consumeSelection = useCallback(async (selectionId: string, name: string, context: BuildAnalysisContext | null = null) => {
+    setAssociationContext(context);
     setBusy(true); setError(''); setLookup(null); setLookupError('');
     try {
       setFileName(name || 'ELF');
-      try { const result = await analyzeSelectedElf(selectionId); setAnalysis(result); setAddress(current => current || result.entry); }
+      try { const result = await analyzeSelectedElf(selectionId); setAnalysis(result); setAddress(current => current || result.entry); if (context) { saveBuildAnalysisRecord(context, 'elf', { summary: { machine: result.machine, bits: result.bits, entry: result.entry, symbols: result.symbolCount, namedSymbols: result.namedSymbolCount, hasDwarf: result.hasDwarf, hasSourceLines: result.hasSourceLines, sourceLines: result.dwarfLineCount, warnings: result.warnings.length } }); setAssociationRevision(value => value + 1); } }
       finally { await revokeLocalPath(selectionId).catch(() => undefined); }
-    } catch (reason) { setAnalysis(null); setError(reason instanceof Error ? reason.message : String(reason)); }
+    } catch (reason) { const message = reason instanceof Error ? reason.message : String(reason); setAnalysis(null); setError(message); if (context) { saveBuildAnalysisRecord(context, 'elf', { error: message }); setAssociationRevision(value => value + 1); } }
     finally { setBusy(false); }
   }, []);
   const select = async () => { setBusy(true); setError(''); try { const selected = await selectLocalFile(); if (!selected.cancelled && selected.selectionId) await consumeSelection(selected.selectionId, selected.name || 'ELF'); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } finally { setBusy(false); } };
   useEffect(() => {
-    const incoming = location.state as { selectionId?: string; fileName?: string; source?: string } | null;
-    if (consumedIncoming.current || !incoming?.selectionId || incoming.source !== 'build-artifact') return;
-    consumedIncoming.current = true; void consumeSelection(incoming.selectionId, incoming.fileName || 'ELF');
+    const incoming = parseBuildArtifactRouteState(location.state);
+    if (consumedIncoming.current || !incoming) return;
+    consumedIncoming.current = true; void consumeSelection(incoming.selectionId, incoming.fileName || 'ELF', routeStateContext(incoming));
     void navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
   }, [consumeSelection, location.pathname, location.search, location.state, navigate]);
   const locate = async () => {
@@ -50,6 +54,7 @@ export default function ElfTool() {
   };
 
   return <>
+    <BuildAnalysisAssociation context={associationContext} revision={associationRevision} />
     <div className="mb-3 flex flex-wrap items-center gap-2">
       <button onClick={() => void select()} disabled={busy} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs text-white disabled:opacity-40"><FileSearch size={14} />{busy ? '正在分析…' : '选择 ELF / AXF / OUT'}</button>
       <span className="min-w-0 flex-1 truncate text-xs text-gray-500">{fileName || '通过 Local Agent 系统选择器读取，不要求重新编译'}</span>

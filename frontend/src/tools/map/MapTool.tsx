@@ -4,6 +4,8 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { analyzeMap } from './map';
 import { lookupMapAddress, type MapAddressLookup } from '../../utils/mapAnalyzer';
 import { readLocalFileBytes, revokeLocalPath } from '../../services/localFiles';
+import { parseBuildArtifactRouteState, routeStateContext, saveBuildAnalysisRecord, type BuildAnalysisContext } from '../../services/buildAnalysisRecords';
+import BuildAnalysisAssociation from '../../features/project/BuildAnalysisAssociation';
 
 const MAX_MAP_BYTES = 16 * 1024 * 1024;
 const formatSize = (value: number) => value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(2)} MiB` : value >= 1024 ? `${(value / 1024).toFixed(2)} KiB` : `${value} B`;
@@ -14,20 +16,24 @@ export default function MapTool() {
   const location = useLocation(), navigate = useNavigate(), consumedIncoming = useRef(false);
   const [source, setSource] = useState(''), [address, setAddress] = useState(''), [lookup, setLookup] = useState<MapAddressLookup | null>(null), [lookupError, setLookupError] = useState('');
   const [fileName, setFileName] = useState(''), [error, setError] = useState(''), [progress, setProgress] = useState<number | null>(null);
+  const [associationContext, setAssociationContext] = useState<BuildAnalysisContext | null>(null), [associationRevision, setAssociationRevision] = useState(0);
   const analysis = useMemo(() => source.trim() ? analyzeMap(source) : null, [source]);
   const locate = () => { if (!analysis) return; try { setLookup(lookupMapAddress(analysis, address)); setLookupError(''); } catch (error) { setLookup(null); setLookupError(error instanceof Error ? error.message : String(error)); } };
-  const consumeSelection = useCallback(async (selectionId: string, incomingName: string) => {
+  const consumeSelection = useCallback(async (selectionId: string, incomingName: string, context: BuildAnalysisContext | null = null) => {
+    setAssociationContext(context);
     setError(''); setLookup(null); setProgress(0);
     try {
       const { metadata, bytes } = await readLocalFileBytes(selectionId, MAX_MAP_BYTES, setProgress);
-      setSource(new TextDecoder('utf-8').decode(bytes)); setFileName(incomingName || metadata.name); setProgress(100);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); setProgress(null); }
+      const text = new TextDecoder('utf-8').decode(bytes), parsed = analyzeMap(text);
+      setSource(text); setFileName(incomingName || metadata.name); setProgress(100);
+      if (context) { saveBuildAnalysisRecord(context, 'map', { summary: { format: parsed.formatLabel, coverage: parsed.coverage.score, confidence: parsed.coverage.confidence, flash: parsed.totals.flash, ram: parsed.totals.ram, modules: parsed.modules.length, symbols: parsed.symbols.length, optimizations: parsed.optimizations.length, warnings: parsed.warnings.length } }); setAssociationRevision(value => value + 1); }
+    } catch (reason) { const message = reason instanceof Error ? reason.message : String(reason); setError(message); setProgress(null); if (context) { saveBuildAnalysisRecord(context, 'map', { error: message }); setAssociationRevision(value => value + 1); } }
     finally { await revokeLocalPath(selectionId).catch(() => undefined); }
   }, []);
   useEffect(() => {
-    const incoming = location.state as { selectionId?: string; fileName?: string; source?: string } | null;
-    if (consumedIncoming.current || !incoming?.selectionId || incoming.source !== 'build-artifact') return;
-    consumedIncoming.current = true; void consumeSelection(incoming.selectionId, incoming.fileName || 'MAP');
+    const incoming = parseBuildArtifactRouteState(location.state);
+    if (consumedIncoming.current || !incoming) return;
+    consumedIncoming.current = true; void consumeSelection(incoming.selectionId, incoming.fileName || 'MAP', routeStateContext(incoming));
     void navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
   }, [consumeSelection, location.pathname, location.search, location.state, navigate]);
   const importBrowserFile = async (file?: File) => {
@@ -36,6 +42,7 @@ export default function MapTool() {
     try { setSource(await file.text()); setFileName(file.name); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
   };
   return <>
+    <BuildAnalysisAssociation context={associationContext} revision={associationRevision} />
     {(fileName || progress !== null) && <div className="mb-3 rounded border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-[11px] text-blue-300">{fileName || '正在读取 MAP'}{progress !== null && progress < 100 ? ` · ${progress}%` : ''}</div>}
     {error && <div className="mb-3 rounded border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-300">{error}</div>}
     <label className="mb-3 block text-[11px] text-gray-500">MAP 内容<textarea value={source} onChange={event => { setSource(event.target.value); setLookup(null); }} rows={9} placeholder="粘贴 MAP 内容，或导入 .map 文件" className="field mt-1 resize-y font-mono" /></label>
