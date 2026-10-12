@@ -1,11 +1,12 @@
 export function parseSerialAcceptanceArgs(values) {
-  const options = { port: '', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', dtr: false, rts: false, encoding: 'text', send: '', expect: '', timeoutMs: 5000, list: false, selfTest: false };
+  const options = { port: '', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', dtr: false, rts: false, encoding: 'text', send: '', expect: '', timeoutMs: 5000, maxCaptureBytes: 65536, redactRequest: false, list: false, selfTest: false };
   for (let index = 0; index < values.length; index += 1) {
     const key = values[index];
     if (key === '--list') options.list = true;
     else if (key === '--self-test') options.selfTest = true;
     else if (key === '--dtr') options.dtr = true;
     else if (key === '--rts') options.rts = true;
+    else if (key === '--redact-request') options.redactRequest = true;
     else {
       const value = values[++index];
       if (value === undefined) throw new Error(`Missing value for ${key}`);
@@ -18,6 +19,7 @@ export function parseSerialAcceptanceArgs(values) {
       else if (key === '--hex') { options.encoding = 'hex'; options.send = value; }
       else if (key === '--expect') options.expect = value;
       else if (key === '--timeout') options.timeoutMs = Number(value);
+      else if (key === '--max-capture') options.maxCaptureBytes = Number(value);
       else throw new Error(`Unknown option: ${key}`);
     }
   }
@@ -26,6 +28,7 @@ export function parseSerialAcceptanceArgs(values) {
   if (![1, 1.5, 2].includes(options.stopBits)) throw new Error('Stop bits must be 1, 1.5 or 2');
   if (!['none', 'even', 'odd', 'mark', 'space'].includes(options.parity)) throw new Error('Invalid parity');
   if (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 100 || options.timeoutMs > 300000) throw new Error('Timeout must be between 100 and 300000 ms');
+  if (!Number.isInteger(options.maxCaptureBytes) || options.maxCaptureBytes < 256 || options.maxCaptureBytes > 1048576) throw new Error('Capture limit must be an integer between 256 and 1048576 bytes');
   if (!options.list && !options.selfTest && !options.port) throw new Error('A serial port is required; use --list first');
   return options;
 }
@@ -37,7 +40,7 @@ export function serialAcceptancePayload(value, encoding) {
   return Buffer.from(normalized, 'hex');
 }
 
-export function serialAcceptanceResult(options, received, startedAt, finishedAt) {
+export function serialAcceptanceResult(options, received, startedAt, finishedAt, receivedBytes = received.length) {
   const text = received.toString('utf8'), expected = options.expect;
-  return { schemaVersion: 1, kind: 'embedkit.serial-device-acceptance', status: expected ? text.includes(expected) ? 'passed' : 'failed' : received.length ? 'observed' : 'no-data', port: options.port, settings: { baudRate: options.baudRate, dataBits: options.dataBits, stopBits: options.stopBits, parity: options.parity, dtr: options.dtr, rts: options.rts }, request: { encoding: options.encoding, data: options.send, bytes: serialAcceptancePayload(options.send, options.encoding).length }, response: { text, hex: received.toString('hex').match(/.{1,2}/g)?.join(' ').toUpperCase() || '', bytes: received.length }, expectation: expected, startedAt, finishedAt, durationMs: new Date(finishedAt).getTime() - new Date(startedAt).getTime() };
+  return { schemaVersion: 2, kind: 'embedkit.serial-device-acceptance', status: expected ? text.includes(expected) ? 'passed' : 'failed' : receivedBytes ? 'observed' : 'no-data', port: options.port, settings: { baudRate: options.baudRate, dataBits: options.dataBits, stopBits: options.stopBits, parity: options.parity, dtr: options.dtr, rts: options.rts }, request: { encoding: options.encoding, data: options.redactRequest ? '[REDACTED]' : options.send, redacted: options.redactRequest, bytes: serialAcceptancePayload(options.send, options.encoding).length }, response: { text, hex: received.toString('hex').match(/.{1,2}/g)?.join(' ').toUpperCase() || '', bytes: receivedBytes, capturedBytes: received.length, truncated: receivedBytes > received.length }, expectation: expected, startedAt, finishedAt, durationMs: new Date(finishedAt).getTime() - new Date(startedAt).getTime(), privacy: 'The report contains only the bounded response preview; use --redact-request for commands containing credentials.' };
 }

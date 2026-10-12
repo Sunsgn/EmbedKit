@@ -14,15 +14,24 @@ if (options.list) {
 }
 
 const startedAt = new Date().toISOString(), received = [];
+let receivedBytes = 0, capturedBytes = 0;
 const port = new SerialPort({ path: options.port, baudRate: options.baudRate, dataBits: options.dataBits, stopBits: options.stopBits, parity: options.parity, autoOpen: false });
 try {
   await new Promise((resolve, reject) => port.open(error => error ? reject(error) : resolve()));
   await new Promise((resolve, reject) => port.set({ dtr: options.dtr, rts: options.rts }, error => error ? reject(error) : resolve()));
-  port.on('data', data => received.push(Buffer.from(data)));
+  port.on('data', data => {
+    const chunk = Buffer.from(data), remaining = Math.max(0, options.maxCaptureBytes - capturedBytes);
+    receivedBytes += chunk.length;
+    if (remaining) {
+      const captured = chunk.subarray(0, remaining);
+      received.push(captured);
+      capturedBytes += captured.length;
+    }
+  });
   const payload = serialAcceptancePayload(options.send, options.encoding);
   if (payload.length) await new Promise((resolve, reject) => port.write(payload, error => error ? reject(error) : port.drain(drainError => drainError ? reject(drainError) : resolve())));
   await new Promise(resolve => setTimeout(resolve, options.timeoutMs));
-  const report = serialAcceptanceResult(options, Buffer.concat(received), startedAt, new Date().toISOString());
+  const report = serialAcceptanceResult(options, Buffer.concat(received), startedAt, new Date().toISOString(), receivedBytes);
   console.log(JSON.stringify(report, null, 2));
   process.exitCode = report.status === 'failed' || report.status === 'no-data' ? 1 : 0;
 } finally {

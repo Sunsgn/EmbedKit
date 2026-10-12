@@ -23,7 +23,13 @@ HEX 请求示例：
 node scripts/serial-device-acceptance.mjs --port COM11 --baud 115200 --hex "01 03 00 00 00 02 C4 0B" --timeout 3000
 ```
 
-只有设备确实要求时才附加 `--dtr` 或 `--rts`。命令输出版本化 JSON，包含串口参数、发送内容、接收文本/HEX、字节数、期望和耗时；有期望但不匹配、或完全没有接收数据时退出码为非零。
+联网或鉴权指令必须增加 `--redact-request`，避免密码进入报告：
+
+```powershell
+node scripts/serial-device-acceptance.mjs --port COM11 --send "AT+CWJAP=..." --expect "OK" --redact-request
+```
+
+只有设备确实要求时才附加 `--dtr` 或 `--rts`。命令输出版本化 JSON，包含串口参数、发送字节数、接收文本/HEX 预览、接收总字节数、期望和耗时；有期望但不匹配、或完全没有接收数据时退出码为非零。接收证据默认最多保留 64 KiB，可用 `--max-capture 256..1048576` 调整；达到上限后继续统计总字节数，并以 `truncated: true` 明确标记，不会无限占用内存。
 
 ## 3. 人工验收矩阵
 
@@ -39,7 +45,18 @@ node scripts/serial-device-acceptance.mjs --port COM11 --baud 115200 --hex "01 0
 
 真实设备结果必须记录设备型号、固件版本、USB 转串口型号、端口、参数和测试时间。没有连接真实硬件时只能报告“自动回归通过、真实设备待验收”。
 
-## 4. WebSocket 独立链路自测
+## 4. 集成测试证据闭环
+
+1. 在设备项目中选择当前样机；不需要设备项目时可跳过。
+2. 如需证明固件版本，先对构建产物计算 SHA-256，再在集成测试页的“验收对象”中选择该指纹。文件名相同不能代替指纹。
+3. 运行流程后导出 JSON 或 HTML。报告应包含版本 2 标识、设备快照、可选固件指纹、通信端点、会话 ID、RX/TX 字节和逐步证据。
+4. 超时用例应保存期望值、有限长度的实际接收数据、超时值和重试次数；没有接收数据时必须明确为空，不得伪造响应。
+5. 人工确认在报告中必须标记为 `manual-confirmation`，不能当作自动设备响应。
+6. 检查 JSON 中没有密码、令牌、绝对源码路径、固件内容或 Local Agent 授权令牌，再归档报告。
+
+串口、TCP/UDP、WebSocket、集成测试和设备项目始终保持可选关联；任何一个模块缺失都不能阻止其他模块独立使用。
+
+## 5. WebSocket 独立链路自测
 
 在 `proxy` 目录运行 `npm run websocket:loopback`，然后在“通信调试 → WebSocket”中连接 `ws://127.0.0.1:18080`。依次发送文本和 HEX 数据，应原样回显；主动断开后可再次连接。
 
