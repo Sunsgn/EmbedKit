@@ -1,0 +1,50 @@
+import { useState } from 'react';
+import { AlertTriangle, CheckCircle2, DatabaseBackup, Download, FileUp, ShieldCheck } from 'lucide-react';
+import { applyWorkspaceBackup, createWorkspaceBackup, exportProductData, parseWorkspaceBackup, previewWorkspaceBackup, WORKSPACE_BACKUP_MAX_BYTES, type WorkspaceBackup, type WorkspaceBackupPreview } from '../services/workspaceBackup';
+
+const downloadJson = (name: string, value: unknown) => {
+  const content = JSON.stringify(value, null, 2);
+  if (new TextEncoder().encode(content).byteLength > WORKSPACE_BACKUP_MAX_BYTES) throw new Error('工作区备份超过 16 MiB，请先删除不需要的历史测试记录');
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
+  link.download = name;
+  link.click();
+  URL.revokeObjectURL(link.href);
+};
+
+export default function DataManagementPage() {
+  const [backup, setBackup] = useState<WorkspaceBackup | null>(null), [preview, setPreview] = useState<WorkspaceBackupPreview | null>(null), [message, setMessage] = useState(''), [error, setError] = useState(''), [busy, setBusy] = useState(false);
+  const exportData = async () => {
+    setBusy(true); setError(''); setMessage('');
+    try { const data = await createWorkspaceBackup(); downloadJson(`embedkit-workspace-${new Date().toISOString().slice(0, 10)}.json`, data); setMessage('备份已生成；请妥善保存 JSON 文件。'); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setBusy(false); }
+  };
+  const chooseFile = async (file?: File) => {
+    setBackup(null); setPreview(null); setError(''); setMessage('');
+    if (!file) return;
+    if (file.size > WORKSPACE_BACKUP_MAX_BYTES) { setError('备份文件超过 16 MiB 上限'); return; }
+    setBusy(true);
+    try { const parsed = parseWorkspaceBackup(await file.text()), current = await exportProductData(); setBackup(parsed); setPreview(previewWorkspaceBackup(parsed, current)); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setBusy(false); }
+  };
+  const importData = async () => {
+    if (!backup) return;
+    setBusy(true); setError(''); setMessage('');
+    try { await applyWorkspaceBackup(backup); setMessage('导入完成。已打开的页面保持原状态，重新进入对应模块即可读取恢复数据。'); setBackup(null); setPreview(null); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setBusy(false); }
+  };
+  return <div className="h-full overflow-y-auto p-5 scrollbar-thin lg:p-8"><div className="mx-auto max-w-5xl space-y-5">
+    <header><div className="flex items-center gap-3"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-blue-400"><DatabaseBackup size={20} /></span><div><h1 className="text-lg font-semibold text-gray-100">工作区备份与恢复</h1><p className="text-xs text-gray-500">迁移设备、测试、学习进度和安全配置，不携带源码、固件与密钥</p></div></div></header>
+    <section className="grid gap-4 md:grid-cols-2">
+      <div className="rounded-xl border border-[#30363d] bg-[#161b22] p-5"><Download className="mb-3 text-blue-400" size={20} /><h2 className="font-semibold">导出工作区</h2><p className="mt-2 text-xs leading-5 text-gray-500">生成版本化 JSON。包含设备项目、最多 5000 条测试摘要、测试套件、工具偏好、通信快捷项、学习进度和分析摘要。</p><button onClick={() => void exportData()} disabled={busy} className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-xs text-white disabled:opacity-40">{busy ? '处理中…' : '下载备份'}</button></div>
+      <div className="rounded-xl border border-[#30363d] bg-[#161b22] p-5"><FileUp className="mb-3 text-purple-400" size={20} /><h2 className="font-semibold">预览并合并</h2><p className="mt-2 text-xs leading-5 text-gray-500">先校验格式、版本、数量和 16 MiB 上限。同 ID 数据仅在确认后合并，不会清空其他本地数据；失败时回滚本次配置写入。</p><label className="mt-4 inline-flex cursor-pointer rounded-lg border border-purple-500/30 px-4 py-2 text-xs text-purple-300">选择备份文件<input aria-label="选择备份文件" type="file" accept="application/json,.json" className="hidden" onChange={event => { void chooseFile(event.target.files?.[0]); event.target.value = ''; }} /></label></div>
+    </section>
+    {preview && <section className="rounded-xl border border-yellow-500/20 bg-yellow-500/5 p-5"><div className="flex items-center gap-2 text-yellow-300"><AlertTriangle size={16} /><b>导入预览</b></div><div className="mt-3 grid gap-2 text-xs sm:grid-cols-3"><div className="rounded bg-[#0d1117] p-3">设备项目 <b>{preview.projects}</b><small className="block text-gray-600">同 ID {preview.projectConflicts}</small></div><div className="rounded bg-[#0d1117] p-3">测试记录 <b>{preview.runs}</b><small className="block text-gray-600">同 ID {preview.runConflicts}</small></div><div className="rounded bg-[#0d1117] p-3">本地配置 <b>{preview.localSettings}</b><small className="block text-gray-600">已有键 {preview.localConflicts}</small></div></div><p className="mt-3 text-[10px] text-gray-500">同 ID 项将采用备份内容，其他现有数据保留。该操作不会导入源码、固件内容或活动会话。</p><button onClick={() => void importData()} disabled={busy} className="mt-3 rounded bg-yellow-600 px-4 py-2 text-xs text-white disabled:opacity-40">确认合并</button></section>}
+    <section className="rounded-xl border border-green-500/20 bg-green-500/5 p-5"><div className="flex items-center gap-2 text-green-300"><ShieldCheck size={16} /><b>默认排除</b></div><div className="mt-3 grid gap-2 text-xs text-gray-500 sm:grid-cols-2"><span>工程源码与编辑器工作区</span><span>固件、MAP、ELF 和运行轨迹原文</span><span>绝对构建路径与临时任务</span><span>AI 密钥、密码和授权令牌</span><span>当前串口与网络会话</span><span>测试原始日志与响应内容</span></div></section>
+    {error && <p role="alert" className="rounded border border-red-500/30 bg-red-500/5 p-3 text-xs text-red-300">{error}</p>}
+    {message && <p className="flex items-center gap-2 rounded border border-green-500/30 bg-green-500/5 p-3 text-xs text-green-300"><CheckCircle2 size={14} />{message}</p>}
+  </div></div>;
+}

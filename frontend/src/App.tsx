@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState, type ComponentType } from 'react';
 import { HashRouter as Router, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { BookOpen, Boxes, BrainCircuit, Code2, Cpu, FlaskConical, Gauge, HardDrive, Menu, Radio, Wrench, X } from 'lucide-react';
+import { BookOpen, Boxes, BrainCircuit, Code2, Cpu, DatabaseBackup, FlaskConical, Gauge, HardDrive, Menu, Radio, Wrench, X } from 'lucide-react';
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const DeviceProjectsPage = lazy(() => import('./pages/DeviceProjectsPage'));
@@ -12,6 +12,7 @@ const ToolWorkspacePage = lazy(() => import('./pages/ToolWorkspacePage'));
 const ChipLibPage = lazy(() => import('./pages/ChipLibPage'));
 const TutorialPage = lazy(() => import('./pages/TutorialPage'));
 const AiPage = lazy(() => import('./pages/AiPage'));
+const DataManagementPage = lazy(() => import('./pages/DataManagementPage'));
 
 interface NavItem {
   icon: ComponentType<{ size?: number }>;
@@ -38,6 +39,12 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
     items: [
       { icon: Boxes, label: '资料中心', path: '/resources', aliases: ['/components', '/chips'] },
       { icon: BookOpen, label: '学习中心', path: '/learn', aliases: ['/tutorials'] },
+    ],
+  },
+  {
+    title: '系统',
+    items: [
+      { icon: DatabaseBackup, label: '数据管理', path: '/data' },
     ],
   },
 ];
@@ -95,6 +102,7 @@ function AppShell() {
         <Route path="/learn" element={<TutorialPage />} />
         <Route path="/tutorials" element={<Navigate to="/learn" replace />} />
         <Route path="/ai" element={<AiPage />} />
+        <Route path="/data" element={<DataManagementPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes></Suspense></div>
     </main>
