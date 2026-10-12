@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node proxy.js",
+    "package:portable": "node scripts/build-portable-package.mjs",
     "test": "node --test",
     "serial:list": "node scripts/serial-device-acceptance.mjs --list",
     "serial:self-test": "node scripts/serial-device-acceptance.mjs --self-test",

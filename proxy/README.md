@@ -3,6 +3,8 @@
 This local agent connects the browser UI to local tools, system file pickers, serial ports, AI servers, and raw TCP/UDP devices.
 It listens on `127.0.0.1:9999`; HTTP proxy targets remain restricted to known loopback AI ports.
 
+Ordinary users should download the self-contained package from GitHub Releases and run `start-agent.cmd` on Windows or `./start-agent.sh` on Linux/macOS. The package includes its Node runtime and platform-native serial dependency. See [Local Agent installation](../docs/LOCAL_AGENT_INSTALLATION.md) for checksum, fallback, and release details.
+
 Network debugging endpoints create bounded TCP client or UDP sessions, retain at most 2,000 events per session, and allow at most 16 sessions. They are only callable from configured browser origins.
 
 ```powershell

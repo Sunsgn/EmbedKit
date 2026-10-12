@@ -68,6 +68,29 @@ jobs:
         run: npm audit --omit=dev --audit-level=high
         working-directory: proxy
 
+      - name: Stage portable Local Agent
+        run: npm run package:portable -- --platform=linux --arch=x64 --output=dist/embedkit-local-agent-ci
+        working-directory: proxy
+
+      - name: Smoke test portable Local Agent
+        shell: bash
+        run: |
+          cd proxy/dist/embedkit-local-agent-ci
+          smoke_dir="$RUNNER_TEMP/embedkit-agent-smoke"
+          mkdir -p "$smoke_dir"
+          EMBEDKIT_PROXY_PORT=19999 \
+          EMBEDKIT_SERIAL_STATE_FILE="$smoke_dir/serial.json" \
+          EMBEDKIT_NETWORK_STATE_FILE="$smoke_dir/network.json" \
+          EMBEDKIT_AGENT_LOG_FILE="$smoke_dir/agent.log" \
+          ./runtime/node ./proxy.js >"$smoke_dir/stdout.log" 2>&1 &
+          agent_pid=$!
+          trap 'kill "$agent_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..20}; do
+            if curl --fail --silent --header 'Origin: https://sunsgn.github.io' --header 'X-EmbedKit-Protocol: 1' http://127.0.0.1:19999/api/agent/status >"$smoke_dir/status.json"; then break; fi
+            sleep 0.5
+          done
+          grep '"available":true' "$smoke_dir/status.json"
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:

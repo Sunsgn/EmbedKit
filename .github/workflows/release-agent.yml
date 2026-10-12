@@ -1,0 +1,104 @@
+name: Release Local Agent
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win32
+            arch: x64
+            runtime: runtime/node.exe
+            artifact: embedkit-local-agent-windows-x64
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+            runtime: runtime/node
+            artifact: embedkit-local-agent-linux-x64
+          - os: macos-14
+            platform: darwin
+            arch: arm64
+            runtime: runtime/node
+            artifact: embedkit-local-agent-macos-arm64
+          - os: macos-15-intel
+            platform: darwin
+            arch: x64
+            runtime: runtime/node
+            artifact: embedkit-local-agent-macos-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: proxy/package-lock.json
+      - name: Install production dependencies
+        run: npm ci --omit=dev
+        working-directory: proxy
+      - name: Test Local Agent
+        run: npm test
+        working-directory: proxy
+      - name: Stage portable package
+        run: node scripts/build-portable-package.mjs --platform=${{ matrix.platform }} --arch=${{ matrix.arch }} --output=dist/${{ matrix.artifact }}
+        working-directory: proxy
+      - name: Smoke test packaged Agent
+        shell: bash
+        run: |
+          cd "proxy/dist/${{ matrix.artifact }}"
+          smoke_dir="$RUNNER_TEMP/embedkit-agent-smoke-${{ matrix.platform }}-${{ matrix.arch }}"
+          mkdir -p "$smoke_dir"
+          EMBEDKIT_PROXY_PORT=19999 \
+          EMBEDKIT_SERIAL_STATE_FILE="$smoke_dir/serial-sessions.json" \
+          EMBEDKIT_NETWORK_STATE_FILE="$smoke_dir/network-sessions.json" \
+          EMBEDKIT_AGENT_LOG_FILE="$smoke_dir/agent.log" \
+          ./${{ matrix.runtime }} ./proxy.js >"$smoke_dir/stdout.log" 2>&1 &
+          agent_pid=$!
+          trap 'kill "$agent_pid" 2>/dev/null || true' EXIT
+          for attempt in {1..20}; do
+            if curl --fail --silent --header 'Origin: https://sunsgn.github.io' --header 'X-EmbedKit-Protocol: 1' http://127.0.0.1:19999/api/agent/status >"$smoke_dir/status.json"; then break; fi
+            sleep 0.5
+          done
+          grep '"available":true' "$smoke_dir/status.json"
+          test ! -e .embedkit-state
+      - name: Archive Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "proxy/dist/${{ matrix.artifact }}" -DestinationPath "${{ matrix.artifact }}.zip"
+      - name: Archive Unix package
+        if: runner.os != 'Windows'
+        run: tar -C proxy/dist -czf "${{ matrix.artifact }}.tar.gz" "${{ matrix.artifact }}"
+      - name: Create checksum
+        shell: bash
+        run: |
+          file=$(ls "${{ matrix.artifact }}".*)
+          node -e "const fs=require('fs'),c=require('crypto');const f=process.argv[1];console.log(c.createHash('sha256').update(fs.readFileSync(f)).digest('hex')+'  '+f)" "$file" > "${{ matrix.artifact }}.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}.*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          generate_release_notes: true
