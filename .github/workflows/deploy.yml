@@ -40,6 +40,10 @@ jobs:
         run: npm test
         working-directory: frontend
 
+      - name: Check dependency security
+        run: npm run security:check
+        working-directory: frontend
+
       - name: Check code
         run: npm run lint
         working-directory: frontend
@@ -58,6 +62,10 @@ jobs:
 
       - name: Test Local Agent
         run: npm test
+        working-directory: proxy
+
+      - name: Check Local Agent production dependencies
+        run: npm audit --omit=dev --audit-level=high
         working-directory: proxy
 
       - name: Upload artifact
