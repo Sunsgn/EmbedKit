@@ -1,6 +1,37 @@
 export interface HardFaultInput { r0: number; r1: number; r2: number; r3: number; r12: number; lr: number; pc: number; xpsr: number; cfsr: number; hfsr: number; mmfar?: number; bfar?: number }
 export interface FaultFinding { register: 'CFSR' | 'HFSR'; bit: number; code: string; detail: string; action: string }
 export interface HardFaultAnalysis { findings: FaultFinding[]; addresses: Array<{ kind: 'PC' | 'LR' | 'MMFAR' | 'BFAR'; value: number; sourceReady: boolean }>; summary: string; warnings: string[] }
+export type HardFaultRegisterName = keyof HardFaultInput;
+export interface ExtractedHardFaultLog { registers: Partial<Record<HardFaultRegisterName, number>>; evidence: Array<{ register: HardFaultRegisterName; value: number; line: number; text: string }>; missing: HardFaultRegisterName[]; unmatchedLines: number; warnings: string[]; confidence: 'high' | 'medium' | 'low' }
+
+const registerNames: HardFaultRegisterName[] = ['r0', 'r1', 'r2', 'r3', 'r12', 'lr', 'pc', 'xpsr', 'cfsr', 'hfsr', 'mmfar', 'bfar'];
+const requiredEvidence: HardFaultRegisterName[] = ['lr', 'pc', 'xpsr', 'cfsr', 'hfsr'];
+
+function normalizedLogRegister(value: string): HardFaultRegisterName | null {
+  const normalized = value.toLowerCase().replace(/^(?:stacked|fault)[_-]/, '').replace(/^scb(?:->|[._-])/, '');
+  return registerNames.includes(normalized as HardFaultRegisterName) ? normalized as HardFaultRegisterName : null;
+}
+
+export function extractHardFaultLog(source: string): ExtractedHardFaultLog {
+  if (source.length > 1024 * 1024) throw new Error('故障日志超过 1 MiB 上限');
+  const registers: ExtractedHardFaultLog['registers'] = {}, evidence: ExtractedHardFaultLog['evidence'] = [], warnings: string[] = [];
+  let unmatchedLines = 0;
+  source.split(/\r?\n/).forEach((text, index) => {
+    const expression = /\b((?:(?:stacked|fault)[_-])?(?:r0|r1|r2|r3|r12|lr|pc|xpsr)|(?:scb(?:->|[._-]))?(?:cfsr|hfsr|mmfar|bfar))\b\s*(?:=|:)?\s*(?:0x)?([0-9a-f]{1,8})\b/gi;
+    let matched = false, item: RegExpExecArray | null;
+    while ((item = expression.exec(text)) !== null) {
+      const register = normalizedLogRegister(item[1]); if (!register) continue;
+      const value = Number.parseInt(item[2], 16) >>> 0, previous = registers[register]; matched = true;
+      evidence.push({ register, value, line: index + 1, text: text.trim() });
+      if (previous !== undefined && previous !== value) warnings.push(`${register.toUpperCase()} 在日志中出现不同值，采用最后一处（第 ${index + 1} 行）`);
+      registers[register] = value;
+    }
+    if (text.trim() && !matched) unmatchedLines += 1;
+  });
+  if (!evidence.length) throw new Error('未识别到 Cortex-M 寄存器；请粘贴包含 PC/LR/xPSR/CFSR 等名称和值的文本日志');
+  const missing = registerNames.filter(name => registers[name] === undefined), coreCount = requiredEvidence.filter(name => registers[name] !== undefined).length;
+  return { registers, evidence, missing, unmatchedLines, warnings, confidence: coreCount >= 4 && registers.pc !== undefined ? 'high' : registers.pc !== undefined && registers.lr !== undefined ? 'medium' : 'low' };
+}
 
 const cfsrRules: Array<[number, string, string, string]> = [
   [0, 'IACCVIOL', '取指访问违反 MPU 权限', '检查 PC 所在存储区、MPU 和函数指针'], [1, 'DACCVIOL', '数据访问违反 MPU 权限', '检查访问地址、MPU 区域和指针边界'], [3, 'MUNSTKERR', '异常返回出栈时发生 MemManage fault', '检查栈指针、栈溢出和 MPU 栈区域'], [4, 'MSTKERR', '异常入栈时发生 MemManage fault', '检查异常前栈空间和栈地址有效性'], [7, 'MMARVALID', 'MMFAR 保存了有效故障地址', '结合 MMFAR 定位非法内存访问'],
