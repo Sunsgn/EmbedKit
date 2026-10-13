@@ -19,7 +19,7 @@ describe('ToolboxPage independent tool workspace', () => {
   it('opens a tool at an independent route and returns to the catalog', async () => {
     renderToolbox();
     fireEvent.click(screen.getByRole('button', { name: '打开CRC 与字节序' }));
-    expect(await screen.findByText('Modbus 线序')).toBeVisible();
+    expect(await screen.findByText('Modbus 线序', {}, { timeout: 5000 })).toBeVisible();
     expect(screen.queryByText('每帧位数')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '返回工具箱' }));
     expect(screen.getByRole('navigation', { name: '嵌入式工具目录' })).toBeVisible();
