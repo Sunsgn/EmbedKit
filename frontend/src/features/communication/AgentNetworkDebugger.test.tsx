@@ -22,17 +22,32 @@ const connectedSession = {
   state: 'connected' as const,
   rxBytes: 4,
   txBytes: 0,
-  events: [{ id: 1, timestamp: '2026-10-10T08:48:07.314Z', direction: 'rx' as const, text: 'PONG', hex: '50 4F 4E 47', byteLength: 4 }],
+  events: [
+    {
+      id: 1,
+      timestamp: '2026-10-10T08:48:07.314Z',
+      direction: 'rx' as const,
+      text: 'PONG',
+      hex: '50 4F 4E 47',
+      byteLength: 4,
+    },
+  ],
 };
 
 describe('AgentNetworkDebugger independent workflow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    vi.mocked(networkAgent.getNetworkStatus).mockResolvedValue({ available: true, activeSessions: 0, maxSessions: 16 });
+    vi.mocked(networkAgent.getNetworkStatus).mockResolvedValue({
+      available: true,
+      activeSessions: 0,
+      maxSessions: 16,
+    });
     vi.mocked(networkAgent.listNetworkSessions).mockResolvedValue([]);
     vi.mocked(networkAgent.readNetworkSession).mockImplementation(() => new Promise(() => undefined));
-    vi.mocked(networkAgent.closeNetworkSession).mockResolvedValue({ closed: true });
+    vi.mocked(networkAgent.closeNetworkSession).mockResolvedValue({
+      closed: true,
+    });
     vi.mocked(networkAgent.sendNetworkData).mockResolvedValue({ sent: 4 });
   });
 
@@ -42,8 +57,10 @@ describe('AgentNetworkDebugger independent workflow', () => {
 
     render(<AgentNetworkDebugger />);
 
-    await waitFor(() => expect(screen.getByText('npm start')).toBeVisible());
+    await waitFor(() => expect(screen.getByText(/TCP\/UDP 原始套接字需要/)).toBeVisible());
     expect(screen.getByText('Local Agent：未运行')).toBeVisible();
+    expect(screen.getByRole('link', { name: '安装或查看本地助手' })).toHaveAttribute('href', '#/agent');
+    expect(screen.getByRole('button', { name: '重新检测' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '添加连接' })).toBeDisabled();
     expect(screen.getByPlaceholderText('搜索当前会话日志…')).toBeEnabled();
     expect(screen.getByLabelText('协议角色')).toBeEnabled();
@@ -69,7 +86,15 @@ describe('AgentNetworkDebugger independent workflow', () => {
     await waitFor(() => expect(screen.getByText(/Local Agent：已连接/)).toBeVisible());
     fireEvent.click(screen.getByRole('button', { name: '添加连接' }));
 
-    await waitFor(() => expect(networkAgent.openNetworkSession).toHaveBeenCalledWith({ type: 'tcp', mode: 'client', host: '127.0.0.1', port: 9000, localPort: 0 }));
+    await waitFor(() =>
+      expect(networkAgent.openNetworkSession).toHaveBeenCalledWith({
+        type: 'tcp',
+        mode: 'client',
+        host: '127.0.0.1',
+        port: 9000,
+        localPort: 0,
+      }),
+    );
     fireEvent.click(screen.getByRole('button', { name: '停止' }));
     await waitFor(() => expect(networkAgent.closeNetworkSession).toHaveBeenCalledWith('network-1'));
   });
