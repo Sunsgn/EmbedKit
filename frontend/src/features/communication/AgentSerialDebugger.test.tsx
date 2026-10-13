@@ -28,8 +28,9 @@ describe('AgentSerialDebugger independent degradation', () => {
     render(<AgentSerialDebugger />);
 
     await waitFor(() =>
-      expect(screen.getByText(/请重启 proxy 目录中的 Local Agent/)).toBeVisible(),
+      expect(screen.getByText(/可切换“浏览器直连”/)).toBeVisible(),
     );
+    expect(screen.getByRole('link', { name: '本地助手' })).toHaveAttribute('href', '#/agent');
     expect(screen.getByRole('button', { name: /连接/ })).toBeDisabled();
     expect(screen.getByPlaceholderText('搜索当前串口日志…')).toBeEnabled();
     expect(screen.getAllByText(/快捷指令/).length).toBeGreaterThan(0);

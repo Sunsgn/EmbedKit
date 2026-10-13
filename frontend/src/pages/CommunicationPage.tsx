@@ -3,14 +3,18 @@ import { LockKeyhole, Radio, Server, Wifi } from 'lucide-react';
 import AgentSerialDebugger from '../features/communication/AgentSerialDebugger';
 import AgentNetworkDebugger from '../features/communication/AgentNetworkDebugger';
 import WebSocketDebugger from '../features/communication/WebSocketDebugger';
+import SerialPage from './SerialPage';
 
 export default function CommunicationPage() {
   type Tab = 'serial' | 'websocket' | 'agent';
+  type SerialBackend = 'browser' | 'agent';
   const [tab, setTab] = useState<Tab>(() => {
     const saved = sessionStorage.getItem('embedkit.communication.tab');
     return saved === 'websocket' || saved === 'agent' ? saved : 'serial';
   });
+  const [serialBackend, setSerialBackend] = useState<SerialBackend>(() => sessionStorage.getItem('embedkit.communication.serial-backend') === 'agent' ? 'agent' : 'browser');
   const selectTab = (next: Tab) => { setTab(next); sessionStorage.setItem('embedkit.communication.tab', next); };
+  const selectSerialBackend = (next: SerialBackend) => { setSerialBackend(next); sessionStorage.setItem('embedkit.communication.serial-backend', next); };
   const tabs = [
     { id: 'serial' as const, label: '串口调试', detail: 'Web Serial · 多会话', icon: Radio, accent: 'blue' },
     { id: 'websocket' as const, label: 'WebSocket', detail: '文本与二进制帧', icon: Wifi, accent: 'green' },
@@ -32,6 +36,6 @@ export default function CommunicationPage() {
         <div className="hidden shrink-0 items-center gap-2 rounded-lg border border-[#30363d] bg-[#0d1117]/70 px-3 py-2 text-[10px] text-gray-500 xl:flex"><LockKeyhole size={12} className="text-green-500" />连接与日志仅在本机处理</div>
       </div>
     </div>
-    <div className="min-h-0 flex-1">{tab === 'serial' ? <AgentSerialDebugger /> : tab === 'websocket' ? <WebSocketDebugger /> : <AgentNetworkDebugger />}</div>
+    <div className="min-h-0 flex-1">{tab === 'serial' ? <div className="flex h-full min-h-0 flex-col"><div className="flex shrink-0 items-center justify-center gap-1 border-b border-[#30363d]/70 bg-[#0d1117] px-3 py-1.5"><span className="mr-2 text-[10px] text-gray-600">串口连接方式</span><button type="button" onClick={() => selectSerialBackend('browser')} className={`rounded-md px-3 py-1 text-[10px] ${serialBackend === 'browser' ? 'bg-blue-500/15 text-blue-300' : 'text-gray-500 hover:text-gray-300'}`}>浏览器直连（默认）</button><button type="button" onClick={() => selectSerialBackend('agent')} className={`rounded-md px-3 py-1 text-[10px] ${serialBackend === 'agent' ? 'bg-purple-500/15 text-purple-300' : 'text-gray-500 hover:text-gray-300'}`}>本地助手增强</button><span className="ml-2 hidden text-[10px] text-gray-600 md:inline">Chrome / Edge 可直接选择串口；后台会话与非 Web Serial 环境使用本地助手</span></div><div className="min-h-0 flex-1">{serialBackend === 'browser' ? <SerialPage /> : <AgentSerialDebugger />}</div></div> : tab === 'websocket' ? <WebSocketDebugger /> : <AgentNetworkDebugger />}</div>
   </div>;
 }
