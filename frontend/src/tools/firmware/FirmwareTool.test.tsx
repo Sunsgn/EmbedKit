@@ -20,5 +20,7 @@ describe('FirmwareTool authorized build artifact workflow', () => {
     expect(screen.getByText(/release\.bin（4 B）/)).toBeVisible();
     expect(screen.getByText(/BIN 不包含加载地址，请确认/)).toBeVisible();
     expect(screen.getByText('当前产物已记录')).toBeVisible();
+    expect(screen.getByText('4 B / 0 B')).toBeVisible();
+    expect(screen.getByRole('button', { name: '导出发布清单' })).toBeEnabled();
   });
 });

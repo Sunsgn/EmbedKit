@@ -6,13 +6,14 @@ import { readLocalFileBytes, revokeLocalPath } from "../../services/localFiles";
 import { parseBuildArtifactRouteState, routeStateContext, saveBuildAnalysisRecord, type BuildAnalysisContext } from "../../services/buildAnalysisRecords";
 import BuildAnalysisAssociation from "../../features/project/BuildAnalysisAssociation";
 import { crc32 } from "../../utils/embeddedTools";
-import { compareFirmware, mergeFirmware, type OverlapPolicy } from "./firmware";
+import { buildFirmwareManifest, compareFirmware, decodeFirmwareArtifact, mergeFirmware, type OverlapPolicy } from "./firmware";
 
 interface SegmentRow {
   id: number;
   name: string;
   address: string;
   bytes: Uint8Array | null;
+  format?: string;
 }
 const parseAddress = (value: string) =>
   Number.parseInt(value.trim().replace(/^0x/i, ""), 16);
@@ -29,6 +30,7 @@ function download(bytes: Uint8Array) {
   link.click();
   URL.revokeObjectURL(url);
 }
+function downloadManifest(content: object) { const url = URL.createObjectURL(new Blob([JSON.stringify(content, null, 2)], { type: 'application/json;charset=utf-8' })), link = document.createElement('a'); link.href = url; link.download = 'firmware-manifest.json'; link.click(); URL.revokeObjectURL(url); }
 
 export default function FirmwareTool() {
   const location = useLocation(), navigate = useNavigate(), consumedIncoming = useRef(false);
@@ -36,12 +38,11 @@ export default function FirmwareTool() {
     { id: 1, name: "boot.bin", address: "08000000", bytes: null },
     { id: 2, name: "app.bin", address: "08010000", bytes: null },
   ]);
-  const [nextId, setNextId] = useState(3),
-    [policy, setPolicy] = useState<OverlapPolicy>("reject"),
+  const [policy, setPolicy] = useState<OverlapPolicy>("reject"),
     [fill, setFill] = useState("FF"),
     [leftId, setLeftId] = useState(1),
     [rightId, setRightId] = useState(2);
-  const [loadError, setLoadError] = useState(''), [progress, setProgress] = useState<number | null>(null), [importedBuild, setImportedBuild] = useState(false);
+  const [loadError, setLoadError] = useState(''), [progress, setProgress] = useState<number | null>(null), [importedBuild, setImportedBuild] = useState(false), [artifactWarnings, setArtifactWarnings] = useState<string[]>([]);
   const [associationContext, setAssociationContext] = useState<BuildAnalysisContext | null>(null), [associationRevision, setAssociationRevision] = useState(0);
   const loaded = useMemo(
     () =>
@@ -114,21 +115,23 @@ export default function FirmwareTool() {
   }, [consumeSelection, location.pathname, location.search, location.state, navigate]);
   const choose = async (id: number, file?: File) => {
     if (!file) return; setLoadError('');
-    if (file.size > MAX_BIN_BYTES) { setLoadError('BIN 文件超过 32 MiB 上限'); return; }
-    try { update(id, { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) }); }
+    if (file.size > MAX_BIN_BYTES) { setLoadError('固件文件超过 32 MiB 上限'); return; }
+    try {
+      const current = segments.find(item => item.id === id), decoded = decodeFirmwareArtifact(file.name, new Uint8Array(await file.arrayBuffer()), parseAddress(current?.address ?? '0'));
+      setArtifactWarnings(decoded.warnings);
+      setSegments(rows => { let next = Math.max(0, ...rows.map(item => item.id)) + 1; return rows.flatMap(item => item.id !== id ? [item] : decoded.segments.map((segment, index) => ({ id: index ? next++ : id, name: segment.name, address: segment.address.toString(16).toUpperCase().padStart(8, '0'), bytes: segment.bytes, format: decoded.format }))); });
+    }
     catch (reason) { setLoadError(reason instanceof Error ? reason.message : String(reason)); }
   };
   const add = () => {
-    setSegments((current) => [
-      ...current,
-      {
+    setSegments((current) => { const nextId = Math.max(0, ...current.map(item => item.id)) + 1; return [
+      ...current, {
         id: nextId,
         name: `segment-${nextId}.bin`,
         address: "08000000",
         bytes: null,
       },
-    ]);
-    setNextId((value) => value + 1);
+    ]; });
   };
   const remove = (id: number) =>
     setSegments((current) => current.filter((item) => item.id !== id));
@@ -137,7 +140,7 @@ export default function FirmwareTool() {
       <BuildAnalysisAssociation context={associationContext} revision={associationRevision} />
       <div className="mb-3 flex items-center justify-between">
         <p className="text-xs text-gray-500">
-          可添加任意数量 BIN 分段；所有数据仅在浏览器内处理。
+          可混合导入 BIN、Intel HEX 与 Motorola SREC；自动保留真实地址段，所有数据仅在浏览器内处理。
         </p>
         <button
           onClick={add}
@@ -150,6 +153,7 @@ export default function FirmwareTool() {
       {importedBuild && <p className="mb-3 rounded border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-xs text-blue-300">已导入构建 BIN；BIN 不包含加载地址，请确认首个分段的基地址。</p>}
       {progress !== null && progress < 100 && <p className="mb-3 text-xs text-blue-300">正在读取构建 BIN · {progress}%</p>}
       {loadError && <p className="mb-3 rounded border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-300">{loadError}</p>}
+      {artifactWarnings.length > 0 && <p className="mb-3 rounded border border-yellow-500/20 bg-yellow-500/5 px-3 py-2 text-xs text-yellow-300">{artifactWarnings.join('；')}</p>}
       <div className="mb-3 space-y-2">
         {segments.map((item) => (
           <div
@@ -161,11 +165,11 @@ export default function FirmwareTool() {
               <label className="field mt-1 flex cursor-pointer items-center gap-2 text-xs">
                 <FileUp size={13} />
                 {item.bytes
-                  ? `${item.name}（${item.bytes.length} B）`
-                  : "选择 BIN"}
+                  ? `${item.name}（${item.bytes.length} B${item.format ? ` · ${item.format}` : ''}）`
+                  : "选择 BIN / HEX / SREC"}
                 <input
                   type="file"
-                  accept=".bin,application/octet-stream"
+                  accept=".bin,.hex,.ihx,.srec,.s19,.s28,.s37,.mot,application/octet-stream,text/plain"
                   className="hidden"
                   onChange={(event) => void choose(item.id, event.target.files?.[0])}
                 />
@@ -230,13 +234,10 @@ export default function FirmwareTool() {
             label="重叠字节"
             value={String(merge.value.overlaps.length)}
           />
-          <button
-            onClick={() => download(merge.value!.bytes)}
-            className="flex items-center gap-2 rounded bg-blue-600 px-3 py-2 text-xs text-white"
-          >
-            <Download size={13} />
-            导出合并 BIN
-          </button>
+          <ToolResultRow label="真实数据 / 填充" value={`${merge.value.dataBytes} B / ${merge.value.bytes.length - merge.value.dataBytes} B`} />
+          <ToolResultRow label="地址空洞" value={`${merge.value.holes.length} 段${merge.value.holes.length ? ` / ${merge.value.holes.reduce((sum, item) => sum + item.bytes, 0)} B` : ''}`} />
+          {merge.value.holes.length > 0 && <div className="max-h-32 overflow-auto rounded border border-[#30363d] p-2 font-mono text-[10px] text-yellow-300">{merge.value.holes.slice(0, 50).map(item => <div key={item.startAddress}>0x{item.startAddress.toString(16).toUpperCase()}–0x{item.endAddress.toString(16).toUpperCase()} · {item.bytes} B</div>)}</div>}
+          <div className="flex flex-wrap gap-2"><button onClick={() => download(merge.value!.bytes)} className="flex items-center gap-2 rounded bg-blue-600 px-3 py-2 text-xs text-white"><Download size={13} />导出合并 BIN</button><button onClick={() => downloadManifest(buildFirmwareManifest(merge.value!, loaded.map(item => ({ name: item.name, address: parseAddress(item.address), bytes: item.bytes })), { fill: Number.parseInt(fill, 16), policy }))} className="flex items-center gap-2 rounded border border-[#30363d] px-3 py-2 text-xs text-gray-300"><Download size={13} />导出发布清单</button></div>
         </div>
       )}
       <div className="border-t border-[#30363d] pt-3">

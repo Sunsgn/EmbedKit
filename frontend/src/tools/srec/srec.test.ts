@@ -19,6 +19,7 @@ describe('Motorola SREC tool domain', () => {
   it('fills address gaps with FF', () => {
     const result = parseSrec([record(1, 0x10, 2, [1, 2]), record(1, 0x14, 2, [3, 4]), record(5, 2, 2), record(9, 0, 2)].join('\n'));
     expect([...result.binary]).toEqual([1, 2, 0xff, 0xff, 3, 4]);
+    expect(result.segments.map(item => [item.address, [...item.bytes]])).toEqual([[0x10, [1, 2]], [0x14, [3, 4]]]);
   });
   it('rejects checksum, count and overlapping-data errors', () => {
     expect(() => parseSrec(`${sample.slice(0, -1)}0`)).toThrow('校验和');

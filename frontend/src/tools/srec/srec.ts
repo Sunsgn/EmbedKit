@@ -1,6 +1,6 @@
-import { parseHexBytes } from '../../utils/embeddedTools';
+import { contiguousAddressSegments, parseHexBytes, type AddressedDataSegment } from '../../utils/embeddedTools';
 
-export interface SrecAnalysis { records: number; dataRecords: number; dataBytes: number; minAddress: number; maxAddress: number; startAddress?: number; countRecord?: number; binary: Uint8Array; dataTypes: string[] }
+export interface SrecAnalysis { records: number; dataRecords: number; dataBytes: number; minAddress: number; maxAddress: number; startAddress?: number; countRecord?: number; binary: Uint8Array; dataTypes: string[]; segments: AddressedDataSegment[] }
 const addressBytes: Record<string, number> = { S0: 2, S1: 2, S2: 3, S3: 4, S5: 2, S6: 3, S7: 4, S8: 3, S9: 2 };
 function readBigEndian(bytes: Uint8Array) { let value = 0; for (const byte of bytes) value = value * 256 + byte; return value; }
 
@@ -29,5 +29,5 @@ export function parseSrec(content: string): SrecAnalysis {
   const addresses = [...memory.keys()].sort((a, b) => a - b), minAddress = addresses[0] ?? 0, maxAddress = addresses.at(-1) ?? 0, span = addresses.length ? maxAddress - minAddress + 1 : 0;
   if (span > 16 * 1024 * 1024) throw new Error('SREC 地址跨度超过 16 MiB，拒绝生成超大稀疏 BIN');
   const binary = new Uint8Array(span).fill(0xff); for (const [address, byte] of memory) binary[address - minAddress] = byte;
-  return { records, dataRecords, dataBytes: memory.size, minAddress, maxAddress, startAddress, countRecord, binary, dataTypes: [...types].sort() };
+  return { records, dataRecords, dataBytes: memory.size, minAddress, maxAddress, startAddress, countRecord, binary, dataTypes: [...types].sort(), segments: contiguousAddressSegments(memory) };
 }

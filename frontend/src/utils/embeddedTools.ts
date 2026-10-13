@@ -73,7 +73,19 @@ export function calculateAdc(bits: number, referenceVoltage: number, raw: number
   return { maxCode, lsbVoltage: referenceVoltage / maxCode, pinVoltage, sourceVoltage: pinVoltage * (resistorTop + resistorBottom) / resistorBottom, percent: raw / maxCode * 100 };
 }
 
-export interface IntelHexAnalysis { records: number; dataRecords: number; dataBytes: number; minAddress: number; maxAddress: number; startAddress?: number; eof: boolean; binary: Uint8Array }
+export interface AddressedDataSegment { address: number; bytes: Uint8Array }
+export interface IntelHexAnalysis { records: number; dataRecords: number; dataBytes: number; minAddress: number; maxAddress: number; startAddress?: number; eof: boolean; binary: Uint8Array; segments: AddressedDataSegment[] }
+
+export function contiguousAddressSegments(memory: Map<number, number>): AddressedDataSegment[] {
+  const addresses = [...memory.keys()].sort((a, b) => a - b), segments: AddressedDataSegment[] = [];
+  let start = 0, previous = -2, bytes: number[] = [];
+  for (const current of addresses) {
+    if (current !== previous + 1) { if (bytes.length) segments.push({ address: start, bytes: Uint8Array.from(bytes) }); start = current; bytes = []; }
+    bytes.push(memory.get(current)!); previous = current;
+  }
+  if (bytes.length) segments.push({ address: start, bytes: Uint8Array.from(bytes) });
+  return segments;
+}
 
 export function parseIntelHex(content: string): IntelHexAnalysis {
   const memory = new Map<number, number>();
@@ -87,7 +99,7 @@ export function parseIntelHex(content: string): IntelHexAnalysis {
     if (Array.from(bytes).reduce((sum, byte) => sum + byte, 0) % 256 !== 0) throw new Error(`第 ${index + 1} 行校验和错误`);
     const count = bytes[0], address = bytes[1] * 256 + bytes[2], type = bytes[3], data = bytes.slice(4, 4 + count);
     records += 1;
-    if (type === 0x00) { dataRecords += 1; for (let offset = 0; offset < data.length; offset += 1) memory.set(upperAddress + address + offset, data[offset]); }
+    if (type === 0x00) { dataRecords += 1; for (let offset = 0; offset < data.length; offset += 1) { const target = upperAddress + address + offset, previous = memory.get(target); if (previous !== undefined && previous !== data[offset]) throw new Error(`第 ${index + 1} 行与已有数据在地址 0x${target.toString(16).toUpperCase()} 冲突`); memory.set(target, data[offset]); } }
     else if (type === 0x01) eof = true;
     else if (type === 0x02) { if (data.length !== 2) throw new Error(`第 ${index + 1} 行扩展段地址长度错误`); upperAddress = (data[0] * 256 + data[1]) << 4; }
     else if (type === 0x04) { if (data.length !== 2) throw new Error(`第 ${index + 1} 行扩展线性地址长度错误`); upperAddress = (data[0] * 256 + data[1]) * 0x10000; }
@@ -98,7 +110,7 @@ export function parseIntelHex(content: string): IntelHexAnalysis {
   if (span > 16 * 1024 * 1024) throw new Error('Intel HEX 地址跨度超过 16 MiB，拒绝生成超大稀疏 BIN');
   const binary = new Uint8Array(span).fill(0xff);
   for (const [address, byte] of memory) binary[address - minAddress] = byte;
-  return { records, dataRecords, dataBytes: memory.size, minAddress, maxAddress, startAddress, eof, binary };
+  return { records, dataRecords, dataBytes: memory.size, minAddress, maxAddress, startAddress, eof, binary, segments: contiguousAddressSegments(memory) };
 }
 
 export function analyzeBinary(bytes: Uint8Array) {
