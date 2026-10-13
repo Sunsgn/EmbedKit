@@ -1,11 +1,13 @@
 import { useMemo, useState } from 'react';
-import { Download, FileUp, TableProperties } from 'lucide-react';
+import { Columns3, Download, FileUp, TableProperties } from 'lucide-react';
 import ToolResultRow from '../../features/toolbox/ToolResultRow';
 import { buildModbusRequest, parseModbusResponse, type ModbusOperation, type ModbusTransport } from './modbus';
-import { decodeRegisterMap, parseRegisterMap, REGISTER_MAP_TEMPLATE } from './registerMap';
+import { decodeRegisterMap, parseRegisterMap, previewRegisterMap, REGISTER_MAP_TEMPLATE, type RegisterColumnMapping, type RegisterMapField } from './registerMap';
 
 const operations: Array<[ModbusOperation, string]> = [['read-coils', '01 读线圈'], ['read-discrete', '02 读离散输入'], ['read-holding', '03 读保持寄存器'], ['read-input', '04 读输入寄存器'], ['write-coil', '05 写单线圈'], ['write-register', '06 写单寄存器']];
 const areaNames = { coil: '线圈', discrete: '离散输入', holding: '保持寄存器', input: '输入寄存器' };
+const mappingFields: Array<[RegisterMapField, string, boolean]> = [['name', '名称', true], ['address', '地址', true], ['area', '区域/功能码', false], ['type', '数据类型', false], ['length', '长度', false], ['scale', '倍率', false], ['offset', '偏移', false], ['unit', '单位', false], ['byteOrder', '字节序', false], ['wordOrder', '字序', false]];
+const confidenceNames = { high: '高', medium: '中', low: '低' };
 const csvCell = (value: unknown) => `"${String(value).replace(/"/g, '""')}"`;
 function downloadDecoded(rows: ReturnType<typeof decodeRegisterMap>['values']) {
   const content = ['名称,区域,协议地址,类型,原始值,工程值,单位', ...rows.map(row => [row.name, areaNames[row.area], row.address, row.type, row.raw, row.value, row.unit].map(csvCell).join(','))].join('\n');
@@ -16,15 +18,22 @@ export default function ModbusTool() {
   const [transport, setTransport] = useState<ModbusTransport>('rtu'), [operation, setOperation] = useState<ModbusOperation>('read-holding');
   const [unitId, setUnitId] = useState('1'), [address, setAddress] = useState('0'), [value, setValue] = useState('2'), [transactionId, setTransactionId] = useState('1');
   const [response, setResponse] = useState(''), [registerSource, setRegisterSource] = useState(''), [fileError, setFileError] = useState('');
+  const [mappingMode, setMappingMode] = useState(false), [columnMapping, setColumnMapping] = useState<RegisterColumnMapping>({});
   const request = useMemo(() => { try { return { value: buildModbusRequest({ transport, operation, unitId: Number(unitId), address: Number(address), value: Number(value), transactionId: Number(transactionId) }), error: '' }; } catch (error) { return { value: null, error: error instanceof Error ? error.message : String(error) }; } }, [address, operation, transactionId, transport, unitId, value]);
   const parsed = useMemo(() => { if (!response.trim()) return { value: null, error: '' }; try { return { value: parseModbusResponse(response, transport), error: '' }; } catch (error) { return { value: null, error: error instanceof Error ? error.message : String(error) }; } }, [response, transport]);
-  const registerMap = useMemo(() => { if (!registerSource.trim()) return { value: null, error: '' }; try { return { value: parseRegisterMap(registerSource), error: '' }; } catch (error) { return { value: null, error: error instanceof Error ? error.message : String(error) }; } }, [registerSource]);
+  const preview = useMemo(() => { if (!registerSource.trim()) return { value: null, error: '' }; try { return { value: previewRegisterMap(registerSource), error: '' }; } catch (error) { return { value: null, error: error instanceof Error ? error.message : String(error) }; } }, [registerSource]);
+  const registerMap = useMemo(() => { if (!registerSource.trim()) return { value: null, error: '' }; try { return { value: parseRegisterMap(registerSource, mappingMode ? columnMapping : undefined), error: '' }; } catch (error) { return { value: null, error: error instanceof Error ? error.message : String(error) }; } }, [columnMapping, mappingMode, registerSource]);
   const decoded = useMemo(() => parsed.value && registerMap.value ? decodeRegisterMap(parsed.value, Number(address), registerMap.value.definitions) : null, [address, parsed.value, registerMap.value]);
   const isRead = operation.startsWith('read-');
   const chooseProtocol = async (file?: File) => {
     setFileError(''); if (!file) return;
     if (file.size > 2 * 1024 * 1024) { setFileError('协议表超过 2 MiB 上限'); return; }
-    try { setRegisterSource(await file.text()); } catch { setFileError('无法读取协议表文件'); }
+    try { setRegisterSource(await file.text()); setMappingMode(false); } catch { setFileError('无法读取协议表文件'); }
+  };
+  const startMapping = () => {
+    if (!preview.value) return;
+    setColumnMapping(Object.fromEntries(mappingFields.map(([field]) => [field, preview.value?.suggestedMapping[field] ?? -1])) as RegisterColumnMapping);
+    setMappingMode(true);
   };
 
   return <div className="space-y-5">
@@ -36,8 +45,10 @@ export default function ModbusTool() {
       {parsed.error && <p className="mb-3 text-xs text-red-400">{parsed.error}</p>}{parsed.value && <div className="space-y-2"><ToolResultRow label="单元 / 功能" value={`${parsed.value.unitId} / 0x${parsed.value.functionCode.toString(16).padStart(2, '0').toUpperCase()}`} /><ToolResultRow label="基础结果" value={parsed.value.exception ?? (parsed.value.address === undefined ? `${parsed.value.data.length} 字节数据` : `地址 ${parsed.value.address}，值 ${parsed.value.value}`)} /></div>}
     </section>
     <section className="rounded-xl border border-[#30363d] bg-[#111820] p-4">
-      <div className="flex flex-wrap items-center gap-2"><TableProperties size={16} className="text-purple-400" /><div className="min-w-0 flex-1"><h2 className="text-sm font-semibold text-gray-200">按厂家协议表解析</h2><p className="text-[10px] text-gray-600">从 Excel 复制表格，或导入 CSV / TSV；协议内容只在当前页面处理，不自动保存。</p></div><button onClick={() => setRegisterSource(REGISTER_MAP_TEMPLATE)} className="rounded border border-[#30363d] px-3 py-1.5 text-[10px] text-gray-400">填入模板</button><label className="flex cursor-pointer items-center gap-1 rounded border border-purple-500/30 px-3 py-1.5 text-[10px] text-purple-300"><FileUp size={11} />导入协议表<input aria-label="导入 Modbus 协议表" type="file" accept=".csv,.tsv,.txt,text/csv,text/plain" className="hidden" onChange={event => { void chooseProtocol(event.target.files?.[0]); event.target.value = ''; }} /></label></div>
-      <textarea value={registerSource} onChange={event => { setRegisterSource(event.target.value); setFileError(''); }} rows={6} className="field mt-3 resize-y font-mono text-[11px]" placeholder={'至少包含：名称,地址\n可选列：区域,类型,长度,倍率,偏移,单位,字节序,字序'} />
+      <div className="flex flex-wrap items-center gap-2"><TableProperties size={16} className="text-purple-400" /><div className="min-w-0 flex-1"><h2 className="text-sm font-semibold text-gray-200">按厂家协议文档解析</h2><p className="text-[10px] text-gray-600">可从 PDF / Word / Excel 复制可选中的表格，或导入 CSV / TSV / TXT；内容仅在当前页面处理。</p></div><button onClick={() => { setRegisterSource(REGISTER_MAP_TEMPLATE); setMappingMode(false); }} className="rounded border border-[#30363d] px-3 py-1.5 text-[10px] text-gray-400">填入模板</button><label className="flex cursor-pointer items-center gap-1 rounded border border-purple-500/30 px-3 py-1.5 text-[10px] text-purple-300"><FileUp size={11} />导入文本表<input aria-label="导入 Modbus 协议表" type="file" accept=".csv,.tsv,.txt,text/csv,text/plain" className="hidden" onChange={event => { void chooseProtocol(event.target.files?.[0]); event.target.value = ''; }} /></label></div>
+      <textarea value={registerSource} onChange={event => { setRegisterSource(event.target.value); setFileError(''); setMappingMode(false); }} rows={6} className="field mt-3 resize-y font-mono text-[11px]" placeholder={'从厂家 PDF / Word / Excel 复制完整表格到这里\n至少需要能对应“名称”和“地址”两列；不标准表头可使用下方列映射'} />
+      <p className="mt-1 text-[10px] text-gray-700">扫描图片型 PDF 无法可靠读取，请先用厂家 PDF 阅读器或 OCR 转成可复制文字；系统不会在无法识别时猜测寄存器含义。</p>
+      {preview.value && <div className="mt-3 rounded-lg border border-[#30363d] bg-[#0d1117] p-3"><div className="flex flex-wrap items-center gap-3 text-[10px] text-gray-500"><span>识别到 {preview.value.headers.length} 列</span><span>自动匹配 {preview.value.matchedColumns}/{mappingFields.length} 列</span><span>置信度 <b className={preview.value.confidence === 'low' ? 'text-yellow-400' : 'text-green-400'}>{confidenceNames[preview.value.confidence]}</b></span><button type="button" onClick={startMapping} className="ml-auto flex items-center gap-1 rounded border border-[#30363d] px-2 py-1 text-purple-300"><Columns3 size={11} />{mappingMode ? '重置列映射' : '调整列映射'}</button></div>{mappingMode && <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">{mappingFields.map(([field, label, required]) => <label key={field} className="text-[10px] text-gray-600">{label}{required && <b className="text-red-400"> *</b>}<select aria-label={`映射${label}列`} value={columnMapping[field] ?? -1} onChange={event => setColumnMapping(current => ({ ...current, [field]: Number(event.target.value) }))} className="field mt-1"><option value={-1}>不映射</option>{preview.value?.headers.map((header, index) => <option key={`${index}-${header}`} value={index}>{index + 1}. {header || '未命名列'}</option>)}</select></label>)}</div>}<div className="mt-3 max-h-36 overflow-auto"><table className="w-full min-w-[560px] text-left text-[10px]"><thead className="text-gray-600"><tr>{preview.value.headers.map((header, index) => <th key={`${index}-${header}`} className="border-b border-[#30363d] px-2 py-1">{index + 1}. {header}</th>)}</tr></thead><tbody>{preview.value.rows.map((row, rowIndex) => <tr key={rowIndex}>{preview.value?.headers.map((_, cellIndex) => <td key={cellIndex} className="max-w-40 truncate border-b border-[#30363d]/50 px-2 py-1 text-gray-400">{row[cellIndex] ?? ''}</td>)}</tr>)}</tbody></table></div></div>}
       {(fileError || registerMap.error) && <p role="alert" className="mt-2 text-xs text-red-400">{fileError || registerMap.error}</p>}
       {registerMap.value && <div className="mt-2 flex flex-wrap gap-3 text-[10px] text-gray-500"><span>已载入 <b className="text-gray-300">{registerMap.value.definitions.length}</b> 项</span><span>支持 bool / u16 / i16 / u32 / i32 / f32 / ascii</span><span>支持 0x 地址、40001/30001 编号及高低字交换</span></div>}
       {registerMap.value?.warnings.map(message => <p key={message} className="mt-1 text-[10px] text-yellow-400">{message}</p>)}

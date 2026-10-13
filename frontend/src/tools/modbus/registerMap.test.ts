@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeRegisterMap, parseRegisterMap } from './registerMap';
+import { decodeRegisterMap, parseRegisterMap, previewRegisterMap } from './registerMap';
 
 describe('Modbus protocol register map', () => {
   it('imports Chinese CSV and converts 4xxxx document addresses', () => {
@@ -11,6 +11,20 @@ describe('Modbus protocol register map', () => {
     const result = parseRegisterMap('name\tarea\taddress\ttype\nPressure\t03\t0x10\tu16\nBad\t03\tnone\tu16');
     expect(result.definitions).toHaveLength(1);
     expect(result.warnings[0]).toContain('第 3 行');
+  });
+
+  it('previews document tables and applies explicit mappings for vendor-specific headers', () => {
+    const source = '项目说明 | 编号 | 格式 | 量纲\n出口温度 | 40001 | int16 | ℃';
+    const preview = previewRegisterMap(source);
+    expect(preview).toMatchObject({ headers: ['项目说明', '编号', '格式', '量纲'], confidence: 'low', separator: 'pipe' });
+    const result = parseRegisterMap(source, { name: 0, address: 1, type: 2, unit: 3 });
+    expect(result.definitions[0]).toMatchObject({ name: '出口温度', address: 0, type: 'i16', unit: '℃' });
+  });
+
+  it('recognizes columns separated by repeated spaces after copying from a PDF', () => {
+    const preview = previewRegisterMap('名称  地址  类型\n温度  40001  i16');
+    expect(preview.separator).toBe('spacing');
+    expect(parseRegisterMap('名称  地址  类型\n温度  40001  i16').definitions[0].name).toBe('温度');
   });
 
   it('decodes scaled signed values and low-word-first float values', () => {

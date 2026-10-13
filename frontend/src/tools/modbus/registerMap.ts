@@ -22,6 +22,17 @@ export interface ModbusDecodedValue extends ModbusRegisterDefinition {
   value: string;
 }
 
+export type RegisterMapField = 'name' | 'area' | 'address' | 'type' | 'length' | 'scale' | 'offset' | 'unit' | 'byteOrder' | 'wordOrder';
+export type RegisterColumnMapping = Partial<Record<RegisterMapField, number>>;
+export interface RegisterMapPreview {
+  headers: string[];
+  rows: string[][];
+  suggestedMapping: RegisterColumnMapping;
+  matchedColumns: number;
+  confidence: 'high' | 'medium' | 'low';
+  separator: 'tab' | 'comma' | 'semicolon' | 'pipe' | 'spacing';
+}
+
 const headerAliases: Record<string, string[]> = {
   name: ['name', '名称', '变量', '参数', '寄存器名称'], area: ['area', '区域', '区', '功能码', 'function', 'fc'], address: ['address', '地址', '寄存器地址', '寄存器'],
   type: ['type', '类型', '数据类型', 'datatype'], length: ['length', '长度', '寄存器数', '字数'], scale: ['scale', '倍率', '系数', '缩放'], offset: ['offset', '偏移'], unit: ['unit', '单位'],
@@ -29,7 +40,18 @@ const headerAliases: Record<string, string[]> = {
 };
 const functionAreas: Record<number, ModbusArea> = { 1: 'coil', 2: 'discrete', 3: 'holding', 4: 'input' };
 
-function splitRow(line: string, delimiter: string) {
+type DetectedSeparator = { value: string | RegExp; label: RegisterMapPreview['separator'] };
+
+function detectSeparator(line: string): DetectedSeparator {
+  if (line.includes('\t')) return { value: '\t', label: 'tab' };
+  if (line.includes(',')) return { value: ',', label: 'comma' };
+  if (line.includes(';')) return { value: ';', label: 'semicolon' };
+  if (line.includes('|')) return { value: '|', label: 'pipe' };
+  return { value: /\s{2,}/, label: 'spacing' };
+}
+
+function splitRow(line: string, delimiter: string | RegExp) {
+  if (delimiter instanceof RegExp) return line.trim().split(delimiter).map(value => value.trim());
   const values: string[] = []; let value = '', quoted = false;
   for (let index = 0; index < line.length; index += 1) {
     const char = line[index];
@@ -43,6 +65,20 @@ function splitRow(line: string, delimiter: string) {
 
 function normalizedHeader(value: string) { return value.trim().toLowerCase().replace(/[ _-]/g, ''); }
 function headerIndex(headers: string[], field: string) { const aliases = headerAliases[field].map(normalizedHeader); return headers.findIndex(header => aliases.includes(normalizedHeader(header))); }
+
+function sourceLines(source: string) {
+  return source.replace(/^\uFEFF/, '').split(/\r?\n/).map((text, index) => ({ text: text.trim(), line: index + 1 })).filter(item => item.text && !item.text.startsWith('#'));
+}
+
+export function previewRegisterMap(source: string): RegisterMapPreview {
+  const lines = sourceLines(source);
+  if (lines.length < 2) throw new Error('文档内容至少需要一行列名和一行数据；扫描版 PDF 请先 OCR 或复制可选中的表格文字');
+  const separator = detectSeparator(lines[0].text), headers = splitRow(lines[0].text, separator.value);
+  if (headers.length < 2) throw new Error('没有识别出表格列；请从 PDF、Word 或 Excel 复制完整表格，并保留制表符或列间空格');
+  const suggestedMapping = Object.fromEntries(Object.keys(headerAliases).map(field => [field, headerIndex(headers, field)]).filter(([, index]) => Number(index) >= 0)) as RegisterColumnMapping;
+  const matchedColumns = Object.keys(suggestedMapping).length;
+  return { headers, rows: lines.slice(1, 6).map(row => splitRow(row.text, separator.value)), suggestedMapping, matchedColumns, confidence: suggestedMapping.name !== undefined && suggestedMapping.address !== undefined ? matchedColumns >= 4 ? 'high' : 'medium' : 'low', separator: separator.label };
+}
 
 function parseArea(value: string): ModbusArea | null {
   const normalized = value.trim().toLowerCase();
@@ -69,11 +105,11 @@ function parseType(value: string): ModbusValueType {
   const result = aliases[normalized]; if (!result) throw new Error(`不支持数据类型“${value}”`); return result;
 }
 
-export function parseRegisterMap(source: string): { definitions: ModbusRegisterDefinition[]; warnings: string[] } {
-  const lines = source.replace(/^\uFEFF/, '').split(/\r?\n/).map((text, index) => ({ text: text.trim(), line: index + 1 })).filter(item => item.text && !item.text.startsWith('#'));
+export function parseRegisterMap(source: string, mapping?: RegisterColumnMapping): { definitions: ModbusRegisterDefinition[]; warnings: string[] } {
+  const lines = sourceLines(source);
   if (lines.length < 2) throw new Error('协议表至少需要表头和一行数据');
-  const delimiter = lines[0].text.includes('\t') ? '\t' : lines[0].text.includes(';') && !lines[0].text.includes(',') ? ';' : ',';
-  const headers = splitRow(lines[0].text, delimiter), indexes = Object.fromEntries(Object.keys(headerAliases).map(field => [field, headerIndex(headers, field)]));
+  const separator = detectSeparator(lines[0].text), delimiter = separator.value;
+  const headers = splitRow(lines[0].text, delimiter), indexes = Object.fromEntries(Object.keys(headerAliases).map(field => [field, mapping?.[field as RegisterMapField] ?? headerIndex(headers, field)]));
   if (indexes.name < 0 || indexes.address < 0) throw new Error('协议表必须包含“名称/name”和“地址/address”列');
   const warnings: string[] = [], definitions: ModbusRegisterDefinition[] = [];
   for (const row of lines.slice(1)) {
