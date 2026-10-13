@@ -4,6 +4,10 @@ export interface DbcSignal { name: string; startBit: number; length: number; lit
 export interface DbcMessage { id: number; rawId: number; extended: boolean; name: string; dlc: number; transmitter: string; signals: DbcSignal[] }
 export interface DbcDatabase { messages: DbcMessage[]; signalCount: number; warnings: string[] }
 export interface DecodedSignal { signal: DbcSignal; raw: number; value: number; text?: string; inRange: boolean }
+export interface CanLogFrame { line: number; timestamp?: number; channel: string; id: number; extended: boolean; data: Uint8Array; raw: string }
+export interface CanLogError { line: number; message: string; raw: string }
+export interface CanLogAnalysis { frames: CanLogFrame[]; errors: CanLogError[]; errorCount: number; ignored: number; truncated: boolean }
+export interface DecodedCanLogRow { line: number; timestamp?: number; channel: string; id: number; extended: boolean; message: string; signal: string; raw: number; value: number; unit: string; text?: string; inRange: boolean }
 
 export function parseDbc(source: string): DbcDatabase {
   if (source.length > 10 * 1024 * 1024) throw new Error('DBC 文件超过 10 MiB 浏览器解析上限');
@@ -36,3 +40,58 @@ export function decodeDbcMessage(message: DbcMessage, dataValue: string) {
   return { message, data, signals };
 }
 export function findDbcMessage(database: DbcDatabase, id: number, extended?: boolean) { return database.messages.find(item => item.id === id && (extended === undefined || item.extended === extended)) ?? null; }
+
+const parseCanId = (value: string) => {
+  const clean = value.trim(); if (!/^(?:0x)?[\da-f]+$/i.test(clean)) throw new Error('CAN ID 格式无效');
+  const id = Number.parseInt(clean.replace(/^0x/i, ''), 16); if (!Number.isInteger(id) || id < 0 || id > 0x1fffffff) throw new Error('CAN ID 超出 29 位范围'); return id;
+};
+const parseLogData = (value: string) => { const data = parseHexBytes(value.replace(/\s+/g, '')); if (data.length > 64) throw new Error('数据超过 64 字节'); return data; };
+
+/** Parses common candump hash/bracket logs and CSV exports while isolating malformed rows. */
+export function parseCanLog(source: string): CanLogAnalysis {
+  if (source.length > 5 * 1024 * 1024) throw new Error('CAN 日志超过 5 MiB 浏览器解析上限');
+  const lines = source.split(/\r?\n/), frames: CanLogFrame[] = [], errors: CanLogError[] = []; let errorCount = 0, ignored = 0, header: Record<string, number> | null = null, truncated = false;
+  for (const [offset, original] of lines.entries()) {
+    const line = original.trim(), lineNumber = offset + 1; if (!line || line.startsWith('//') || line.startsWith(';')) { ignored += 1; continue; }
+    if (frames.length >= 100000) { truncated = true; break; }
+    try {
+      const columns = line.split(',').map(item => item.trim());
+      if (!header && columns.length >= 2 && columns.some(item => /^(?:timestamp|time|channel|interface|can_id|id|data|payload)$/i.test(item))) { header = {}; columns.forEach((item, index) => { header![item.toLowerCase()] = index; }); ignored += 1; continue; }
+      let timestamp: number | undefined, channel = '', idText = '', dataText = '';
+      if (header) {
+        const at = (...names: string[]) => names.map(name => header![name]).find(index => index !== undefined);
+        const timeIndex = at('timestamp', 'time'), channelIndex = at('channel', 'interface'), idIndex = at('can_id', 'id'), dataIndex = at('data', 'payload');
+        if (idIndex === undefined || dataIndex === undefined) throw new Error('CSV 表头必须包含 ID 与 Data/Payload 列');
+        if (timeIndex !== undefined && columns[timeIndex]) { timestamp = Number(columns[timeIndex]); if (!Number.isFinite(timestamp)) throw new Error('时间戳无效'); }
+        channel = channelIndex === undefined ? '' : columns[channelIndex] ?? ''; idText = columns[idIndex] ?? ''; dataText = columns[dataIndex] ?? '';
+      } else {
+        const hash = line.match(/^(?:\(([\d.]+)\)\s+)?(\S+)\s+([\da-f]{3,8})#(?:#([\da-f]))?([\da-f]*)$/i);
+        const bracket = line.match(/^(?:\(([\d.]+)\)|([\d.]+))?\s*(\S+)\s+([\da-f]{3,8})\s+\[(\d{1,2})\]\s+(.+)$/i);
+        if (hash) { if (hash[1]) timestamp = Number(hash[1]); channel = hash[2]; idText = hash[3]; dataText = hash[5]; }
+        else if (bracket) { const declared = Number(bracket[5]); timestamp = bracket[1] || bracket[2] ? Number(bracket[1] || bracket[2]) : undefined; channel = bracket[3]; idText = bracket[4]; dataText = bracket[6]; const actual = dataText.trim().split(/\s+/).filter(Boolean).length; if (actual !== declared) throw new Error(`DLC 声明 ${declared}，实际 ${actual} 字节`); }
+        else throw new Error('不支持的日志行格式');
+      }
+      const id = parseCanId(idText), data = parseLogData(dataText); frames.push({ line: lineNumber, timestamp, channel, id, extended: id > 0x7ff || idText.replace(/^0x/i, '').length > 3, data, raw: original });
+    } catch (reason) { errorCount += 1; if (errors.length < 1000) errors.push({ line: lineNumber, message: reason instanceof Error ? reason.message : String(reason), raw: original }); }
+  }
+  return { frames, errors, errorCount, ignored, truncated };
+}
+
+export function filterCanLogFrames(frames: CanLogFrame[], options: { id?: string; startTime?: number; endTime?: number }) {
+  const id = options.id?.trim() ? parseCanId(options.id) : undefined;
+  return frames.filter(frame => (id === undefined || frame.id === id) && (options.startTime === undefined || (frame.timestamp !== undefined && frame.timestamp >= options.startTime)) && (options.endTime === undefined || (frame.timestamp !== undefined && frame.timestamp <= options.endTime)));
+}
+
+export function decodeCanLog(database: DbcDatabase, frames: CanLogFrame[]) {
+  const rows: DecodedCanLogRow[] = [], errors: CanLogError[] = []; let unmatched = 0, failed = 0, outOfRange = 0, truncated = false;
+  for (const frame of frames) {
+    const message = findDbcMessage(database, frame.id, frame.extended) ?? findDbcMessage(database, frame.id);
+    if (!message) { unmatched += 1; continue; }
+    try {
+      const decoded = decodeDbcMessage(message, Array.from(frame.data, byte => byte.toString(16).padStart(2, '0')).join(''));
+      for (const item of decoded.signals) { if (rows.length >= 200000) { truncated = true; break; } if (!item.inRange) outOfRange += 1; rows.push({ line: frame.line, timestamp: frame.timestamp, channel: frame.channel, id: frame.id, extended: frame.extended, message: message.name, signal: item.signal.name, raw: item.raw, value: item.value, unit: item.signal.unit, text: item.text, inRange: item.inRange }); }
+      if (truncated) break;
+    } catch (reason) { failed += 1; if (errors.length < 1000) errors.push({ line: frame.line, message: reason instanceof Error ? reason.message : String(reason), raw: frame.raw }); }
+  }
+  return { rows, unmatched, failed, outOfRange, errors, truncated };
+}
