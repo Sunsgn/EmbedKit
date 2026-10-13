@@ -1,9 +1,11 @@
 import { crc16Modbus, formatHex, parseHexBytes } from '../../utils/embeddedTools';
 
 export type FrameChecksum = 'none' | 'sum8' | 'xor8' | 'crc16-modbus';
-export interface FrameTemplate { header: string; commandBytes: 1 | 2; includeLength: boolean; checksum: FrameChecksum }
+export interface FrameTemplate { header: string; commandBytes: 1 | 2; includeLength: boolean; checksum: FrameChecksum; fixedPayloadLength?: number }
 export interface FrameField { name: string; offset: number; length: number; hex: string }
 export interface FrameResult { bytes: Uint8Array; hex: string; command: number; payload: Uint8Array; fields: FrameField[] }
+export interface StreamFrame { offset: number; end: number; hex: string; result: FrameResult | null; error: string }
+export interface FrameStreamResult { frames: StreamFrame[]; noiseBytes: number; trailing: Uint8Array; truncated: boolean }
 
 function checksumSize(kind: FrameChecksum) { return kind === 'none' ? 0 : kind === 'crc16-modbus' ? 2 : 1; }
 function checksum(bytes: Uint8Array, kind: FrameChecksum) {
@@ -45,4 +47,39 @@ export function parseCustomFrame(template: FrameTemplate, value: string): FrameR
   if (checkSize) { const actual = bytes.slice(payloadEnd), expected = checksum(bytes.slice(0, payloadEnd), template.checksum); if (formatHex(actual) !== formatHex(expected)) throw new Error(`校验错误：字节偏移 ${payloadEnd} 期望 ${formatHex(expected)}，实际 ${formatHex(actual)}`); }
   let command = 0; for (const byte of bytes.slice(commandOffset, payloadOffset)) command = command * 256 + byte;
   return describe(bytes, template, command, bytes.slice(payloadOffset, payloadEnd));
+}
+
+function headerAt(bytes: Uint8Array, header: Uint8Array, offset: number) {
+  if (offset + header.length > bytes.length) return false;
+  return header.every((byte, index) => bytes[offset + index] === byte);
+}
+
+export function parseFrameStream(template: FrameTemplate, value: string, maxFrames = 1000): FrameStreamResult {
+  const bytes = parseHexBytes(value), header = parseHexBytes(template.header), checkSize = checksumSize(template.checksum);
+  if (!header.length) throw new Error('帧头不能为空');
+  if (bytes.length > 1024 * 1024) throw new Error('连续数据超过 1 MiB 上限');
+  if (!Number.isInteger(maxFrames) || maxFrames < 1 || maxFrames > 10000) throw new Error('最大帧数必须是 1 到 10000');
+  if (!template.includeLength && (!Number.isInteger(template.fixedPayloadLength) || template.fixedPayloadLength! < 0 || template.fixedPayloadLength! > 65535)) throw new Error('无长度字段时必须填写固定负载长度');
+  const frames: StreamFrame[] = [];
+  let cursor = 0, noiseBytes = 0, trailing = new Uint8Array(), truncated = false;
+  while (cursor < bytes.length) {
+    let start = cursor;
+    while (start < bytes.length && !headerAt(bytes, header, start)) start += 1;
+    if (start >= bytes.length) { noiseBytes += bytes.length - cursor; break; }
+    noiseBytes += start - cursor;
+    const lengthOffset = start + header.length;
+    if (template.includeLength && lengthOffset >= bytes.length) { trailing = bytes.slice(start); break; }
+    const bodyLength = template.includeLength ? bytes[lengthOffset] : template.commandBytes + template.fixedPayloadLength!;
+    const totalLength = header.length + (template.includeLength ? 1 : 0) + bodyLength + checkSize;
+    if (bodyLength < template.commandBytes) {
+      frames.push({ offset: start, end: Math.min(bytes.length, start + totalLength), hex: formatHex(bytes.slice(start, Math.min(bytes.length, start + totalLength))), result: null, error: `长度字段小于命令宽度：字节偏移 ${lengthOffset}` });
+      cursor = start + 1; continue;
+    }
+    if (start + totalLength > bytes.length) { trailing = bytes.slice(start); break; }
+    const candidate = bytes.slice(start, start + totalLength), hex = formatHex(candidate);
+    try { frames.push({ offset: start, end: start + totalLength, hex, result: parseCustomFrame(template, hex), error: '' }); cursor = start + totalLength; }
+    catch (reason) { frames.push({ offset: start, end: start + totalLength, hex, result: null, error: reason instanceof Error ? reason.message : String(reason) }); cursor = start + 1; }
+    if (frames.length >= maxFrames) { truncated = cursor < bytes.length; break; }
+  }
+  return { frames, noiseBytes, trailing, truncated };
 }
