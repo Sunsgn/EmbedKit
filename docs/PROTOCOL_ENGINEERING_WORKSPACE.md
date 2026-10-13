@@ -2,6 +2,8 @@
 
 更新日期：2026-10-13
 
+本文档是 [通用嵌入式开发平台产品蓝图](./EMBEDDED_DEVELOPMENT_PRODUCT_BLUEPRINT.md) 的网络与协议子方案。底层驱动、板级 Bring-up、I²C/SPI 调试、调试探针和全局工具规划以产品蓝图为准。
+
 ## 1. 产品重新定位
 
 通用 AI 已经能够阅读协议文档并生成 C、Python 或 JavaScript 解析代码，因此“能够解释协议、生成一帧、解析一帧”不能作为 EmbedKit 的核心优势。
