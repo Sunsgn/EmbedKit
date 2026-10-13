@@ -13,6 +13,13 @@ FLASH 0x08000000 0x1000 xr
 Linker script and memory map
 .text 0x08000000 0x100
                 0x08000000 0x10 main`;
+const keilMap = (code: number, zi: number) => `ARM Linker, 5.06
+Memory Map of the image
+Execution Region ER_IROM1 (Exec base: 0x08000000, Load base: 0x08000000, Size: 0x00001000, Max: 0x00010000)
+Image component sizes
+   ${code}          0         20          8         ${zi}          0   network.o
+  0x08000000 0x20 Code RO 1 .text network.o
+  network_run 0x08000000 Thumb 32 network.o`;
 
 describe('MAP address workflow', () => {
   beforeEach(() => {
@@ -56,5 +63,31 @@ describe('MAP address workflow', () => {
     expect(readLocalFileBytes).toHaveBeenCalled();
     await waitFor(() => expect(revokeLocalPath).toHaveBeenCalledWith('selection-map'));
     expect(screen.getByText('当前产物分析失败')).toBeVisible();
+  });
+
+  it('compares a baseline, drills into module evidence, and clears only the comparison', async () => {
+    render(<MemoryRouter><MapTool /></MemoryRouter>);
+    fireEvent.change(screen.getByPlaceholderText('粘贴 MAP 内容，或导入 .map 文件'), { target: { value: keilMap(240, 96) } });
+    expect(await screen.findByText('Keil ARMCC / armlink 5')).toBeVisible();
+    fireEvent.change(screen.getByLabelText('基线 MAP 内容'), { target: { value: keilMap(160, 64) } });
+    expect(await screen.findByText('容量增长')).toBeVisible();
+    expect(screen.getByText('对比置信度：high')).toBeVisible();
+    fireEvent.click(screen.getByText('network.o'));
+    expect(await screen.findByText('network.o 贡献证据')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'JSON 证据' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: '清除基线' }));
+    expect(screen.queryByText('容量增长')).not.toBeInTheDocument();
+    expect(screen.getByText('Keil ARMCC / armlink 5')).toBeVisible();
+  });
+
+  it('rejects an oversized baseline without discarding the current analysis', async () => {
+    render(<MemoryRouter><MapTool /></MemoryRouter>);
+    fireEvent.change(screen.getByPlaceholderText('粘贴 MAP 内容，或导入 .map 文件'), { target: { value: map } });
+    expect(await screen.findByText('GNU ld / LLVM lld / ESP-IDF')).toBeVisible();
+    const file = new File(['x'], 'huge.map', { type: 'text/plain' });
+    Object.defineProperty(file, 'size', { value: 16 * 1024 * 1024 + 1 });
+    fireEvent.change(screen.getByLabelText('导入基线 MAP'), { target: { files: [file] } });
+    expect(await screen.findByText(/基线 MAP 文件超过/)).toBeVisible();
+    expect(screen.getByText('GNU ld / LLVM lld / ESP-IDF')).toBeVisible();
   });
 });

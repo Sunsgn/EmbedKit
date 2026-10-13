@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { analyzeMap, compareMapAnalyses, detectMapFormat, lookupMapAddress } from '../src/utils/mapAnalyzer.ts';
+import { analyzeMap, buildMapComparisonEvidence, compareMapAnalyses, detectMapFormat, getMapModuleDrilldown, lookupMapAddress } from '../src/utils/mapAnalyzer.ts';
 
 test('parses GNU ld memory regions, sections and modules', () => {
   const content = `Memory Configuration
@@ -133,6 +133,44 @@ Linker script and memory map
   const comparison = compareMapAnalyses(current, baseline);
   assert.notEqual(comparison.confidence, 'high');
   assert.match(comparison.warnings.join(' '), /工具链格式不同/);
+});
+
+test('drills module growth down to memory classes, sections, and symbols', () => {
+  const create = (code, zi, sectionSize, symbolSize) => analyzeMap(`ARM Linker, 5.06
+Memory Map of the image
+Execution Region ER_IROM1 (Exec base: 0x08000000, Load base: 0x08000000, Size: 0x00001000, Max: 0x00010000)
+Image component sizes
+   ${code}          0          0          0       ${zi}          0   network.o
+  0x08000000 0x${sectionSize.toString(16)} Code RO 1 .text network.o
+  network_run 0x08000000 Thumb ${symbolSize} network.o`);
+  const current = create(240, 96, 0x30, 48), baseline = create(160, 64, 0x20, 32);
+  const detail = getMapModuleDrilldown(current, baseline, 'network.o');
+  assert.equal(detail.memory.find(item => item.name === 'Code')?.delta, 80);
+  assert.equal(detail.sections.find(item => item.name === '.text')?.delta, 16);
+  assert.equal(detail.symbols.find(item => item.name === 'network_run')?.delta, 16);
+});
+
+test('exports portable comparison evidence without MAP text or absolute paths', () => {
+  const current = analyzeMap(`ARM Linker, 5.06
+Memory Map of the image
+Execution Region ER_IROM1 (Exec base: 0x08000000, Load base: 0x08000000, Size: 0x00000100, Max: 0x00001000)
+Image component sizes
+   120 0 20 8 32 0 main.o`);
+  const baseline = analyzeMap(`ARM Linker, 5.06
+Memory Map of the image
+Execution Region ER_IROM1 (Exec base: 0x08000000, Load base: 0x08000000, Size: 0x000000f0, Max: 0x00001000)
+Image component sizes
+   100 0 20 8 32 0 main.o`);
+  const evidence = buildMapComparisonEvidence(current, baseline, compareMapAnalyses(current, baseline), {
+    currentFileName: 'D:\\secret\\build\\current.map', baselineFileName: '/home/user/build/baseline.map', analyzedAt: '2026-10-13T00:00:00.000Z',
+  });
+  const serialized = JSON.stringify(evidence);
+  assert.equal(evidence.current.fileName, 'current.map');
+  assert.equal(evidence.baseline.fileName, 'baseline.map');
+  assert.equal(evidence.schema, 'embedkit.map-comparison.v1');
+  assert.equal(serialized.includes('secret'), false);
+  assert.equal(serialized.includes('/home/user'), false);
+  assert.equal(serialized.includes('Memory Map of the image'), false);
 });
 
 test('resolves MAP addresses with symbol, offset, low-bit, and section degradation evidence', () => {

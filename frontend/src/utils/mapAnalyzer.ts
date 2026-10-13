@@ -57,6 +57,24 @@ export interface MapComparison {
   symbols: MapDeltaItem[];
   warnings: string[];
 }
+export interface MapContributionDetail extends MapDeltaItem {
+  kind: 'memory' | 'section' | 'symbol';
+  currentAddress?: number;
+  baselineAddress?: number;
+}
+export interface MapModuleDrilldown {
+  module: string;
+  memory: MapContributionDetail[];
+  sections: MapContributionDetail[];
+  symbols: MapContributionDetail[];
+}
+export interface MapComparisonEvidence {
+  schema: 'embedkit.map-comparison.v1';
+  analyzedAt: string;
+  current: { fileName: string; format: MapFormat; formatLabel: string; coverage: number; confidence: MapCoverage['confidence']; totals: MapAnalysis['totals'] };
+  baseline: { fileName: string; format: MapFormat; formatLabel: string; coverage: number; confidence: MapCoverage['confidence']; totals: MapAnalysis['totals'] };
+  result: MapComparison;
+}
 export interface MapAddressLookup {
   requestedAddress: number;
   normalizedAddress: number;
@@ -347,5 +365,94 @@ export function compareMapAnalyses(current: MapAnalysis, baseline: MapAnalysis):
       baseline.symbols.filter(item => item.size > 0).map(item => ({ name: `${item.module ?? '?'}:${item.name}`, size: item.size })),
     ),
     warnings,
+  };
+}
+
+const aggregateContributions = (
+  current: Array<{ name: string; size: number; address?: number }>,
+  baseline: Array<{ name: string; size: number; address?: number }>,
+  kind: MapContributionDetail['kind'],
+) => {
+  const aggregate = (items: Array<{ name: string; size: number; address?: number }>) => {
+    const values = new Map<string, { size: number; address?: number }>();
+    for (const item of items) {
+      const previous = values.get(item.name);
+      values.set(item.name, { size: (previous?.size ?? 0) + item.size, address: previous?.address ?? item.address });
+    }
+    return values;
+  };
+  const after = aggregate(current), before = aggregate(baseline);
+  return [...new Set([...before.keys(), ...after.keys()])]
+    .map(name => ({
+      kind,
+      name,
+      before: before.get(name)?.size ?? 0,
+      after: after.get(name)?.size ?? 0,
+      delta: (after.get(name)?.size ?? 0) - (before.get(name)?.size ?? 0),
+      currentAddress: after.get(name)?.address,
+      baselineAddress: before.get(name)?.address,
+    }))
+    .filter(item => item.before !== 0 || item.after !== 0)
+    .sort((left, right) => Math.abs(right.delta) - Math.abs(left.delta));
+};
+
+/** Builds object-level evidence for one compared module without retaining MAP source text. */
+export function getMapModuleDrilldown(current: MapAnalysis, baseline: MapAnalysis, moduleName: string): MapModuleDrilldown {
+  const matches = (candidate?: string) => candidate ? basename(candidate) === basename(moduleName) : false;
+  const currentModule = current.modules.find(item => matches(item.name));
+  const baselineModule = baseline.modules.find(item => matches(item.name));
+  const fields: Array<[string, keyof Pick<MapModule, 'code' | 'roData' | 'rwData' | 'ziData'>]> = [
+    ['Code', 'code'], ['RO Data', 'roData'], ['RW Data', 'rwData'], ['ZI / BSS', 'ziData'],
+  ];
+  const memory = fields.map(([name, field]) => ({
+    kind: 'memory' as const,
+    name,
+    before: baselineModule?.[field] ?? 0,
+    after: currentModule?.[field] ?? 0,
+    delta: (currentModule?.[field] ?? 0) - (baselineModule?.[field] ?? 0),
+  })).filter(item => item.before !== 0 || item.after !== 0);
+  const selectSections = (analysis: MapAnalysis) => analysis.sections
+    .filter(item => matches(item.module))
+    .map(item => ({ name: item.name, size: item.size, address: item.address }));
+  const selectSymbols = (analysis: MapAnalysis) => analysis.symbols
+    .filter(item => matches(item.module) && item.size > 0)
+    .map(item => ({ name: item.name, size: item.size, address: item.address }));
+  return {
+    module: basename(moduleName),
+    memory,
+    sections: aggregateContributions(selectSections(current), selectSections(baseline), 'section'),
+    symbols: aggregateContributions(selectSymbols(current), selectSymbols(baseline), 'symbol'),
+  };
+}
+
+const evidenceFileName = (value: string, fallback: string) => Array.from(basename(value || fallback)).filter(character => character.charCodeAt(0) >= 32).join('') || fallback;
+
+/** Creates a portable, auditable result and deliberately excludes paths and original MAP text. */
+export function buildMapComparisonEvidence(
+  current: MapAnalysis,
+  baseline: MapAnalysis,
+  comparison: MapComparison,
+  options: { currentFileName?: string; baselineFileName?: string; analyzedAt?: string } = {},
+): MapComparisonEvidence {
+  const describe = (analysis: MapAnalysis, fileName: string) => ({
+    fileName,
+    format: analysis.format,
+    formatLabel: analysis.formatLabel,
+    coverage: analysis.coverage.score,
+    confidence: analysis.coverage.confidence,
+    totals: { ...analysis.totals },
+  });
+  return {
+    schema: 'embedkit.map-comparison.v1',
+    analyzedAt: options.analyzedAt ?? new Date().toISOString(),
+    current: describe(current, evidenceFileName(options.currentFileName ?? '', 'current.map')),
+    baseline: describe(baseline, evidenceFileName(options.baselineFileName ?? '', 'baseline.map')),
+    result: {
+      ...comparison,
+      totals: { ...comparison.totals },
+      modules: comparison.modules.map(item => ({ ...item })),
+      symbols: comparison.symbols.map(item => ({ ...item })),
+      warnings: [...comparison.warnings],
+    },
   };
 }
