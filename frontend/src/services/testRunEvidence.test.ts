@@ -53,7 +53,28 @@ const run = (): TestRunRecord => ({
 
 describe('test run evidence', () => {
   it('redacts secret variables and enforces evidence bounds', () => {
-    const result = createTestRunEvidence(run(), ['password-123']);
+    const value = run();
+    value.evidenceReferences = [{
+      schemaVersion: 1,
+      id: 'evidence-1',
+      kind: 'log',
+      origin: 'captured',
+      sourceId: 'run-1',
+      label: 'password-123 response',
+    }];
+    value.findings = [{
+      schemaVersion: 1,
+      id: 'finding-1',
+      category: 'communication',
+      severity: 'error',
+      conclusionType: 'deterministic',
+      confidence: 'high',
+      summary: 'password-123 failed',
+      evidenceIds: ['evidence-1'],
+      unknowns: ['password-123 state'],
+      verificationSteps: ['retry password-123'],
+    }];
+    const result = createTestRunEvidence(value, ['password-123']);
 
     expect(result.schemaVersion).toBe(2);
     expect(result.logs).toHaveLength(TEST_RUN_LOG_LIMIT);
@@ -78,5 +99,40 @@ describe('test run evidence', () => {
 
     expect(report.schema).toBe('embedkit.real-device-test-report');
     expect(report.evidenceLegend.manualConfirmation).toContain('不等价');
+  });
+
+  it('normalizes versioned common evidence without changing legacy step evidence', () => {
+    const value = run();
+    value.evidenceReferences = [
+      {
+        schemaVersion: 1,
+        id: 'rx-1',
+        kind: 'communication',
+        origin: 'captured',
+        sourceId: 'session-1',
+        label: '设备响应',
+        location: { eventId: 'event-1' },
+      },
+    ];
+    value.findings = [
+      {
+        schemaVersion: 1,
+        id: 'timeout-1',
+        category: 'communication',
+        severity: 'error',
+        conclusionType: 'deterministic',
+        confidence: 'high',
+        summary: '等待响应超时',
+        evidenceIds: ['rx-1'],
+        unknowns: [],
+        verificationSteps: ['检查设备是否仍在线'],
+      },
+    ];
+
+    const result = normalizeTestRunRecord(value);
+
+    expect(result.evidenceReferences?.[0].location?.eventId).toBe('event-1');
+    expect(result.findings?.[0].conclusionType).toBe('deterministic');
+    expect(result.steps[0].evidence?.source).toBe('device-response');
   });
 });

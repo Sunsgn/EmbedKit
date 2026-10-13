@@ -1,3 +1,13 @@
+export type {
+  EvidenceKind,
+  EvidenceLocation,
+  EvidenceOrigin,
+  EvidenceReference,
+  Finding,
+  FindingConclusionType,
+  FindingConfidence,
+} from './evidence';
+
 export interface Chip {
   id: string;
   name: string;

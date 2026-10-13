@@ -1,4 +1,5 @@
 import type { TestRunRecord } from '../types/product';
+import { normalizeEvidenceReferences, normalizeFindings } from './evidenceModel';
 
 export const TEST_RUN_LOG_LIMIT = 1000;
 export const TEST_RUN_TEXT_LIMIT = 2000;
@@ -25,6 +26,12 @@ export function normalizeTestRunRecord(value: TestRunRecord): TestRunRecord {
     logs: Array.isArray(value.logs) ? value.logs.slice(-TEST_RUN_LOG_LIMIT) : [],
     ...(Array.isArray(value.communications)
       ? { communications: value.communications }
+      : {}),
+    ...(Array.isArray(value.evidenceReferences)
+      ? { evidenceReferences: normalizeEvidenceReferences(value.evidenceReferences) }
+      : {}),
+    ...(Array.isArray(value.findings)
+      ? { findings: normalizeFindings(value.findings) }
       : {}),
   };
 }
@@ -68,6 +75,23 @@ export function createTestRunEvidence(
           }
         : {}),
     })),
+    ...(Array.isArray(value.evidenceReferences)
+      ? {
+          evidenceReferences: normalizeEvidenceReferences(value.evidenceReferences).map(
+            (reference) => ({ ...reference, label: redact(reference.label, secrets) }),
+          ),
+        }
+      : {}),
+    ...(Array.isArray(value.findings)
+      ? {
+          findings: normalizeFindings(value.findings).map((finding) => ({
+            ...finding,
+            summary: redact(finding.summary, secrets),
+            unknowns: finding.unknowns.map((item) => redact(item, secrets)),
+            verificationSteps: finding.verificationSteps.map((item) => redact(item, secrets)),
+          })),
+        }
+      : {}),
     logs: value.logs.slice(-TEST_RUN_LOG_LIMIT).map((log) => ({
       time: bounded(log.time, 32),
       level: bounded(log.level, 16),

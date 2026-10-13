@@ -1,3 +1,5 @@
+import type { EvidenceReference, Finding } from './evidence';
+
 export type ChannelKind = 'serial' | 'tcp' | 'udp' | 'websocket';
 export type NetworkRole = 'client' | 'server';
 
@@ -75,6 +77,7 @@ export interface TestStepRun {
     observed?: string;
     timeoutMs?: number;
   };
+  evidenceReferences?: EvidenceReference[];
 }
 
 export interface TestDeviceEvidence {
@@ -123,6 +126,8 @@ export interface TestRunRecord {
   device?: TestDeviceEvidence;
   firmware?: TestFirmwareEvidence;
   communications?: TestCommunicationEvidence[];
+  evidenceReferences?: EvidenceReference[];
+  findings?: Finding[];
   environment: Record<string, string>;
   steps: TestStepRun[];
   logs: Array<{ time: string; level: string; text: string }>;
