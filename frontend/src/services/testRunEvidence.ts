@@ -8,6 +8,11 @@ export const TEST_RUN_OBSERVED_LIMIT = 4096;
 const bounded = (value: unknown, limit = TEST_RUN_TEXT_LIMIT) =>
   String(value ?? '').slice(0, limit);
 
+const stableId = (value: unknown) => {
+  const text = bounded(value, 160);
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(text) ? text : '';
+};
+
 const redact = (
   value: unknown,
   secrets: string[],
@@ -24,6 +29,11 @@ export function normalizeTestRunRecord(value: TestRunRecord): TestRunRecord {
     environment: value.environment && typeof value.environment === 'object' ? value.environment : {},
     steps: Array.isArray(value.steps) ? value.steps : [],
     logs: Array.isArray(value.logs) ? value.logs.slice(-TEST_RUN_LOG_LIMIT) : [],
+    ...(stableId(value.projectRevisionId) ? { projectRevisionId: stableId(value.projectRevisionId) } : { projectRevisionId: undefined }),
+    ...(stableId(value.firmwareId) ? { firmwareId: stableId(value.firmwareId) } : { firmwareId: undefined }),
+    ...(Array.isArray(value.communicationSessionIds)
+      ? { communicationSessionIds: [...new Set(value.communicationSessionIds.map(stableId).filter(Boolean))].slice(0, 100) }
+      : {}),
     ...(Array.isArray(value.communications)
       ? { communications: value.communications }
       : {}),

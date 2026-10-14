@@ -135,4 +135,17 @@ describe('test run evidence', () => {
     expect(result.findings?.[0].conclusionType).toBe('deterministic');
     expect(result.steps[0].evidence?.source).toBe('device-response');
   });
+
+  it('keeps only valid stable lifecycle relationships', () => {
+    const value = run();
+    value.projectRevisionId = 'revision-1';
+    value.firmwareId = '../invalid';
+    value.communicationSessionIds = ['session-1', 'session-1', '../invalid'];
+
+    const result = normalizeTestRunRecord(value);
+
+    expect(result.projectRevisionId).toBe('revision-1');
+    expect(result.firmwareId).toBeUndefined();
+    expect(result.communicationSessionIds).toEqual(['session-1']);
+  });
 });

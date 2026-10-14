@@ -1,4 +1,5 @@
 import type { DeviceProject, TestRunRecord } from '../types/product';
+import { LIFECYCLE_RECORD_LIMIT, normalizeLifecycleRecords, parseBuildArtifact, parseCommunicationSession, parseFirmwareIdentity, parseProjectRevision } from './lifecycleModel';
 import { exportProductData, mergeProductData, type ProductDataSnapshot } from './productStorage';
 
 const SCHEMA = 'embedkit.workspace-backup';
@@ -35,6 +36,8 @@ export interface WorkspaceBackupPreview {
   projectConflicts: number;
   runs: number;
   runConflicts: number;
+  lifecycleRecords: number;
+  lifecycleConflicts: number;
   localSettings: number;
   localConflicts: number;
 }
@@ -65,6 +68,12 @@ function readPortableLocal(storage: Storage) {
 const validProject = (value: unknown): value is DeviceProject => isObject(value) && typeof value.id === 'string' && typeof value.name === 'string' && Array.isArray(value.devices) && typeof value.updatedAt === 'string';
 const validRun = (value: unknown): value is TestRunRecord => isObject(value) && typeof value.id === 'string' && typeof value.startedAt === 'string' && typeof value.caseName === 'string' && Array.isArray(value.steps) && Array.isArray(value.logs);
 
+function parseLifecycleCollection<T>(value: unknown, parser: (item: unknown) => T | null, label: string): T[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > LIFECYCLE_RECORD_LIMIT || value.some(item => parser(item) === null)) throw new Error(`${label}数据无效或超过 ${LIFECYCLE_RECORD_LIMIT} 项`);
+  return normalizeLifecycleRecords(value, parser);
+}
+
 export function parseWorkspaceBackup(text: string): WorkspaceBackup {
   if (encodedSize(text) > WORKSPACE_BACKUP_MAX_BYTES) throw new Error('备份文件超过 16 MiB 上限');
   let value: unknown;
@@ -76,7 +85,7 @@ export function parseWorkspaceBackup(text: string): WorkspaceBackup {
   if (!Array.isArray(settings) || settings.length > 20 || !settings.every(item => isObject(item) && typeof item.key === 'string')) throw new Error('产品设置数据无效');
   const local = Object.fromEntries(Object.entries(value.local).filter(([key]) => (PORTABLE_LOCAL_KEYS as readonly string[]).includes(key)).map(([key, item]) => [key, sanitize(item)])) as WorkspaceBackup['local'];
   if (Object.values(local).some(item => encodedSize(JSON.stringify(item)) > MAX_LOCAL_VALUE_BYTES)) throw new Error('单项本地配置超过 4 MiB 上限');
-  return { schema: SCHEMA, version: VERSION, createdAt: typeof value.createdAt === 'string' ? value.createdAt : '', local, product: { projects, runs, settings: settings as ProductDataSnapshot['settings'] }, privacy: { excluded: Array.isArray((value.privacy as Record<string, unknown> | undefined)?.excluded) ? (value.privacy as { excluded: string[] }).excluded : [], note: '导入前已重新执行字段白名单和秘密值清理。' } };
+  return { schema: SCHEMA, version: VERSION, createdAt: typeof value.createdAt === 'string' ? value.createdAt : '', local, product: { projects, runs, settings: settings as ProductDataSnapshot['settings'], projectRevisions: parseLifecycleCollection(product.projectRevisions, parseProjectRevision, '工程修订'), buildArtifacts: parseLifecycleCollection(product.buildArtifacts, parseBuildArtifact, '构建产物'), firmwareIdentities: parseLifecycleCollection(product.firmwareIdentities, parseFirmwareIdentity, '固件身份'), communicationSessions: parseLifecycleCollection(product.communicationSessions, parseCommunicationSession, '通信会话') }, privacy: { excluded: Array.isArray((value.privacy as Record<string, unknown> | undefined)?.excluded) ? (value.privacy as { excluded: string[] }).excluded : [], note: '导入前已重新执行字段白名单和秘密值清理。' } };
 }
 
 export async function createWorkspaceBackup(storage: Storage = localStorage): Promise<WorkspaceBackup> {
@@ -95,7 +104,9 @@ export async function createWorkspaceBackup(storage: Storage = localStorage): Pr
 
 export function previewWorkspaceBackup(backup: WorkspaceBackup, current: ProductDataSnapshot, storage: Storage = localStorage): WorkspaceBackupPreview {
   const projectIds = new Set(current.projects.map(item => item.id)), runIds = new Set(current.runs.map(item => item.id)), localKeys = Object.keys(backup.local);
-  return { projects: backup.product.projects.length, projectConflicts: backup.product.projects.filter(item => projectIds.has(item.id)).length, runs: backup.product.runs.length, runConflicts: backup.product.runs.filter(item => runIds.has(item.id)).length, localSettings: localKeys.length, localConflicts: localKeys.filter(key => storage.getItem(key) !== null).length };
+  const lifecycleGroups = [backup.product.projectRevisions ?? [], backup.product.buildArtifacts ?? [], backup.product.firmwareIdentities ?? [], backup.product.communicationSessions ?? []];
+  const currentLifecycleIds = [current.projectRevisions ?? [], current.buildArtifacts ?? [], current.firmwareIdentities ?? [], current.communicationSessions ?? []].map(items => new Set(items.map(item => item.id)));
+  return { projects: backup.product.projects.length, projectConflicts: backup.product.projects.filter(item => projectIds.has(item.id)).length, runs: backup.product.runs.length, runConflicts: backup.product.runs.filter(item => runIds.has(item.id)).length, lifecycleRecords: lifecycleGroups.reduce((total, items) => total + items.length, 0), lifecycleConflicts: lifecycleGroups.reduce((total, items, index) => total + items.filter(item => currentLifecycleIds[index].has(item.id)).length, 0), localSettings: localKeys.length, localConflicts: localKeys.filter(key => storage.getItem(key) !== null).length };
 }
 
 export async function applyWorkspaceBackup(backup: WorkspaceBackup, storage: Storage = localStorage, merge: (snapshot: ProductDataSnapshot) => Promise<void> = mergeProductData) {

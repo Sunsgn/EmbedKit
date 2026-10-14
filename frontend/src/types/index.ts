@@ -7,6 +7,15 @@ export type {
   FindingConclusionType,
   FindingConfidence,
 } from './evidence';
+export type {
+  BuildArtifact,
+  BuildArtifactKind,
+  CommunicationSession,
+  CommunicationSessionStatus,
+  FirmwareIdentity,
+  ProjectRevision,
+  ProjectRevisionSource,
+} from './lifecycle';
 
 export interface Chip {
   id: string;

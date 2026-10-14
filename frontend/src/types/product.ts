@@ -123,6 +123,9 @@ export interface TestRunRecord {
   passed: number;
   failed: number;
   agentVersion: string;
+  projectRevisionId?: string;
+  firmwareId?: string;
+  communicationSessionIds?: string[];
   device?: TestDeviceEvidence;
   firmware?: TestFirmwareEvidence;
   communications?: TestCommunicationEvidence[];
