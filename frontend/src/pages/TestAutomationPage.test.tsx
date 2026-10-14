@@ -4,12 +4,12 @@ import TestAutomationPage from './TestAutomationPage';
 import { getAgentStatus } from '../services/agentClient';
 import { closeNetworkSession, openNetworkSession, sendNetworkData } from '../services/networkAgent';
 import { listSerialSessions } from '../services/serialAgent';
-import { getProductSetting, listDeviceProjects, listTestRuns, saveTestRun } from '../services/productStorage';
+import { getProductSetting, listBuildArtifacts, listDeviceProjects, listFirmwareIdentities, listTestRuns, saveTestRun } from '../services/productStorage';
 
 vi.mock('../services/agentClient', () => ({ getAgentStatus: vi.fn() }));
 vi.mock('../services/networkAgent', () => ({ closeNetworkSession: vi.fn(), openNetworkSession: vi.fn(), readNetworkSession: vi.fn(), sendNetworkData: vi.fn() }));
 vi.mock('../services/serialAgent', () => ({ listSerialSessions: vi.fn(), readSerialSession: vi.fn(), sendSerialData: vi.fn() }));
-vi.mock('../services/productStorage', () => ({ deleteTestRun: vi.fn(), getProductSetting: vi.fn(), listDeviceProjects: vi.fn(), listTestRuns: vi.fn(), saveTestRun: vi.fn() }));
+vi.mock('../services/productStorage', () => ({ deleteTestRun: vi.fn(), getProductSetting: vi.fn(), listBuildArtifacts: vi.fn(), listDeviceProjects: vi.fn(), listFirmwareIdentities: vi.fn(), listTestRuns: vi.fn(), saveTestRun: vi.fn() }));
 
 const tcpSuite = [{
   id: 'suite-1',
@@ -35,6 +35,8 @@ describe('TestAutomationPage centralized Agent workflow', () => {
     vi.mocked(listTestRuns).mockResolvedValue([]);
     vi.mocked(getProductSetting).mockResolvedValue(undefined);
     vi.mocked(listDeviceProjects).mockResolvedValue([]);
+    vi.mocked(listBuildArtifacts).mockResolvedValue([]);
+    vi.mocked(listFirmwareIdentities).mockResolvedValue([]);
     vi.mocked(saveTestRun).mockResolvedValue(undefined);
     vi.mocked(openNetworkSession).mockResolvedValue({ id: 'network-1', type: 'tcp', mode: 'client', host: '127.0.0.1', port: 9000, localAddress: '127.0.0.1:50000', state: 'connected', rxBytes: 0, txBytes: 0, events: [] });
     vi.mocked(sendNetworkData).mockResolvedValue({ sent: 4 });
@@ -130,5 +132,24 @@ describe('TestAutomationPage centralized Agent workflow', () => {
         }),
       ),
     );
+  });
+
+  it('associates a persisted firmware identity with a test run', async () => {
+    vi.mocked(listBuildArtifacts).mockResolvedValue([{ schemaVersion: 1, id: 'artifact-1', buildId: 'build-2', kind: 'bin', fileName: 'verified.bin', byteLength: 64, sha256: 'b'.repeat(64), capturedAt: '2026-10-14T00:00:00.000Z' }]);
+    vi.mocked(listFirmwareIdentities).mockResolvedValue([{ schemaVersion: 1, id: 'firmware-1', buildArtifactId: 'artifact-1', sha256: 'b'.repeat(64), byteLength: 64, format: 'bin', capturedAt: '2026-10-14T00:00:00.000Z' }]);
+
+    render(<TestAutomationPage />);
+    await waitFor(() => expect(screen.getByRole('option', { name: /verified\.bin/ })).toBeVisible());
+    fireEvent.change(screen.getByLabelText('已计算固件指纹'), { target: { value: 'firmware-1' } });
+    fireEvent.click(screen.getByRole('button', { name: '运行流程' }));
+
+    await waitFor(() => expect(saveTestRun).toHaveBeenCalledWith(expect.objectContaining({ firmwareId: 'firmware-1', firmware: expect.objectContaining({ artifactName: 'verified.bin', sha256: 'b'.repeat(64) }) })));
+  });
+
+  it('does not offer a legacy firmware record with an invalid digest', async () => {
+    localStorage.setItem('embedkit.build-analysis-records', JSON.stringify([{ schemaVersion: 1, id: 'bad:0', buildId: 'bad', artifactIndex: 0, fileName: 'unverified.bin', artifactType: 'bin', size: 1, modifiedAt: '2026-10-14T00:00:00.000Z', sha256: 'abc123', kind: 'bin', status: 'passed', analyzedAt: '2026-10-14T00:00:00.000Z' }]));
+    render(<TestAutomationPage />);
+    await waitFor(() => expect(listFirmwareIdentities).toHaveBeenCalled());
+    expect(screen.queryByRole('option', { name: /unverified\.bin/ })).not.toBeInTheDocument();
   });
 });

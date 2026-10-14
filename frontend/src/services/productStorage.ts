@@ -105,6 +105,19 @@ export async function listBuildArtifacts() { return normalizeLifecycleRecords(aw
 export async function saveBuildArtifact(value: BuildArtifact) { const record = parseBuildArtifact(value); if (!record) throw new Error('Invalid build artifact'); await put(BUILD_ARTIFACTS, record); }
 export async function listFirmwareIdentities() { return normalizeLifecycleRecords(await readAll<FirmwareIdentity>(FIRMWARE_IDENTITIES), parseFirmwareIdentity).sort((a, b) => b.capturedAt.localeCompare(a.capturedAt)); }
 export async function saveFirmwareIdentity(value: FirmwareIdentity) { const record = parseFirmwareIdentity(value); if (!record) throw new Error('Invalid firmware identity'); await put(FIRMWARE_IDENTITIES, record); }
+export async function saveFirmwareArtifactIdentity(artifactValue: BuildArtifact, firmwareValue: FirmwareIdentity): Promise<void> {
+  const artifact = parseBuildArtifact(artifactValue), firmware = parseFirmwareIdentity(firmwareValue);
+  if (!artifact || !firmware || firmware.buildArtifactId !== artifact.id) throw new Error('固件身份与构建产物关系无效');
+  const database = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction([BUILD_ARTIFACTS, FIRMWARE_IDENTITIES], 'readwrite');
+    transaction.objectStore(BUILD_ARTIFACTS).put(artifact);
+    transaction.objectStore(FIRMWARE_IDENTITIES).put(firmware);
+    transaction.oncomplete = () => { database.close(); resolve(); };
+    transaction.onerror = () => { database.close(); reject(transaction.error); };
+    transaction.onabort = () => { database.close(); reject(transaction.error ?? new Error('固件身份保存已中止')); };
+  });
+}
 export async function listCommunicationSessions() { return normalizeLifecycleRecords(await readAll<CommunicationSession>(COMMUNICATION_SESSIONS), parseCommunicationSession).sort((a, b) => b.startedAt.localeCompare(a.startedAt)); }
 export async function saveCommunicationSession(value: CommunicationSession) { const record = parseCommunicationSession(value); if (!record) throw new Error('Invalid communication session'); await put(COMMUNICATION_SESSIONS, record); }
 export async function setProductSetting<T>(key: string, value: T) { await put(SETTINGS, { key, value }); }

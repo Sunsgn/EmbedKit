@@ -4,6 +4,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import ToolResultRow from "../../features/toolbox/ToolResultRow";
 import { readLocalFileBytes, revokeLocalPath } from "../../services/localFiles";
 import { parseBuildArtifactRouteState, routeStateContext, saveBuildAnalysisRecord, type BuildAnalysisContext } from "../../services/buildAnalysisRecords";
+import { createFirmwareIdentityRecords } from "../../services/firmwareIdentity";
+import { saveFirmwareArtifactIdentity } from "../../services/productStorage";
 import BuildAnalysisAssociation from "../../features/project/BuildAnalysisAssociation";
 import { crc32 } from "../../utils/embeddedTools";
 import { buildFirmwareManifest, compareFirmware, decodeFirmwareArtifact, mergeFirmware, type OverlapPolicy } from "./firmware";
@@ -43,6 +45,7 @@ export default function FirmwareTool() {
     [leftId, setLeftId] = useState(1),
     [rightId, setRightId] = useState(2);
   const [loadError, setLoadError] = useState(''), [progress, setProgress] = useState<number | null>(null), [importedBuild, setImportedBuild] = useState(false), [artifactWarnings, setArtifactWarnings] = useState<string[]>([]);
+  const [identityNotice, setIdentityNotice] = useState(''), [identityError, setIdentityError] = useState('');
   const [associationContext, setAssociationContext] = useState<BuildAnalysisContext | null>(null), [associationRevision, setAssociationRevision] = useState(0);
   const loaded = useMemo(
     () =>
@@ -100,13 +103,25 @@ export default function FirmwareTool() {
     setSegments((current) =>
       current.map((item) => (item.id === id ? { ...item, ...change } : item)),
     );
+  const recordIdentity = useCallback(async (name: string, bytes: Uint8Array, decodedFormat?: string, context: BuildAnalysisContext | null = null) => {
+    setIdentityNotice(''); setIdentityError('');
+    try {
+      const records = await createFirmwareIdentityRecords({ fileName: name, bytes, decodedFormat, buildId: context?.buildId, artifactIndex: context?.artifactIndex, expectedSha256: context?.sha256 });
+      await saveFirmwareArtifactIdentity(records.artifact, records.firmware);
+      setIdentityNotice(`固件身份已保存 · SHA-256 ${records.firmware.sha256.slice(0, 16)}…`);
+      return true;
+    } catch (reason) {
+      setIdentityError(reason instanceof Error ? reason.message : String(reason));
+      return false;
+    }
+  }, []);
   const consumeSelection = useCallback(async (selectionId: string, name: string, context: BuildAnalysisContext | null = null) => {
     setAssociationContext(context);
     setLoadError(''); setProgress(0);
-    try { const result = await readLocalFileBytes(selectionId, MAX_BIN_BYTES, setProgress); setSegments(current => current.map((item, index) => index === 0 ? { ...item, name: name || result.metadata.name, bytes: result.bytes } : item)); setImportedBuild(true); setProgress(100); if (context) { saveBuildAnalysisRecord(context, 'bin', { summary: { bytes: result.bytes.length, crc32: crc(crc32(result.bytes)), baseAddressKnown: false } }); setAssociationRevision(value => value + 1); } }
+    try { const result = await readLocalFileBytes(selectionId, MAX_BIN_BYTES, setProgress), fileName = name || result.metadata.name; setSegments(current => current.map((item, index) => index === 0 ? { ...item, name: fileName, bytes: result.bytes } : item)); setImportedBuild(true); setProgress(100); const identitySaved = await recordIdentity(fileName, result.bytes, 'bin', context); if (context) { saveBuildAnalysisRecord(context, 'bin', identitySaved ? { summary: { bytes: result.bytes.length, crc32: crc(crc32(result.bytes)), baseAddressKnown: false } } : { error: '固件指纹校验或身份保存失败' }); setAssociationRevision(value => value + 1); } }
     catch (reason) { const message = reason instanceof Error ? reason.message : String(reason); setLoadError(message); setProgress(null); if (context) { saveBuildAnalysisRecord(context, 'bin', { error: message }); setAssociationRevision(value => value + 1); } }
     finally { await revokeLocalPath(selectionId).catch(() => undefined); }
-  }, []);
+  }, [recordIdentity]);
   useEffect(() => {
     const incoming = parseBuildArtifactRouteState(location.state);
     if (consumedIncoming.current || !incoming) return;
@@ -117,9 +132,10 @@ export default function FirmwareTool() {
     if (!file) return; setLoadError('');
     if (file.size > MAX_BIN_BYTES) { setLoadError('固件文件超过 32 MiB 上限'); return; }
     try {
-      const current = segments.find(item => item.id === id), decoded = decodeFirmwareArtifact(file.name, new Uint8Array(await file.arrayBuffer()), parseAddress(current?.address ?? '0'));
+      const bytes = new Uint8Array(await file.arrayBuffer()), current = segments.find(item => item.id === id), decoded = decodeFirmwareArtifact(file.name, bytes, parseAddress(current?.address ?? '0'));
       setArtifactWarnings(decoded.warnings);
       setSegments(rows => { let next = Math.max(0, ...rows.map(item => item.id)) + 1; return rows.flatMap(item => item.id !== id ? [item] : decoded.segments.map((segment, index) => ({ id: index ? next++ : id, name: segment.name, address: segment.address.toString(16).toUpperCase().padStart(8, '0'), bytes: segment.bytes, format: decoded.format }))); });
+      await recordIdentity(file.name, bytes, decoded.format);
     }
     catch (reason) { setLoadError(reason instanceof Error ? reason.message : String(reason)); }
   };
@@ -153,6 +169,8 @@ export default function FirmwareTool() {
       {importedBuild && <p className="mb-3 rounded border border-blue-500/20 bg-blue-500/5 px-3 py-2 text-xs text-blue-300">已导入构建 BIN；BIN 不包含加载地址，请确认首个分段的基地址。</p>}
       {progress !== null && progress < 100 && <p className="mb-3 text-xs text-blue-300">正在读取构建 BIN · {progress}%</p>}
       {loadError && <p className="mb-3 rounded border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-300">{loadError}</p>}
+      {identityNotice && <p className="mb-3 rounded border border-green-500/20 bg-green-500/5 px-3 py-2 text-xs text-green-300">{identityNotice}</p>}
+      {identityError && <p role="alert" className="mb-3 rounded border border-yellow-500/20 bg-yellow-500/5 px-3 py-2 text-xs text-yellow-300">文件分析仍可继续，但固件身份未保存：{identityError}</p>}
       {artifactWarnings.length > 0 && <p className="mb-3 rounded border border-yellow-500/20 bg-yellow-500/5 px-3 py-2 text-xs text-yellow-300">{artifactWarnings.join('；')}</p>}
       <div className="mb-3 space-y-2">
         {segments.map((item) => (

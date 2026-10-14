@@ -32,7 +32,9 @@ import {
 import {
   deleteTestRun,
   getProductSetting,
+  listBuildArtifacts,
   listDeviceProjects,
+  listFirmwareIdentities,
   listTestRuns,
   saveTestRun,
 } from "../services/productStorage";
@@ -42,6 +44,7 @@ import {
   TEST_RUN_OBSERVED_LIMIT,
 } from "../services/testRunEvidence";
 import { listBuildAnalysisRecords } from "../services/buildAnalysisRecords";
+import { createFirmwareCatalog } from "../services/firmwareIdentity";
 import type {
   TestCommunicationEvidence,
   TestDeviceEvidence,
@@ -62,6 +65,17 @@ import {
 } from "../utils/testFlow";
 
 type Channel = "serial-a" | "serial-b" | "websocket" | "tcp" | "udp";
+interface FirmwareChoice {
+  id: string;
+  firmwareId?: string;
+  buildId: string;
+  fileName: string;
+  artifactType: string;
+  size: number;
+  modifiedAt: string;
+  sha256: string;
+  analyzedAt: string;
+}
 type StepType =
   | "command"
   | "send"
@@ -323,8 +337,8 @@ export default function TestAutomationPage() {
     [deviceEvidence, setDeviceEvidence] = useState<TestDeviceEvidence | null>(
       null,
     ),
-    [firmwareChoices] = useState(() =>
-      listBuildAnalysisRecords().filter((item) => Boolean(item.sha256)),
+    [firmwareChoices, setFirmwareChoices] = useState<FirmwareChoice[]>(() =>
+      listBuildAnalysisRecords().filter((item) => item.status === 'passed' && /^[0-9a-f]{64}$/i.test(item.sha256 ?? '')).map(item => ({ ...item, sha256: item.sha256!.toLowerCase() })),
     ),
     [selectedFirmwareId, setSelectedFirmwareId] = useState("");
   const logSeq = useRef(0),
@@ -362,8 +376,12 @@ export default function TestAutomationPage() {
       getProductSetting<string>("activeDeviceId"),
       getAgentStatus().catch(() => null),
       listDeviceProjects(),
-    ]).then(([runs, projectId, deviceId, status, projects]) => {
+      listBuildArtifacts(),
+      listFirmwareIdentities(),
+    ]).then(([runs, projectId, deviceId, status, projects, artifacts, identities]) => {
       setRunHistory(runs);
+      const lifecycleFirmware = createFirmwareCatalog(artifacts, identities).map(item => ({ ...item, modifiedAt: item.capturedAt, analyzedAt: item.capturedAt }));
+      setFirmwareChoices(current => [...lifecycleFirmware, ...current.filter(item => !lifecycleFirmware.some(saved => saved.sha256 === item.sha256 && saved.buildId === item.buildId))]);
       setActiveProjectId(projectId ?? "");
       setActiveDeviceId(deviceId ?? "");
       setAgentVersion(
@@ -1095,6 +1113,7 @@ export default function TestAutomationPage() {
           ...(deviceEvidence ? { device: deviceEvidence } : {}),
           ...(selectedFirmware
             ? {
+                ...(selectedFirmware.firmwareId ? { firmwareId: selectedFirmware.firmwareId } : {}),
                 firmware: {
                   buildId: selectedFirmware.buildId,
                   artifactName: selectedFirmware.fileName,
