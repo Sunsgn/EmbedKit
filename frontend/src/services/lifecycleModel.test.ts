@@ -27,8 +27,8 @@ describe('lifecycle public model', () => {
   });
 
   it('validates session chronology and optional stable relationships', () => {
-    const value = { schemaVersion: 1, id: 'session-1', transport: 'serial', status: 'failed', startedAt: '2026-10-13T00:00:00.000Z', endedAt: '2026-10-13T00:01:00.000Z', endpoint: 'COM3 @ 115200', rxBytes: 10, txBytes: 5, projectId: 'project-1', deviceId: 'device-1', firmwareId: 'firmware-1', evidenceIds: ['event-1', 'event-1', '../bad'] };
-    expect(parseCommunicationSession(value)?.evidenceIds).toEqual(['event-1']);
+    const value = { schemaVersion: 1, id: 'session-1', sourceSessionId: 'agent-session-1', transport: 'serial', status: 'failed', startedAt: '2026-10-13T00:00:00.000Z', endedAt: '2026-10-13T00:01:00.000Z', endpoint: 'COM3 @ 115200', rxBytes: 10, txBytes: 5, projectId: 'project-1', deviceId: 'device-1', firmwareId: 'firmware-1', evidenceIds: ['event-1', 'event-1', '../bad'] };
+    expect(parseCommunicationSession(value)).toMatchObject({ sourceSessionId: 'agent-session-1', evidenceIds: ['event-1'] });
     expect(parseCommunicationSession({ ...value, endedAt: '2026-10-12T23:59:00.000Z' })).toBeNull();
     expect(parseCommunicationSession({ ...value, status: 'active', endedAt: undefined })).toMatchObject({ status: 'active' });
     expect(parseCommunicationSession({ ...value, status: 'completed', endedAt: undefined })).toBeNull();

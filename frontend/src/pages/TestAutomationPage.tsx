@@ -36,7 +36,7 @@ import {
   listDeviceProjects,
   listFirmwareIdentities,
   listTestRuns,
-  saveTestRun,
+  saveTestRunWithCommunicationSessions,
 } from "../services/productStorage";
 import {
   createTestRunEvidence,
@@ -45,8 +45,8 @@ import {
 } from "../services/testRunEvidence";
 import { listBuildAnalysisRecords } from "../services/buildAnalysisRecords";
 import { createFirmwareCatalog } from "../services/firmwareIdentity";
+import { createCommunicationSessionRecords, type ArchivedCommunicationEvidence } from "../services/communicationArchive";
 import type {
-  TestCommunicationEvidence,
   TestDeviceEvidence,
   TestRunRecord,
   TestStepRun,
@@ -138,7 +138,7 @@ interface Incoming {
   text: string;
   hex: string;
 }
-type SessionEvidence = TestCommunicationEvidence;
+type SessionEvidence = ArchivedCommunicationEvidence;
 interface SerialRuntime {
   id: string;
   after: number;
@@ -586,6 +586,7 @@ export default function TestAutomationPage() {
         endpoint: selected.path,
         rxBytes: 0,
         txBytes: 0,
+        startedAt: new Date().toISOString(),
       });
       setSerialNames((previous) => ({
         ...previous,
@@ -620,6 +621,7 @@ export default function TestAutomationPage() {
           endpoint: wsUrl,
           rxBytes: 0,
           txBytes: 0,
+          startedAt: new Date().toISOString(),
         });
         addRunLog("pass", `WebSocket 已连接 ${wsUrl}`);
         resolve(socket);
@@ -661,6 +663,7 @@ export default function TestAutomationPage() {
       endpoint: `${config.mode}:${config.host}:${config.port}`,
       rxBytes: 0,
       txBytes: 0,
+      startedAt: new Date().toISOString(),
     });
     addRunLog(
       "pass",
@@ -853,6 +856,7 @@ export default function TestAutomationPage() {
           endpoint: runtime.path,
           rxBytes: 0,
           txBytes: 0,
+          startedAt,
         });
     }
     for (const step of orderedFlowSteps(selectedCase.steps)) {
@@ -1047,9 +1051,8 @@ export default function TestAutomationPage() {
       }
       executingTeardown.current = false;
     }
-    const communications = [...sessionEvidence.current.values()].map(
-        (item) => ({ ...item }),
-      ),
+    const communicationEvidence = [...sessionEvidence.current.values()].map(item => ({ ...item })),
+      communications = communicationEvidence.map(({ startedAt: _startedAt, ...item }) => item),
       cleanupStarted = Date.now(),
       cleanupFailures = await releaseResources(false, true);
     if (cleanupFailures.length) {
@@ -1090,13 +1093,16 @@ export default function TestAutomationPage() {
     const selectedFirmware = firmwareChoices.find(
         (item) => item.id === selectedFirmwareId && item.sha256,
       ),
+      runId = crypto.randomUUID(),
+      finishedAt = new Date(finished).toISOString(),
+      communicationSessions = createCommunicationSessionRecords(communicationEvidence, { runId, finishedAt, status, projectId: activeProjectId || undefined, deviceId: activeDeviceId || undefined, firmwareId: selectedFirmware?.firmwareId }),
       secretValues = runtimeVariables.current
         .filter((variable) => variable.secret)
         .map((variable) => variable.value),
       record = createTestRunEvidence(
         {
           schemaVersion: 2,
-          id: crypto.randomUUID(),
+          id: runId,
           projectId: activeProjectId,
           deviceId: activeDeviceId,
           suiteId: selectedSuite.id,
@@ -1105,7 +1111,7 @@ export default function TestAutomationPage() {
           caseName: selectedCase.name,
           status,
           startedAt,
-          finishedAt: new Date(finished).toISOString(),
+          finishedAt,
           durationMs: duration,
           passed,
           failed,
@@ -1126,6 +1132,7 @@ export default function TestAutomationPage() {
               }
             : {}),
           communications,
+          communicationSessionIds: communicationSessions.map(session => session.id),
           environment: Object.fromEntries(
             runtimeVariables.current
               .filter((variable) => !variable.secret)
@@ -1141,8 +1148,8 @@ export default function TestAutomationPage() {
         secretValues,
       );
     try {
-      await saveTestRun(record);
-      setRunHistory((previous) => [record, ...previous]);
+      const storedRecord = await saveTestRunWithCommunicationSessions(record, communicationSessions);
+      setRunHistory((previous) => [storedRecord, ...previous]);
     } finally {
       setRunning(false);
     }
@@ -1586,8 +1593,8 @@ export default function TestAutomationPage() {
         : "未关联已计算的固件指纹",
       communications = (run.communications ?? [])
         .map(
-          (item) =>
-            `<li>${escapeMarkup(item.channel)} · ${escapeMarkup(item.transport)} · ${escapeMarkup(item.endpoint)} · RX ${item.rxBytes} / TX ${item.txBytes} 字节 · 会话 ${escapeMarkup(item.sessionId)}</li>`,
+          (item, index) =>
+            `<li>${escapeMarkup(item.channel)} · ${escapeMarkup(item.transport)} · ${escapeMarkup(item.endpoint)} · RX ${item.rxBytes} / TX ${item.txBytes} 字节 · 归档 ${escapeMarkup(run.communicationSessionIds?.[index] ?? '未归档')} · 源会话 ${escapeMarkup(item.sessionId)}</li>`,
         )
         .join(""),
       html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>EmbedKit 测试报告</title><style>body{font:14px sans-serif;margin:32px;color:#222}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:8px;text-align:left}th{background:#f5f5f5}.passed{color:#16803c}.failed,.error{color:#c62828}pre{white-space:pre-wrap;background:#f5f5f5;padding:12px}</style></head><body><h1>EmbedKit 真实设备测试报告</h1><p>套件：${escapeMarkup(run.suiteName)} · 流程：${escapeMarkup(run.caseName)}</p><p>设备：${device}</p><p>固件：${firmware}</p><p>Agent：${escapeMarkup(run.agentVersion)} · 开始：${escapeMarkup(new Date(run.startedAt).toLocaleString())} · 耗时：${run.durationMs} ms</p><p class="${run.status}">结果：${escapeMarkup(run.status)} · 通过 ${run.passed} · 失败 ${run.failed}</p><h2>证据说明</h2><p>设备响应来自通信会话；人工确认仅代表操作人员确认；设备、固件与端点快照只用于追溯，不单独证明测试通过。</p><h2>通信会话</h2><ul>${communications || "<li>本次流程未建立通信会话</li>"}</ul><h2>运行环境</h2><ul>${environment || "<li>无公开变量</li>"}</ul><h2>步骤</h2><table><tr><th>步骤</th><th>类型</th><th>通道</th><th>结果</th><th>耗时</th><th>证据类型</th><th>观测/失败</th></tr>${rows}</table><h2>执行日志</h2><pre>${logs}</pre></body></html>`;

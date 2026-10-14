@@ -120,6 +120,21 @@ export async function saveFirmwareArtifactIdentity(artifactValue: BuildArtifact,
 }
 export async function listCommunicationSessions() { return normalizeLifecycleRecords(await readAll<CommunicationSession>(COMMUNICATION_SESSIONS), parseCommunicationSession).sort((a, b) => b.startedAt.localeCompare(a.startedAt)); }
 export async function saveCommunicationSession(value: CommunicationSession) { const record = parseCommunicationSession(value); if (!record) throw new Error('Invalid communication session'); await put(COMMUNICATION_SESSIONS, record); }
+export async function saveTestRunWithCommunicationSessions(runValue: TestRunRecord, sessionValues: CommunicationSession[]): Promise<TestRunRecord> {
+  const sessions = normalizeLifecycleRecords(sessionValues, parseCommunicationSession);
+  if (sessions.length !== sessionValues.length) throw new Error('测试通信会话数据无效');
+  const run = normalizeTestRunRecord({ ...runValue, communicationSessionIds: sessions.map(session => session.id) });
+  const database = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction([RUNS, COMMUNICATION_SESSIONS], 'readwrite');
+    sessions.forEach(session => transaction.objectStore(COMMUNICATION_SESSIONS).put(session));
+    transaction.objectStore(RUNS).put(run);
+    transaction.oncomplete = () => { database.close(); resolve(); };
+    transaction.onerror = () => { database.close(); reject(transaction.error); };
+    transaction.onabort = () => { database.close(); reject(transaction.error ?? new Error('测试运行与通信会话保存已中止')); };
+  });
+  return run;
+}
 export async function setProductSetting<T>(key: string, value: T) { await put(SETTINGS, { key, value }); }
 export async function getProductSetting<T>(key: string): Promise<T | null> { const database = await openDatabase(); return await new Promise((resolve, reject) => { const transaction = database.transaction(SETTINGS, 'readonly'), request = transaction.objectStore(SETTINGS).get(key); request.onsuccess = () => resolve((request.result as { value?: T } | undefined)?.value ?? null); request.onerror = () => reject(request.error); transaction.oncomplete = () => database.close(); }); }
 

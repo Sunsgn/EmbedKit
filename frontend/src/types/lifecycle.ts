@@ -50,6 +50,7 @@ export type CommunicationSessionStatus = 'active' | 'completed' | 'failed' | 'ab
 export interface CommunicationSession {
   schemaVersion: typeof COMMUNICATION_SESSION_SCHEMA_VERSION;
   id: string;
+  sourceSessionId?: string;
   transport: ChannelKind;
   status: CommunicationSessionStatus;
   startedAt: string;

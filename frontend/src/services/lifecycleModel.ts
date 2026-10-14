@@ -123,6 +123,7 @@ export function parseCommunicationSession(value: unknown): CommunicationSession 
   const rxBytes = byteCount(value.rxBytes), txBytes = byteCount(value.txBytes);
   if (!id || !transports.has(transport) || !sessionStatuses.has(status) || !startedAt || (status !== 'active' && !endedAt) || (endedAt && Date.parse(endedAt) < Date.parse(startedAt)) || !endpoint || rxBytes === undefined || txBytes === undefined) return null;
   const projectId = identifier(value.projectId), deviceId = identifier(value.deviceId), firmwareId = identifier(value.firmwareId);
+  const sourceSessionId = identifier(value.sourceSessionId);
   const agentVersion = boundedString(value.agentVersion, 100);
   const evidenceIds = Array.isArray(value.evidenceIds)
     ? [...new Set(value.evidenceIds.map(identifier).filter(Boolean))].slice(0, EVIDENCE_ID_LIMIT)
@@ -130,6 +131,7 @@ export function parseCommunicationSession(value: unknown): CommunicationSession 
   return {
     schemaVersion: COMMUNICATION_SESSION_SCHEMA_VERSION,
     id, transport, status, startedAt, endpoint, rxBytes, txBytes, evidenceIds,
+    ...(sourceSessionId ? { sourceSessionId } : {}),
     ...(endedAt ? { endedAt } : {}),
     ...(projectId ? { projectId } : {}),
     ...(deviceId ? { deviceId } : {}),
