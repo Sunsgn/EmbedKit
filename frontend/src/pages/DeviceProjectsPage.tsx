@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  BadgeCheck,
   Cpu,
   Download,
   FileUp,
+  ListChecks,
+  MonitorCog,
   Plus,
   Radio,
   Save,
@@ -22,7 +25,14 @@ import {
   type DeviceChannel,
   type DeviceProfile,
   type DeviceProject,
+  type ProjectEnvironmentRequirement,
+  type ProjectFeature,
 } from "../types/product";
+import {
+  createEnvironmentRequirement,
+  createProjectFeature,
+  normalizeDeviceProject,
+} from "../services/projectModel";
 
 const createNetworkChannel = (
   kind: "tcp" | "udp" | "websocket",
@@ -63,7 +73,7 @@ export default function DeviceProjectsPage() {
         setSelectedId(loaded[0].id);
         setDeviceId(loaded[0].devices[0]?.id ?? "");
       } else {
-        const created = createDeviceProject("我的设备项目");
+        const created = createDeviceProject("我的工程");
         await saveDeviceProject(created);
         setProjects([created]);
         setSelectedId(created.id);
@@ -87,6 +97,28 @@ export default function DeviceProjectsPage() {
     if (project)
       commit({ ...project, ...patch, updatedAt: new Date().toISOString() });
   };
+  const addFeature = () => {
+    if (!project) return;
+    commit({ ...project, features: [...(project.features ?? []), createProjectFeature(`程序功能 ${(project.features?.length ?? 0) + 1}`)] });
+  };
+  const updateFeature = (id: string, patch: Partial<ProjectFeature>) => {
+    if (!project) return;
+    commit({ ...project, features: (project.features ?? []).map(item => item.id === id ? { ...item, ...patch, updatedAt: new Date().toISOString() } : item) });
+  };
+  const removeFeature = (id: string) => {
+    if (project) commit({ ...project, features: (project.features ?? []).filter(item => item.id !== id) });
+  };
+  const addRequirement = () => {
+    if (!project) return;
+    commit({ ...project, environmentRequirements: [...(project.environmentRequirements ?? []), createEnvironmentRequirement(`开发工具 ${(project.environmentRequirements?.length ?? 0) + 1}`)] });
+  };
+  const updateRequirement = (id: string, patch: Partial<ProjectEnvironmentRequirement>) => {
+    if (!project) return;
+    commit({ ...project, environmentRequirements: (project.environmentRequirements ?? []).map(item => item.id === id ? { ...item, ...patch } : item) });
+  };
+  const removeRequirement = (id: string) => {
+    if (project) commit({ ...project, environmentRequirements: (project.environmentRequirements ?? []).filter(item => item.id !== id) });
+  };
   const updateDevice = (patch: Partial<DeviceProfile>) => {
     if (!project || !device) return;
     commit({
@@ -105,7 +137,7 @@ export default function DeviceProjectsPage() {
     });
   };
   const addProject = () => {
-    const created = createDeviceProject(`设备项目 ${projects.length + 1}`);
+    const created = createDeviceProject(`工程项目 ${projects.length + 1}`);
     setProjects((all) => [created, ...all]);
     setSelectedId(created.id);
     setDeviceId(created.devices[0].id);
@@ -171,7 +203,7 @@ export default function DeviceProjectsPage() {
     if (!project) return;
     const payload = {
       schema: "embedkit.device-project",
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
       project,
     };
@@ -190,23 +222,25 @@ export default function DeviceProjectsPage() {
       const payload = JSON.parse(await file.text()) as {
         schema?: string;
         version?: number;
-        project?: DeviceProject;
+        project?: unknown;
       };
       if (
         payload.schema !== "embedkit.device-project" ||
-        payload.version !== 1 ||
-        !payload.project?.name ||
-        !Array.isArray(payload.project.devices)
+        ![1, 2].includes(payload.version ?? 0)
       )
         throw new Error("不是受支持的设备项目文件");
+      const normalized = normalizeDeviceProject(payload.project);
+      if (!normalized) throw new Error("工程项目内容无效或超过资源上限");
       const now = new Date().toISOString(),
         imported: DeviceProject = {
-          ...payload.project,
+          ...normalized,
           id: crypto.randomUUID(),
-          name: `${payload.project.name}（导入）`,
+          name: `${normalized.name}（导入）`,
           createdAt: now,
           updatedAt: now,
-          devices: payload.project.devices.map((item) => ({
+          features: (normalized.features ?? []).map(item => ({ ...item, id: crypto.randomUUID(), updatedAt: now })),
+          environmentRequirements: (normalized.environmentRequirements ?? []).map(item => ({ ...item, id: crypto.randomUUID() })),
+          devices: normalized.devices.map((item) => ({
             ...item,
             id: crypto.randomUUID(),
             channels: (item.channels ?? []).map((channel) => ({
@@ -240,15 +274,15 @@ export default function DeviceProjectsPage() {
         <aside className="flex min-h-0 flex-col rounded-xl border border-[#30363d] bg-[#0d1117]">
           <div className="flex items-center justify-between border-b border-[#30363d] p-3">
             <div>
-              <h1 className="text-sm font-semibold">设备项目</h1>
+              <h1 className="text-sm font-semibold">工程中心</h1>
               <p className="text-[10px] text-gray-600">
-                项目、设备与通道统一管理
+                功能、环境、设备与通道
               </p>
             </div>
             <button
               onClick={addProject}
               className="rounded bg-blue-600 p-1.5"
-              title="新建设备项目"
+              title="新建工程项目"
             >
               <Plus size={13} />
             </button>
@@ -374,6 +408,48 @@ export default function DeviceProjectsPage() {
                   className="field"
                 />
               </label>
+            </section>
+            <section className="mb-4 rounded-xl border border-[#30363d] bg-[#111820]">
+              <div className="flex items-center justify-between border-b border-[#30363d] p-3">
+                <div><h2 className="flex items-center gap-2 text-sm font-semibold"><ListChecks size={14} className="text-purple-400" />程序功能</h2><p className="mt-1 text-[9px] text-gray-600">保存经确认的程序作用、输入输出、资源和源码依据；外部 AI 内容默认只能作为草稿。</p></div>
+                <button onClick={addFeature} className="flex items-center gap-1 rounded border border-purple-500/30 px-2 py-1 text-[10px] text-purple-300"><Plus size={10} />添加功能</button>
+              </div>
+              <div className="grid gap-2 p-3">
+                {(project.features ?? []).length === 0 && <div className="rounded border border-dashed border-[#30363d] py-5 text-center text-xs text-gray-600">尚未记录程序功能。可由用户填写，或导入并确认外部 AI 的分析结果。</div>}
+                {(project.features ?? []).map(feature => <article key={feature.id} className="rounded-lg border border-[#30363d] bg-[#0d1117] p-3">
+                  <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_150px_130px_auto]">
+                    <input value={feature.name} onChange={event => updateFeature(feature.id, { name: event.target.value })} placeholder="功能名称" className="field" />
+                    <select value={feature.source} onChange={event => updateFeature(feature.id, { source: event.target.value as ProjectFeature['source'], ...(event.target.value === 'external-ai' ? { status: 'draft' as const } : {}) })} className="field"><option value="user">用户填写</option><option value="project-document">项目文档</option><option value="deterministic-analysis">确定性分析</option><option value="imported">导入</option><option value="external-ai">外部 AI</option></select>
+                    <select value={feature.status} onChange={event => updateFeature(feature.id, { status: event.target.value as ProjectFeature['status'] })} className="field"><option value="draft">草稿</option><option value="confirmed">已确认</option><option value="verified">已验证</option></select>
+                    <button onClick={() => removeFeature(feature.id)} title="删除功能" className="px-2 text-red-400"><Trash2 size={13} /></button>
+                  </div>
+                  <textarea value={feature.description} onChange={event => updateFeature(feature.id, { description: event.target.value })} placeholder="说明程序功能、工作模式和能力边界" className="field mt-2 min-h-16 resize-y" />
+                  <div className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+                    <input value={feature.inputs.join(', ')} onChange={event => updateFeature(feature.id, { inputs: event.target.value.split(',').map(item => item.trim()).filter(Boolean) })} placeholder="输入，逗号分隔" className="field" />
+                    <input value={feature.outputs.join(', ')} onChange={event => updateFeature(feature.id, { outputs: event.target.value.split(',').map(item => item.trim()).filter(Boolean) })} placeholder="输出，逗号分隔" className="field" />
+                    <input value={feature.resources.join(', ')} onChange={event => updateFeature(feature.id, { resources: event.target.value.split(',').map(item => item.trim()).filter(Boolean) })} placeholder="外设/任务/资源" className="field" />
+                    <input value={feature.relatedFiles.join(', ')} onChange={event => updateFeature(feature.id, { relatedFiles: event.target.value.split(',').map(item => item.trim()).filter(Boolean) })} placeholder="相关源码文件" className="field" />
+                  </div>
+                </article>)}
+              </div>
+            </section>
+            <section className="mb-4 rounded-xl border border-[#30363d] bg-[#111820]">
+              <div className="flex items-center justify-between border-b border-[#30363d] p-3">
+                <div><h2 className="flex items-center gap-2 text-sm font-semibold"><MonitorCog size={14} className="text-blue-400" />开发环境需求</h2><p className="mt-1 text-[9px] text-gray-600">当前阶段保存工程需要的能力；本机扫描、版本匹配和受控安装将在开发环境页执行。</p></div>
+                <button onClick={addRequirement} className="flex items-center gap-1 rounded border border-blue-500/30 px-2 py-1 text-[10px] text-blue-300"><Plus size={10} />添加需求</button>
+              </div>
+              <div className="grid gap-2 p-3">
+                {(project.environmentRequirements ?? []).length === 0 && <div className="rounded border border-dashed border-[#30363d] py-5 text-center text-xs text-gray-600">尚未记录 IDE、编译器、SDK、芯片包或调试器要求。</div>}
+                {(project.environmentRequirements ?? []).map(requirement => <article key={requirement.id} className="grid gap-2 rounded-lg border border-[#30363d] bg-[#0d1117] p-3 md:grid-cols-2 xl:grid-cols-[1fr_1fr_160px_110px_2fr_auto]">
+                  <input value={requirement.displayName} onChange={event => updateRequirement(requirement.id, { displayName: event.target.value })} placeholder="显示名称" className="field" />
+                  <input value={requirement.capabilityId} onChange={event => updateRequirement(requirement.id, { capabilityId: event.target.value })} placeholder="能力 ID，例如 compiler.arm.ac6" className="field" />
+                  <input value={requirement.versionRange} onChange={event => updateRequirement(requirement.id, { versionRange: event.target.value })} placeholder="版本范围" className="field" />
+                  <label className="flex items-center gap-2 rounded border border-[#30363d] px-2 text-[10px] text-gray-500"><input type="checkbox" checked={requirement.optional} onChange={event => updateRequirement(requirement.id, { optional: event.target.checked })} />可选</label>
+                  <input value={requirement.evidence} onChange={event => updateRequirement(requirement.id, { evidence: event.target.value })} placeholder="依据：工程文件、文档或用户确认" className="field" />
+                  <button onClick={() => removeRequirement(requirement.id)} title="删除需求" className="px-2 text-red-400"><Trash2 size={13} /></button>
+                </article>)}
+                {(project.environmentRequirements ?? []).length > 0 && <p className="flex items-center gap-1 text-[9px] text-gray-600"><BadgeCheck size={11} className="text-green-500" />工程需求使用稳定能力 ID，不保存本机安装路径、许可证或密钥。</p>}
+              </div>
             </section>
             <section className="mb-4 rounded-xl border border-[#30363d] bg-[#111820]">
               <div className="flex items-center justify-between border-b border-[#30363d] p-3">

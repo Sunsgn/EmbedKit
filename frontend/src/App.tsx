@@ -29,7 +29,7 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
     title: '开发工作区',
     items: [
       { icon: Gauge, label: '工作台', path: '/' },
-      { icon: HardDrive, label: '设备项目', path: '/devices' },
+      { icon: HardDrive, label: '工程中心', path: '/devices' },
       { icon: Code2, label: '工程分析', path: '/projects', aliases: ['/editor'] },
       { icon: Radio, label: '通信调试', path: '/communication', aliases: ['/serial'] },
       { icon: FlaskConical, label: '集成测试', path: '/tests' },

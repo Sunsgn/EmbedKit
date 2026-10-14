@@ -46,13 +46,46 @@ export interface DeviceProfile {
   channels: DeviceChannel[];
 }
 
+export const DEVICE_PROJECT_SCHEMA_VERSION = 2 as const;
+
+export type ProjectFeatureSource = 'user' | 'project-document' | 'deterministic-analysis' | 'imported' | 'external-ai';
+export type ProjectFeatureStatus = 'draft' | 'confirmed' | 'verified';
+
+export interface ProjectFeature {
+  id: string;
+  name: string;
+  description: string;
+  inputs: string[];
+  outputs: string[];
+  resources: string[];
+  relatedFiles: string[];
+  relatedResourceIds: string[];
+  source: ProjectFeatureSource;
+  status: ProjectFeatureStatus;
+  updatedAt: string;
+}
+
+export interface ProjectEnvironmentRequirement {
+  id: string;
+  capabilityId: string;
+  displayName: string;
+  versionRange: string;
+  optional: boolean;
+  source: 'user' | 'project-file' | 'imported' | 'deterministic-analysis';
+  evidence: string;
+}
+
 export interface DeviceProject {
+  schemaVersion?: typeof DEVICE_PROJECT_SCHEMA_VERSION;
   id: string;
   name: string;
   productModel: string;
   chipModel: string;
   description: string;
   tags: string[];
+  features?: ProjectFeature[];
+  environmentRequirements?: ProjectEnvironmentRequirement[];
+  resourceLinks?: string[];
   devices: DeviceProfile[];
   createdAt: string;
   updatedAt: string;
@@ -146,5 +179,5 @@ export function createDefaultSerialChannel(name = '主串口'): DeviceChannel {
 
 export function createDeviceProject(name = '新设备项目'): DeviceProject {
   const now = new Date().toISOString();
-  return { id: crypto.randomUUID(), name, productModel: '', chipModel: '', description: '', tags: [], devices: [{ id: crypto.randomUUID(), name: '测试设备 1', serialNumber: '', hardwareVersion: '', firmwareVersion: '', channels: [createDefaultSerialChannel()] }], createdAt: now, updatedAt: now };
+  return { schemaVersion: DEVICE_PROJECT_SCHEMA_VERSION, id: crypto.randomUUID(), name, productModel: '', chipModel: '', description: '', tags: [], features: [], environmentRequirements: [], resourceLinks: [], devices: [{ id: crypto.randomUUID(), name: '测试设备 1', serialNumber: '', hardwareVersion: '', firmwareVersion: '', channels: [createDefaultSerialChannel()] }], createdAt: now, updatedAt: now };
 }

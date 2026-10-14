@@ -2,6 +2,7 @@ import type { DeviceProject, TestRunRecord } from '../types/product';
 import type { BuildArtifact, CommunicationSession, FirmwareIdentity, ProjectRevision } from '../types/lifecycle';
 import { normalizeLifecycleRecords, parseBuildArtifact, parseCommunicationSession, parseFirmwareIdentity, parseProjectRevision } from './lifecycleModel';
 import { normalizeTestRunRecord } from './testRunEvidence';
+import { normalizeDeviceProject } from './projectModel';
 
 const DATABASE = 'embedkit-product';
 const VERSION = 2;
@@ -26,7 +27,7 @@ export interface ProductDataSnapshot {
 
 export function createPortableProductData(snapshot: ProductDataSnapshot): ProductDataSnapshot {
   return {
-    projects: snapshot.projects.slice(0, 500),
+    projects: snapshot.projects.map(normalizeDeviceProject).filter((item): item is DeviceProject => item !== null).slice(0, 500),
     runs: snapshot.runs.map(normalizeTestRunRecord).map(run => ({
       ...run,
       environment: Object.fromEntries(Object.entries(run.environment).filter(([key]) => !/(?:password|api.?key|token|credential)/i.test(key))),
@@ -93,8 +94,8 @@ async function remove(storeName: string, key: IDBValidKey): Promise<void> {
   });
 }
 
-export async function listDeviceProjects() { return (await readAll<DeviceProject>(PROJECTS)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)); }
-export async function saveDeviceProject(project: DeviceProject) { await put(PROJECTS, { ...project, updatedAt: new Date().toISOString() }); }
+export async function listDeviceProjects() { return (await readAll<DeviceProject>(PROJECTS)).map(normalizeDeviceProject).filter((item): item is DeviceProject => item !== null).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)); }
+export async function saveDeviceProject(project: DeviceProject) { const normalized = normalizeDeviceProject({ ...project, updatedAt: new Date().toISOString() }); if (!normalized) throw new Error('工程项目数据无效或超过资源上限'); await put(PROJECTS, normalized); }
 export async function deleteDeviceProject(id: string) { await remove(PROJECTS, id); }
 export async function listTestRuns() { return (await readAll<TestRunRecord>(RUNS)).map(normalizeTestRunRecord).sort((a, b) => b.startedAt.localeCompare(a.startedAt)); }
 export async function saveTestRun(run: TestRunRecord) { await put(RUNS, run); }
@@ -156,7 +157,7 @@ export async function mergeProductData(snapshot: ProductDataSnapshot): Promise<v
   await new Promise<void>((resolve, reject) => {
     const transaction = database.transaction([PROJECTS, RUNS, SETTINGS, PROJECT_REVISIONS, BUILD_ARTIFACTS, FIRMWARE_IDENTITIES, COMMUNICATION_SESSIONS], 'readwrite');
     const projects = transaction.objectStore(PROJECTS), runs = transaction.objectStore(RUNS), settings = transaction.objectStore(SETTINGS);
-    snapshot.projects.forEach(project => projects.put(project));
+    snapshot.projects.map(normalizeDeviceProject).filter((item): item is DeviceProject => item !== null).forEach(project => projects.put(project));
     snapshot.runs.forEach(run => runs.put(normalizeTestRunRecord(run)));
     snapshot.settings.filter(item => PORTABLE_SETTINGS.has(item.key)).forEach(item => settings.put(item));
     normalizeLifecycleRecords(snapshot.projectRevisions, parseProjectRevision).forEach(item => transaction.objectStore(PROJECT_REVISIONS).put(item));
