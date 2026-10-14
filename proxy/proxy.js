@@ -28,6 +28,8 @@ const MAX_FILE_CHUNK_BYTES = 256 * 1024;
 const FILE_SELECTION_TTL_MS = 15 * 60 * 1000;
 const ELF_ANALYSIS_TTL_MS = 15 * 60 * 1000;
 const MAX_ELF_ANALYSES = 8;
+const SOFTWARE_DETECTION_TIMEOUT_MS = 4000;
+const SOFTWARE_VERSION_OUTPUT_LIMIT = 16 * 1024;
 const SERIAL_STATE_FILE = process.env.EMBEDKIT_SERIAL_STATE_FILE || join(process.cwd(), '.embedkit-state', 'serial-sessions.json');
 const NETWORK_STATE_FILE = process.env.EMBEDKIT_NETWORK_STATE_FILE || join(process.cwd(), '.embedkit-state', 'network-sessions.json');
 const AGENT_LOG_FILE = process.env.EMBEDKIT_AGENT_LOG_FILE || join(process.cwd(), '.embedkit-state', 'agent.log');
@@ -40,6 +42,42 @@ const systemSerialAdapter = {
 };
 let serialAdapter = systemSerialAdapter;
 let filePickerActive = false;
+
+const softwareDefinitions = [
+  { id: 'runtime.node', capabilityId: 'runtime.node', name: 'Node.js', executable: process.execPath, args: ['--version'] },
+  { id: 'build.cmake', capabilityId: 'build.cmake', name: 'CMake', executable: 'cmake', args: ['--version'] },
+  { id: 'build.ninja', capabilityId: 'build.ninja', name: 'Ninja', executable: 'ninja', args: ['--version'] },
+  { id: 'build.make', capabilityId: 'build.make', name: 'Make', executable: process.platform === 'win32' ? 'mingw32-make' : 'make', args: ['--version'] },
+  { id: 'compiler.arm.gnu', capabilityId: 'compiler.arm.gnu', name: 'Arm GNU Toolchain', executable: 'arm-none-eabi-gcc', args: ['--version'] },
+  { id: 'debug.openocd', capabilityId: 'debug.openocd', name: 'OpenOCD', executable: 'openocd', args: ['--version'] },
+  { id: 'debug.pyocd', capabilityId: 'debug.pyocd', name: 'pyOCD', executable: 'pyocd', args: ['--version'] },
+];
+
+export function extractSoftwareVersion(output) {
+  const match = String(output || '').match(/\bv?(\d+(?:\.\d+){0,3}(?:[-+._][0-9A-Za-z.-]+)?)/);
+  return match?.[1] || '';
+}
+
+function detectSoftwareDefinition(definition) {
+  return new Promise(resolveDetection => {
+    const startedAt = Date.now(), child = spawn(definition.executable, definition.args, { windowsHide: true, shell: false });
+    let output = '', settled = false;
+    const finish = available => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolveDetection({ id: definition.id, capabilityId: definition.capabilityId, name: definition.name, available, executable: definition.executable, version: available ? extractSoftwareVersion(output) : '', rawVersion: available ? output.replace(/\r?\n/g, ' ').trim().slice(0, 500) : '', detection: 'path-command', durationMs: Date.now() - startedAt });
+    };
+    const append = data => { if (output.length < SOFTWARE_VERSION_OUTPUT_LIMIT) output += data.toString().slice(0, SOFTWARE_VERSION_OUTPUT_LIMIT - output.length); };
+    const timer = setTimeout(() => { child.kill(); finish(false); }, SOFTWARE_DETECTION_TIMEOUT_MS);
+    child.stdout.on('data', append); child.stderr.on('data', append); child.on('error', () => finish(false)); child.on('close', code => finish(code === 0));
+  });
+}
+
+export async function detectDevelopmentSoftware() {
+  const results = await Promise.all(softwareDefinitions.map(detectSoftwareDefinition));
+  return { schemaVersion: 1, platform: process.platform, architecture: process.arch, detectedAt: new Date().toISOString(), installations: results.filter(item => item.available), unavailable: results.filter(item => !item.available).map(item => ({ id: item.id, capabilityId: item.capabilityId, name: item.name })) };
+}
 
 function runPickerProcess(executable, args) {
   return new Promise((resolvePicker, reject) => {
@@ -1172,7 +1210,13 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === '/api/agent/status' && req.method === 'GET') {
-    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: ['serial', 'tcp-client', 'tcp-server', 'udp-client', 'udp-server', 'session-restore', 'network-session-restore', 'structured-errors', 'project-build', 'local-picker', 'local-file-read', 'elf-analysis'] });
+    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: ['serial', 'tcp-client', 'tcp-server', 'udp-client', 'udp-server', 'session-restore', 'network-session-restore', 'structured-errors', 'project-build', 'local-picker', 'local-file-read', 'elf-analysis', 'software-environment'] });
+    return;
+  }
+
+  if (pathname === '/api/environment/installations' && req.method === 'GET') {
+    try { jsonRes(res, 200, await detectDevelopmentSoftware()); }
+    catch (error) { jsonRes(res, 500, { error: error.message }); }
     return;
   }
 

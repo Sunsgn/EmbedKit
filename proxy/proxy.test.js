@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { authorizeBuildArtifact, configureFilePickerAdapter, configureSerialAdapter, createBuildCommand, decodeNetworkPayload, hashBuildArtifact, isAllowedOrigin, parseBuildDiagnostic, receiveSerialData, startServer, validateHostAndPort, validateProxyTarget, validateSerialOptions } from './proxy.js';
+import { authorizeBuildArtifact, configureFilePickerAdapter, configureSerialAdapter, createBuildCommand, decodeNetworkPayload, extractSoftwareVersion, hashBuildArtifact, isAllowedOrigin, parseBuildDiagnostic, receiveSerialData, startServer, validateHostAndPort, validateProxyTarget, validateSerialOptions } from './proxy.js';
 
 class VirtualSerialPort extends EventEmitter {
   constructor(options) { super(); this.options = options; this.isOpen = false; this.signals = { dtr: false, rts: false }; }
@@ -98,6 +98,12 @@ test('parses GCC, Keil, IAR, and MSVC build diagnostics for source navigation', 
   assert.equal(parseBuildDiagnostic('region FLASH overflowed by 128 bytes'), null);
 });
 
+test('extracts common development tool versions without assuming one vendor', () => {
+  assert.equal(extractSoftwareVersion('cmake version 3.30.5'), '3.30.5');
+  assert.equal(extractSoftwareVersion('arm-none-eabi-gcc.exe (GNU Arm Embedded Toolchain 13.2.Rel1) 13.2.1'), '13.2.Rel1');
+  assert.equal(extractSoftwareVersion('unknown output'), '');
+});
+
 test('validates serial session settings', () => {
   assert.deepEqual(validateSerialOptions({ path: 'COM11', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false }), { path: 'COM11', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false, frameMode: 'auto', frameGapMs: 30 });
   assert.throws(() => validateSerialOptions({ path: '', baudRate: 115200 }), /Invalid serial port path/);
@@ -168,7 +174,17 @@ test('reports local agent version and capabilities', async () => {
   assert.ok(result.capabilities.includes('local-picker'));
   assert.ok(result.capabilities.includes('local-file-read'));
   assert.ok(result.capabilities.includes('elf-analysis'));
+  assert.ok(result.capabilities.includes('software-environment'));
   assert.equal(response.headers.get('x-embedkit-protocol'), '1');
+});
+
+test('detects installed development software with bounded structured results', async () => {
+  const response = await fetch(`${agentBaseUrl}/api/environment/installations`), result = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(result.schemaVersion, 1);
+  assert.equal(typeof result.platform, 'string');
+  assert.ok(result.installations.some(item => item.capabilityId === 'runtime.node' && item.available && item.version));
+  assert.ok(result.installations.every(item => typeof item.durationMs === 'number' && item.rawVersion.length <= 500));
 });
 
 test('opens a controlled system picker and validates the selected path type', async () => {

@@ -16,6 +16,7 @@ const TutorialPage = lazy(() => import('./pages/TutorialPage'));
 const AiPage = lazy(() => import('./pages/AiPage'));
 const DataManagementPage = lazy(() => import('./pages/DataManagementPage'));
 const LocalAgentPage = lazy(() => import('./pages/LocalAgentPage'));
+const DevelopmentEnvironmentPage = lazy(() => import('./pages/DevelopmentEnvironmentPage'));
 
 interface NavItem {
   icon: ComponentType<{ size?: number }>;
@@ -30,6 +31,7 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
     items: [
       { icon: Gauge, label: '工作台', path: '/' },
       { icon: HardDrive, label: '工程中心', path: '/devices' },
+      { icon: MonitorCog, label: '开发环境', path: '/environment' },
       { icon: Code2, label: '工程分析', path: '/projects', aliases: ['/editor'] },
       { icon: Radio, label: '通信调试', path: '/communication', aliases: ['/serial'] },
       { icon: FlaskConical, label: '集成测试', path: '/tests' },
@@ -99,6 +101,7 @@ function AppShell() {
       <div className="min-h-0 flex-1 overflow-hidden"><AppErrorBoundary resetKey={location.pathname} onHome={() => navigate('/')}><Suspense fallback={<LoadingPage />}><Routes>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/devices" element={<DeviceProjectsPage />} />
+        <Route path="/environment" element={<DevelopmentEnvironmentPage />} />
         <Route path="/projects" element={<EditorPage />} />
         <Route path="/editor" element={<Navigate to="/projects" replace />} />
         <Route path="/communication" element={<CommunicationPage />} />

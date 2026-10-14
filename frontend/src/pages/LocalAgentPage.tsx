@@ -9,6 +9,7 @@ const publicAgentEndpoint = (() => { try { const url = new URL(LOCAL_PROXY_BASE)
 const capabilityLabels: Record<string, string> = {
   serial: '真实串口', 'tcp-client': 'TCP 客户端', 'tcp-server': 'TCP 服务端', udp: 'UDP', 'udp-server': 'UDP 服务端', websocket: 'WebSocket',
   'local-picker': '系统文件/目录选择', 'file-read': '受控文件读取', 'elf-analysis': 'ELF / DWARF', 'project-build': '工程识别与可选构建',
+  'software-environment': '开发软件与版本检测',
 };
 
 function saveJson(name: string, value: unknown) {
