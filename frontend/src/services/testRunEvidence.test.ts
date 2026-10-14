@@ -140,12 +140,14 @@ describe('test run evidence', () => {
     const value = run();
     value.projectRevisionId = 'revision-1';
     value.firmwareId = '../invalid';
+    value.baselineRunId = 'baseline-1';
     value.communicationSessionIds = ['session-1', 'session-1', '../invalid'];
 
     const result = normalizeTestRunRecord(value);
 
     expect(result.projectRevisionId).toBe('revision-1');
     expect(result.firmwareId).toBeUndefined();
+    expect(result.baselineRunId).toBe('baseline-1');
     expect(result.communicationSessionIds).toEqual(['session-1']);
   });
 });

@@ -5,6 +5,7 @@ import { getAgentStatus } from '../services/agentClient';
 import { closeNetworkSession, openNetworkSession, sendNetworkData } from '../services/networkAgent';
 import { listSerialSessions } from '../services/serialAgent';
 import { getProductSetting, listBuildArtifacts, listDeviceProjects, listFirmwareIdentities, listTestRuns, saveTestRunWithCommunicationSessions } from '../services/productStorage';
+import { createConfigurationFingerprint } from '../services/configurationFingerprint';
 
 vi.mock('../services/agentClient', () => ({ getAgentStatus: vi.fn() }));
 vi.mock('../services/networkAgent', () => ({ closeNetworkSession: vi.fn(), openNetworkSession: vi.fn(), readNetworkSession: vi.fn(), sendNetworkData: vi.fn() }));
@@ -53,6 +54,23 @@ describe('TestAutomationPage centralized Agent workflow', () => {
     await waitFor(() => expect(closeNetworkSession).toHaveBeenCalledWith('network-1'));
     await waitFor(() => expect(saveTestRunWithCommunicationSessions).toHaveBeenCalledWith(expect.objectContaining({ schemaVersion: 2, caseName: '发送与清理', status: 'passed', agentVersion: '1.0.0', passed: 1, failed: 0, communications: [expect.objectContaining({ transport: 'tcp', sessionId: 'network-1', txBytes: 4, rxBytes: 0 })], communicationSessionIds: [expect.stringMatching(/:tcp$/)] }), [expect.objectContaining({ sourceSessionId: 'network-1', transport: 'tcp', status: 'completed', txBytes: 4, rxBytes: 0 })]));
     expect(screen.getByText(/测试创建的网络资源已释放/)).toBeVisible();
+  });
+
+  it('links a rerun to its baseline and reports a same-context candidate fix', async () => {
+    const testDefinitionSha256 = await createConfigurationFingerprint(tcpSuite[0].cases[0]);
+    vi.mocked(getProductSetting).mockImplementation(async key => key === 'activeDeviceId' ? 'device-1' : null);
+    vi.mocked(listBuildArtifacts).mockResolvedValue([{ schemaVersion: 1, id: 'artifact-1', buildId: 'build-1', kind: 'bin', fileName: 'verified.bin', byteLength: 64, sha256: 'b'.repeat(64), capturedAt: '2026-10-14T00:00:00.000Z' }]);
+    vi.mocked(listFirmwareIdentities).mockResolvedValue([{ schemaVersion: 1, id: 'firmware-1', buildArtifactId: 'artifact-1', sha256: 'b'.repeat(64), byteLength: 64, format: 'bin', capturedAt: '2026-10-14T00:00:00.000Z' }]);
+    vi.mocked(listTestRuns).mockResolvedValue([{ schemaVersion: 2, id: 'baseline-1', projectId: '', deviceId: 'device-1', suiteId: 'suite-1', suiteName: 'TCP 设备流程', caseId: 'case-1', caseName: '发送与清理', status: 'failed', startedAt: '2026-10-13T00:00:00.000Z', finishedAt: '2026-10-13T00:00:01.000Z', durationMs: 1000, passed: 0, failed: 1, agentVersion: '1.0.0', firmwareId: 'firmware-1', firmware: { buildId: 'build-1', artifactName: 'verified.bin', artifactType: 'bin', size: 64, modifiedAt: '', sha256: 'b'.repeat(64), analyzedAt: '' }, testDefinitionSha256, inputEnvironment: {}, secretInputCount: 0, communications: [{ channel: 'tcp', transport: 'tcp', sessionId: 'old-network', endpoint: 'client:127.0.0.1:9000', rxBytes: 0, txBytes: 4 }], environment: {}, steps: [{ id: 'step-1', name: '发送 PING', type: 'send', channel: 'tcp', status: 'failed', startedAt: '', finishedAt: '', durationMs: 1000, retries: 0 }], logs: [] }]);
+    render(<TestAutomationPage />);
+    await waitFor(() => expect(screen.getByRole('option', { name: /failed/ })).toBeVisible());
+    fireEvent.change(screen.getByLabelText('已计算固件指纹'), { target: { value: 'firmware-1' } });
+    fireEvent.change(screen.getByLabelText('修复复测基线'), { target: { value: 'baseline-1' } });
+    fireEvent.click(screen.getByRole('button', { name: '运行流程' }));
+
+    await waitFor(() => expect(saveTestRunWithCommunicationSessions).toHaveBeenCalledWith(expect.objectContaining({ baselineRunId: 'baseline-1', status: 'passed' }), expect.any(Array)));
+    fireEvent.click(screen.getByRole('button', { name: '执行日志' }));
+    expect(await screen.findByText('复测通过，候选修复有效')).toBeVisible();
   });
 
   it('keeps flow editing available when the Agent is offline', async () => {

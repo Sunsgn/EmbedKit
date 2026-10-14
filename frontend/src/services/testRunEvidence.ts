@@ -31,6 +31,10 @@ export function normalizeTestRunRecord(value: TestRunRecord): TestRunRecord {
     logs: Array.isArray(value.logs) ? value.logs.slice(-TEST_RUN_LOG_LIMIT) : [],
     ...(stableId(value.projectRevisionId) ? { projectRevisionId: stableId(value.projectRevisionId) } : { projectRevisionId: undefined }),
     ...(stableId(value.firmwareId) ? { firmwareId: stableId(value.firmwareId) } : { firmwareId: undefined }),
+    ...(stableId(value.baselineRunId) ? { baselineRunId: stableId(value.baselineRunId) } : { baselineRunId: undefined }),
+    ...(/^[0-9a-f]{64}$/i.test(value.testDefinitionSha256 ?? '') ? { testDefinitionSha256: value.testDefinitionSha256!.toLowerCase() } : { testDefinitionSha256: undefined }),
+    inputEnvironment: value.inputEnvironment && typeof value.inputEnvironment === 'object' ? value.inputEnvironment : {},
+    secretInputCount: Number.isSafeInteger(value.secretInputCount) && Number(value.secretInputCount) >= 0 ? Number(value.secretInputCount) : 0,
     ...(Array.isArray(value.communicationSessionIds)
       ? { communicationSessionIds: [...new Set(value.communicationSessionIds.map(stableId).filter(Boolean))].slice(0, 100) }
       : {}),
@@ -59,6 +63,9 @@ export function createTestRunEvidence(
         bounded(name, 100),
         redact(item, secrets),
       ]),
+    ),
+    inputEnvironment: Object.fromEntries(
+      Object.entries(value.inputEnvironment ?? {}).map(([name, item]) => [bounded(name, 100), redact(item, secrets)]),
     ),
     steps: value.steps.map((step) => ({
       ...step,

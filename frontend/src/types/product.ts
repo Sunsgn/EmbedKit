@@ -126,6 +126,10 @@ export interface TestRunRecord {
   projectRevisionId?: string;
   firmwareId?: string;
   communicationSessionIds?: string[];
+  baselineRunId?: string;
+  testDefinitionSha256?: string;
+  inputEnvironment?: Record<string, string>;
+  secretInputCount?: number;
   device?: TestDeviceEvidence;
   firmware?: TestFirmwareEvidence;
   communications?: TestCommunicationEvidence[];

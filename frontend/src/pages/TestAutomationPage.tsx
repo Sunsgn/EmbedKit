@@ -46,6 +46,8 @@ import {
 import { listBuildAnalysisRecords } from "../services/buildAnalysisRecords";
 import { createFirmwareCatalog } from "../services/firmwareIdentity";
 import { createCommunicationSessionRecords, type ArchivedCommunicationEvidence } from "../services/communicationArchive";
+import { compareTestRuns, type RunComparisonOutcome } from "../services/testRunComparison";
+import { createConfigurationFingerprint } from "../services/configurationFingerprint";
 import type {
   TestDeviceEvidence,
   TestRunRecord,
@@ -159,6 +161,14 @@ const channelLabels: Record<Channel, string> = {
   websocket: "WebSocket",
   tcp: "TCP",
   udp: "UDP",
+};
+const comparisonLabels: Record<RunComparisonOutcome, string> = {
+  fixed: '复测通过，候选修复有效',
+  regressed: '出现回归',
+  'unchanged-pass': '持续通过',
+  'unchanged-fail': '问题仍可复现',
+  changed: '结果发生变化',
+  incomparable: '上下文不同，不能比较',
 };
 const typeLabels: Record<StepType, string> = {
   command: "发送并断言",
@@ -340,7 +350,8 @@ export default function TestAutomationPage() {
     [firmwareChoices, setFirmwareChoices] = useState<FirmwareChoice[]>(() =>
       listBuildAnalysisRecords().filter((item) => item.status === 'passed' && /^[0-9a-f]{64}$/i.test(item.sha256 ?? '')).map(item => ({ ...item, sha256: item.sha256!.toLowerCase() })),
     ),
-    [selectedFirmwareId, setSelectedFirmwareId] = useState("");
+    [selectedFirmwareId, setSelectedFirmwareId] = useState(""),
+    [baselineRunId, setBaselineRunId] = useState("");
   const logSeq = useRef(0),
     stopRequested = useRef(false),
     executingTeardown = useRef(false),
@@ -359,6 +370,12 @@ export default function TestAutomationPage() {
     selectedSuite?.cases[0];
   const selectedStep =
     selectedCase?.steps.find((item) => item.id === selectedStepId) ?? null;
+  const runComparison = useMemo(() => {
+    const current = runHistory[0], baselineId = current?.baselineRunId || baselineRunId;
+    if (!current || !baselineId || current.id === baselineId) return null;
+    const baseline = runHistory.find(item => item.id === baselineId);
+    return baseline ? compareTestRuns(baseline, current) : null;
+  }, [baselineRunId, runHistory]);
 
   useEffect(() => {
     const safeSuites = suites.map((suite) => ({
@@ -817,6 +834,9 @@ export default function TestAutomationPage() {
 
   const runCase = async () => {
     if (!selectedCase || running) return;
+    const testDefinitionSha256 = await createConfigurationFingerprint(selectedCase),
+      inputEnvironment = Object.fromEntries((selectedSuite.variables ?? []).filter(variable => !variable.secret).map(variable => [variable.name, variable.value])),
+      secretInputCount = (selectedSuite.variables ?? []).filter(variable => variable.secret).length;
     setRunning(true);
     setRunLogs([]);
     runLogsRef.current = [];
@@ -1133,6 +1153,10 @@ export default function TestAutomationPage() {
             : {}),
           communications,
           communicationSessionIds: communicationSessions.map(session => session.id),
+          ...(baselineRunId ? { baselineRunId } : {}),
+          testDefinitionSha256,
+          inputEnvironment,
+          secretInputCount,
           environment: Object.fromEntries(
             runtimeVariables.current
               .filter((variable) => !variable.secret)
@@ -2454,7 +2478,7 @@ export default function TestAutomationPage() {
               </section>
             )}
             <section className="shrink-0 rounded-xl border border-[#30363d] bg-[#0d1117] px-3 py-2">
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid gap-2 sm:grid-cols-3">
                 <div className="min-w-0 text-[10px] text-gray-500">
                   <b className="block text-[11px] text-gray-300">
                     验收对象（可选）
@@ -2481,6 +2505,13 @@ export default function TestAutomationPage() {
                         {item.fileName} · {item.sha256?.slice(0, 12)}…
                       </option>
                     ))}
+                  </select>
+                </label>
+                <label className="min-w-0 text-[10px] text-gray-500">
+                  修复复测基线
+                  <select value={baselineRunId} onChange={(event) => setBaselineRunId(event.target.value)} disabled={running} className="field">
+                    <option value="">不比较（仍可运行）</option>
+                    {runHistory.filter(item => item.suiteId === selectedSuite?.id && item.caseId === selectedCase?.id).map(item => <option key={item.id} value={item.id}>{new Date(item.startedAt).toLocaleString()} · {item.status}</option>)}
                   </select>
                 </label>
               </div>
@@ -2660,6 +2691,7 @@ export default function TestAutomationPage() {
               </div>
               {showHistory && (
                 <div className="max-h-40 space-y-1 overflow-y-auto border-b border-[#30363d] p-2 scrollbar-thin">
+                  {runComparison && <div role="status" className={`mb-2 rounded border p-2 text-[10px] ${runComparison.comparable ? runComparison.outcome === 'regressed' || runComparison.outcome === 'unchanged-fail' ? 'border-red-500/30 bg-red-500/5 text-red-200' : 'border-green-500/30 bg-green-500/5 text-green-200' : 'border-yellow-500/30 bg-yellow-500/5 text-yellow-200'}`}><div className="flex items-center gap-2"><b>{comparisonLabels[runComparison.outcome]}</b><span>耗时 {runComparison.durationDeltaMs >= 0 ? '+' : ''}{runComparison.durationDeltaMs} ms</span><span>失败项 {runComparison.failedDelta >= 0 ? '+' : ''}{runComparison.failedDelta}</span><button onClick={() => downloadText(`embedkit-comparison-${runComparison.currentRunId}.json`, JSON.stringify(runComparison, null, 2), 'application/json;charset=utf-8')} className="ml-auto text-cyan-300">导出比较</button></div>{runComparison.reasons.length > 0 && <p className="mt-1">{runComparison.reasons.join('；')}</p>}<p className="mt-1 text-gray-500">基线 {runComparison.baselineRunId} → 当前 {runComparison.currentRunId} · 变化步骤 {runComparison.steps.length}</p></div>}
                   {runHistory.length ? (
                     runHistory.map((run) => (
                       <div
