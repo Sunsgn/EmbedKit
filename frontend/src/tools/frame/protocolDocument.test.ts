@@ -18,13 +18,15 @@ describe('protocol document extraction', () => {
   it('requires explicit confirmation before producing a confirmed versioned model', () => {
     const candidate = extractProtocolDefinition('帧头=5A A5\n固定负载长度：4 字节\n命令宽度：1 字节\n无校验', 'protocol.txt');
     const confirmed = confirmProtocolDefinition(candidate, '温控器协议', candidate.frame);
-    expect(confirmed).toMatchObject({ schema: 'embedkit.protocol-definition', version: 1, status: 'confirmed', name: '温控器协议', frame: { header: '5A A5', includeLength: false, fixedPayloadLength: 4 } });
+    expect(confirmed).toMatchObject({ schema: 'embedkit.protocol-definition', version: 2, status: 'confirmed', name: '温控器协议', frame: { header: '5A A5', includeLength: false, fixedPayloadLength: 4 } });
     expect(normalizeProtocolDefinition({ ...confirmed, frame: { ...confirmed.frame, header: '' } })).toBeNull();
   });
 
   it('imports only compatible versioned JSON definitions', () => {
     const confirmed = confirmProtocolDefinition(extractProtocolDefinition('帧头：AA 55', 'a.txt'), 'A', { header: 'AA 55', commandBytes: 1, includeLength: true, checksum: 'sum8' });
     expect(parseProtocolDocument(JSON.stringify(confirmed), 'a.json').id).toBe(confirmed.id);
+    const legacy = { ...confirmed, version: 1 }; delete (legacy as Partial<typeof legacy>).framework;
+    expect(parseProtocolDocument(JSON.stringify(legacy), 'legacy.json')).toMatchObject({ version: 2, framework: { messages: [], frameSegments: [], confidence: 0 } });
     expect(() => parseProtocolDocument('{"version":99}', 'a.json')).toThrow(/版本不受支持/);
   });
 

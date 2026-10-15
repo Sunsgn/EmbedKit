@@ -1,9 +1,10 @@
 import { formatHex, parseHexBytes } from '../../utils/embeddedTools';
 import type { FrameChecksum, FrameTemplate } from './frame';
 import { extractProtocolFields, normalizeProtocolFields, validateProtocolFields, type ProtocolFieldDefinition } from './protocolFields';
+import { extractProtocolFramework, normalizeProtocolFramework, type ProtocolFramework } from './protocolFramework';
 
 export const PROTOCOL_DEFINITION_SCHEMA = 'embedkit.protocol-definition';
-export const PROTOCOL_DEFINITION_VERSION = 1 as const;
+export const PROTOCOL_DEFINITION_VERSION = 2 as const;
 export const PROTOCOL_DOCUMENT_MAX_BYTES = 2 * 1024 * 1024;
 export const PROTOCOL_DOCUMENT_MAX_LINES = 20_000;
 
@@ -26,6 +27,7 @@ export interface ProtocolDefinition {
   status: 'candidate' | 'confirmed';
   source: { fileName: string; kind: 'text' | 'csv' | 'tsv' | 'markdown' | 'json' | 'pdf' | 'docx' | 'xlsx'; importedAt: string };
   frame: FrameTemplate;
+  framework: ProtocolFramework;
   fields: ProtocolFieldDefinition[];
   evidence: ProtocolDocumentEvidence[];
   unknowns: string[];
@@ -61,19 +63,20 @@ function numericWidth(line: string) {
 }
 
 export function normalizeProtocolDefinition(value: unknown): ProtocolDefinition | null {
-  if (!object(value) || value.schema !== PROTOCOL_DEFINITION_SCHEMA || value.version !== PROTOCOL_DEFINITION_VERSION || typeof value.id !== 'string' || typeof value.name !== 'string' || !object(value.source) || !object(value.frame)) return null;
+  if (!object(value) || value.schema !== PROTOCOL_DEFINITION_SCHEMA || (value.version !== 1 && value.version !== PROTOCOL_DEFINITION_VERSION) || typeof value.id !== 'string' || typeof value.name !== 'string' || !object(value.source) || !object(value.frame)) return null;
   const commandBytes = value.frame.commandBytes === 2 ? 2 : value.frame.commandBytes === 1 ? 1 : null;
   const checksum = checksumKinds.has(value.frame.checksum as FrameChecksum) ? value.frame.checksum as FrameChecksum : null;
   if (!commandBytes || !checksum || typeof value.frame.header !== 'string' || typeof value.frame.includeLength !== 'boolean') return null;
   let header: string; try { const bytes = parseHexBytes(value.frame.header); if (!bytes.length || bytes.length > 16) return null; header = formatHex(bytes); } catch { return null; }
   const fixedPayloadLength = Number.isSafeInteger(value.frame.fixedPayloadLength) && Number(value.frame.fixedPayloadLength) >= 0 && Number(value.frame.fixedPayloadLength) <= 65535 ? Number(value.frame.fixedPayloadLength) : 0;
   const fields = normalizeProtocolFields(value.fields); if (!fields) return null;
+  const framework = normalizeProtocolFramework(value.framework); if (!framework) return null;
   if (!Array.isArray(value.evidence) || value.evidence.length > 100 || !Array.isArray(value.unknowns) || value.unknowns.length > 20) return null;
   const allowedFields = new Set<ProtocolDocumentEvidence['field']>(['header', 'commandBytes', 'includeLength', 'fixedPayloadLength', 'checksum']), allowedConfidence = new Set<ProtocolEvidenceConfidence>(['high', 'medium', 'low']);
   const evidence = value.evidence.map(item => object(item) && allowedFields.has(item.field as ProtocolDocumentEvidence['field']) && Number.isSafeInteger(item.line) && Number(item.line) > 0 && typeof item.text === 'string' && allowedConfidence.has(item.confidence as ProtocolEvidenceConfidence) ? { field: item.field as ProtocolDocumentEvidence['field'], line: Number(item.line), text: clean(item.text, 1000), confidence: item.confidence as ProtocolEvidenceConfidence, ...(typeof item.location === 'string' ? { location: clean(item.location, 300) } : {}) } : null);
   if (evidence.some(item => item === null)) return null;
   const kind = ['text', 'csv', 'tsv', 'markdown', 'json', 'pdf', 'docx', 'xlsx'].includes(String(value.source.kind)) ? value.source.kind as ProtocolDefinition['source']['kind'] : 'text';
-  return { schema: PROTOCOL_DEFINITION_SCHEMA, version: PROTOCOL_DEFINITION_VERSION, id: clean(value.id, 200), name: clean(value.name, 200), revision: Number.isSafeInteger(value.revision) && Number(value.revision) > 0 ? Number(value.revision) : 1, status: value.status === 'confirmed' ? 'confirmed' : 'candidate', source: { fileName: clean(String(value.source.fileName ?? ''), 300), kind, importedAt: typeof value.source.importedAt === 'string' ? value.source.importedAt : new Date(0).toISOString() }, frame: { header, commandBytes, includeLength: value.frame.includeLength, checksum, fixedPayloadLength }, fields, evidence: evidence as ProtocolDocumentEvidence[], unknowns: value.unknowns.filter(item => typeof item === 'string').map(item => clean(item, 300)), confidence: typeof value.confidence === 'number' && Number.isFinite(value.confidence) ? Math.max(0, Math.min(1, value.confidence)) : 0, updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : new Date(0).toISOString() };
+  return { schema: PROTOCOL_DEFINITION_SCHEMA, version: PROTOCOL_DEFINITION_VERSION, id: clean(value.id, 200), name: clean(value.name, 200), revision: Number.isSafeInteger(value.revision) && Number(value.revision) > 0 ? Number(value.revision) : 1, status: value.status === 'confirmed' ? 'confirmed' : 'candidate', source: { fileName: clean(String(value.source.fileName ?? ''), 300), kind, importedAt: typeof value.source.importedAt === 'string' ? value.source.importedAt : new Date(0).toISOString() }, frame: { header, commandBytes, includeLength: value.frame.includeLength, checksum, fixedPayloadLength }, framework, fields, evidence: evidence as ProtocolDocumentEvidence[], unknowns: value.unknowns.filter(item => typeof item === 'string').map(item => clean(item, 300)), confidence: typeof value.confidence === 'number' && Number.isFinite(value.confidence) ? Math.max(0, Math.min(1, value.confidence)) : 0, updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : new Date(0).toISOString() };
 }
 
 export function extractProtocolDefinition(source: string, fileName = '粘贴文本'): ProtocolDefinition {
@@ -101,9 +104,10 @@ export function extractProtocolDefinition(source: string, fileName = '粘贴文�
   const unknowns = [...(!headerFound ? ['未识别帧头'] : []), ...(!commandFound ? ['未识别命令字段宽度，暂按 1 字节'] : []), ...(!lengthFound ? ['未确认长度字段语义，暂按单字节“命令+负载长度”'] : []), ...(!checksumFound ? ['未识别校验算法，暂按无校验'] : [])];
   const fields = extractProtocolFields(source);
   unknowns.push(...validateProtocolFields(fields));
+  const framework = extractProtocolFramework(source);
   const name = clean(lines.find(line => line.trim())?.replace(/^#+\s*/, '') || fileName.replace(/\.[^.]+$/, ''), 200);
   const now = new Date().toISOString();
-  return { schema: PROTOCOL_DEFINITION_SCHEMA, version: PROTOCOL_DEFINITION_VERSION, id: crypto.randomUUID(), name, revision: 1, status: 'candidate', source: { fileName: clean(fileName, 300), kind: fileKind(fileName), importedAt: now }, frame: { header: header || 'AA 55', commandBytes, includeLength, checksum, fixedPayloadLength }, fields, evidence, unknowns, confidence: Math.min(1, evidence.length / 4), updatedAt: now };
+  return { schema: PROTOCOL_DEFINITION_SCHEMA, version: PROTOCOL_DEFINITION_VERSION, id: crypto.randomUUID(), name, revision: 1, status: 'candidate', source: { fileName: clean(fileName, 300), kind: fileKind(fileName), importedAt: now }, frame: { header: header || 'AA 55', commandBytes, includeLength, checksum, fixedPayloadLength }, framework, fields, evidence, unknowns, confidence: Math.min(1, evidence.length / 4), updatedAt: now };
 }
 
 export function confirmProtocolDefinition(candidate: ProtocolDefinition, name: string, frame: FrameTemplate): ProtocolDefinition {

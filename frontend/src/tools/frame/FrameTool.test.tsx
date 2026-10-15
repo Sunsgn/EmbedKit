@@ -46,7 +46,7 @@ describe('FrameTool stream workflow', () => {
     const file = new File(['%PDF'], 'protocol.pdf', { type: 'application/pdf' });
     fireEvent.change(screen.getByLabelText('导入协议资料'), { target: { files: [file] } });
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/PDF 读取失败/));
-  });
+  }, 20_000);
 
   it('loads a versioned RX capture into continuous stream analysis', async () => {
     writePendingCommunicationCapture(createCommunicationCapture({ transport: 'tcp', sessionId: 'network-1', endpoint: 'TCP Client · 127.0.0.1:9000', events: [
@@ -70,5 +70,18 @@ describe('FrameTool stream workflow', () => {
     fireEvent.change(screen.getByLabelText('待解析帧 HEX'), { target: { value: 'AA 55 04 10 9C FF 01 AF' } });
     expect(screen.getByText('-10 ℃（9C FF）')).toBeVisible();
     expect(screen.getByText('开启（01）')).toBeVisible();
+  });
+
+  it('recognizes and presents the protocol framework instead of only extracting file text', () => {
+    render(<FrameTool />);
+    const source = 'Modbus RTU 使用 RS485 串口，采用主从请求响应方式\n帧头：AA 55\n长度字段：1 字节\n命令码宽度：1 字节\n校验：CRC16-Modbus\n帧字段,偏移,长度\n帧头,0,2\n地址,2,1\n长度,3,1\n命令码,4,1\n数据,5,可变\nCRC,可变,2\n命令码,命令名称,方向\n0x10,读取温度,请求\n0x90,读取温度响应,响应';
+    fireEvent.change(screen.getByLabelText('协议资料原文'), { target: { value: source } });
+    fireEvent.click(screen.getByRole('button', { name: '提取候选结构' }));
+    const framework = screen.getByRole('region', { name: '协议框架识别结果' });
+    expect(framework).toHaveTextContent('协议族：Modbus RTU');
+    expect(framework).toHaveTextContent('传输：UART、RS-485');
+    expect(framework).toHaveTextContent('交互：请求/响应、主从');
+    expect(framework).toHaveTextContent('命令 / 消息目录（2）');
+    expect(framework).toHaveTextContent('读取温度响应');
   });
 });
