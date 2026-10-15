@@ -31,9 +31,7 @@ import {
 } from "../services/serialAgent";
 import {
   deleteTestRun,
-  getProductSetting,
   listBuildArtifacts,
-  listDeviceProjects,
   listFirmwareIdentities,
   listTestRuns,
   saveTestRunWithCommunicationSessions,
@@ -48,11 +46,7 @@ import { createFirmwareCatalog } from "../services/firmwareIdentity";
 import { createCommunicationSessionRecords, type ArchivedCommunicationEvidence } from "../services/communicationArchive";
 import { compareTestRuns, type RunComparisonOutcome } from "../services/testRunComparison";
 import { createConfigurationFingerprint } from "../services/configurationFingerprint";
-import type {
-  TestDeviceEvidence,
-  TestRunRecord,
-  TestStepRun,
-} from "../types/product";
+import type { TestRunRecord, TestStepRun } from "../types/product";
 import { formatHex, parseHexBytes } from "../utils/embeddedTools";
 import {
   applySharedFlowChannel,
@@ -323,9 +317,6 @@ export default function TestAutomationPage() {
     [serialSelection, setSerialSelection] = useState<
       Partial<Record<"serial-a" | "serial-b", string>>
     >({});
-  const [configuredSerialPaths, setConfiguredSerialPaths] = useState<string[]>(
-    [],
-  );
   const [wsUrl, setWsUrl] = useState("ws://127.0.0.1:8080");
   const [networkConfigs, setNetworkConfigs] = useState<
     Record<"tcp" | "udp", NetworkConfig>
@@ -342,11 +333,6 @@ export default function TestAutomationPage() {
   const [runHistory, setRunHistory] = useState<TestRunRecord[]>([]),
     [showHistory, setShowHistory] = useState(false),
     [agentVersion, setAgentVersion] = useState("unknown"),
-    [activeProjectId, setActiveProjectId] = useState(""),
-    [activeDeviceId, setActiveDeviceId] = useState(""),
-    [deviceEvidence, setDeviceEvidence] = useState<TestDeviceEvidence | null>(
-      null,
-    ),
     [firmwareChoices, setFirmwareChoices] = useState<FirmwareChoice[]>(() =>
       listBuildAnalysisRecords().filter((item) => item.status === 'passed' && /^[0-9a-f]{64}$/i.test(item.sha256 ?? '')).map(item => ({ ...item, sha256: item.sha256!.toLowerCase() })),
     ),
@@ -389,61 +375,16 @@ export default function TestAutomationPage() {
   useEffect(() => {
     void Promise.all([
       listTestRuns(),
-      getProductSetting<string>("activeProjectId"),
-      getProductSetting<string>("activeDeviceId"),
       getAgentStatus().catch(() => null),
-      listDeviceProjects(),
       listBuildArtifacts(),
       listFirmwareIdentities(),
-    ]).then(([runs, projectId, deviceId, status, projects, artifacts, identities]) => {
+    ]).then(([runs, status, artifacts, identities]) => {
       setRunHistory(runs);
       const lifecycleFirmware = createFirmwareCatalog(artifacts, identities).map(item => ({ ...item, modifiedAt: item.capturedAt, analyzedAt: item.capturedAt }));
       setFirmwareChoices(current => [...lifecycleFirmware, ...current.filter(item => !lifecycleFirmware.some(saved => saved.sha256 === item.sha256 && saved.buildId === item.buildId))]);
-      setActiveProjectId(projectId ?? "");
-      setActiveDeviceId(deviceId ?? "");
       setAgentVersion(
         (status as { version?: string } | null)?.version ?? "unknown",
       );
-      const project = projects.find((item) => item.id === projectId),
-        device =
-          project?.devices.find((item) => item.id === deviceId) ??
-          project?.devices[0];
-      if (!device) return;
-      setDeviceEvidence({
-        projectName: project?.name ?? "",
-        deviceName: device.name,
-        serialNumber: device.serialNumber,
-        hardwareVersion: device.hardwareVersion,
-        firmwareVersion: device.firmwareVersion,
-      });
-      setConfiguredSerialPaths(
-        device.channels
-          .filter(
-            (item) =>
-              item.kind === "serial" && item.enabled && item.serial?.path,
-          )
-          .map((item) => item.serial!.path),
-      );
-      const websocket = device.channels.find(
-        (item) => item.kind === "websocket" && item.enabled,
-      );
-      if (websocket?.websocketUrl) setWsUrl(websocket.websocketUrl);
-      setNetworkConfigs((previous) => {
-        const next = { ...previous };
-        for (const kind of ["tcp", "udp"] as const) {
-          const channel = device.channels.find(
-            (item) => item.kind === kind && item.enabled,
-          );
-          if (channel?.network)
-            next[kind] = {
-              mode: channel.network.role,
-              host: channel.network.host,
-              port: String(channel.network.port),
-              localPort: String(channel.network.localPort),
-            };
-        }
-        return next;
-      });
     });
   }, []);
   useEffect(() => {
@@ -451,28 +392,13 @@ export default function TestAutomationPage() {
       .then((sessions) => {
         const connected = sessions.filter((item) => item.state === "connected");
         setSerialChoices(connected);
-        const preferredA = connected.find(
-            (item) =>
-              item.path.toLowerCase() ===
-              configuredSerialPaths[0]?.toLowerCase(),
-          ),
-          preferredB = connected.find(
-            (item) =>
-              item.path.toLowerCase() ===
-              configuredSerialPaths[1]?.toLowerCase(),
-          );
         setSerialSelection((previous) => ({
-          "serial-a":
-            preferredA?.id ?? previous["serial-a"] ?? connected[0]?.id,
-          "serial-b":
-            preferredB?.id ??
-            previous["serial-b"] ??
-            connected[1]?.id ??
-            connected[0]?.id,
+          "serial-a": previous["serial-a"] ?? connected[0]?.id,
+          "serial-b": previous["serial-b"] ?? connected[1]?.id ?? connected[0]?.id,
         }));
       })
       .catch(() => setSerialChoices([]));
-  }, [configuredSerialPaths]);
+  }, []);
   const addRunLog = useCallback((level: RunLog["level"], text: string) => {
     const date = new Date(),
       pad = (value: number, length = 2) => String(value).padStart(length, "0"),
@@ -1115,16 +1041,14 @@ export default function TestAutomationPage() {
       ),
       runId = crypto.randomUUID(),
       finishedAt = new Date(finished).toISOString(),
-      communicationSessions = createCommunicationSessionRecords(communicationEvidence, { runId, finishedAt, status, projectId: activeProjectId || undefined, deviceId: activeDeviceId || undefined, firmwareId: selectedFirmware?.firmwareId }),
+      communicationSessions = createCommunicationSessionRecords(communicationEvidence, { runId, finishedAt, status, firmwareId: selectedFirmware?.firmwareId }),
       secretValues = runtimeVariables.current
         .filter((variable) => variable.secret)
         .map((variable) => variable.value),
       record = createTestRunEvidence(
         {
-          schemaVersion: 2,
+          schemaVersion: 3,
           id: runId,
-          projectId: activeProjectId,
-          deviceId: activeDeviceId,
           suiteId: selectedSuite.id,
           suiteName: selectedSuite.name,
           caseId: selectedCase.id,
@@ -1136,7 +1060,6 @@ export default function TestAutomationPage() {
           passed,
           failed,
           agentVersion,
-          ...(deviceEvidence ? { device: deviceEvidence } : {}),
           ...(selectedFirmware
             ? {
                 ...(selectedFirmware.firmwareId ? { firmwareId: selectedFirmware.firmwareId } : {}),
@@ -1609,9 +1532,6 @@ export default function TestAutomationPage() {
             `${escapeMarkup(log.time)} [${escapeMarkup(log.level)}] ${escapeMarkup(log.text)}`,
         )
         .join("\n"),
-      device = run.device
-        ? `${escapeMarkup(run.device.projectName)} / ${escapeMarkup(run.device.deviceName)} · SN ${escapeMarkup(run.device.serialNumber || "未填写")} · HW ${escapeMarkup(run.device.hardwareVersion || "未填写")} · FW ${escapeMarkup(run.device.firmwareVersion || "未填写")}`
-        : "未关联设备快照",
       firmware = run.firmware
         ? `${escapeMarkup(run.firmware.artifactName)} · SHA-256 ${escapeMarkup(run.firmware.sha256)}`
         : "未关联已计算的固件指纹",
@@ -1621,7 +1541,7 @@ export default function TestAutomationPage() {
             `<li>${escapeMarkup(item.channel)} · ${escapeMarkup(item.transport)} · ${escapeMarkup(item.endpoint)} · RX ${item.rxBytes} / TX ${item.txBytes} 字节 · 归档 ${escapeMarkup(run.communicationSessionIds?.[index] ?? '未归档')} · 源会话 ${escapeMarkup(item.sessionId)}</li>`,
         )
         .join(""),
-      html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>EmbedKit 测试报告</title><style>body{font:14px sans-serif;margin:32px;color:#222}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:8px;text-align:left}th{background:#f5f5f5}.passed{color:#16803c}.failed,.error{color:#c62828}pre{white-space:pre-wrap;background:#f5f5f5;padding:12px}</style></head><body><h1>EmbedKit 真实设备测试报告</h1><p>套件：${escapeMarkup(run.suiteName)} · 流程：${escapeMarkup(run.caseName)}</p><p>设备：${device}</p><p>固件：${firmware}</p><p>Agent：${escapeMarkup(run.agentVersion)} · 开始：${escapeMarkup(new Date(run.startedAt).toLocaleString())} · 耗时：${run.durationMs} ms</p><p class="${run.status}">结果：${escapeMarkup(run.status)} · 通过 ${run.passed} · 失败 ${run.failed}</p><h2>证据说明</h2><p>设备响应来自通信会话；人工确认仅代表操作人员确认；设备、固件与端点快照只用于追溯，不单独证明测试通过。</p><h2>通信会话</h2><ul>${communications || "<li>本次流程未建立通信会话</li>"}</ul><h2>运行环境</h2><ul>${environment || "<li>无公开变量</li>"}</ul><h2>步骤</h2><table><tr><th>步骤</th><th>类型</th><th>通道</th><th>结果</th><th>耗时</th><th>证据类型</th><th>观测/失败</th></tr>${rows}</table><h2>执行日志</h2><pre>${logs}</pre></body></html>`;
+      html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>EmbedKit 测试报告</title><style>body{font:14px sans-serif;margin:32px;color:#222}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:8px;text-align:left}th{background:#f5f5f5}.passed{color:#16803c}.failed,.error{color:#c62828}pre{white-space:pre-wrap;background:#f5f5f5;padding:12px}</style></head><body><h1>EmbedKit 通信测试报告</h1><p>套件：${escapeMarkup(run.suiteName)} · 流程：${escapeMarkup(run.caseName)}</p><p>固件：${firmware}</p><p>Agent：${escapeMarkup(run.agentVersion)} · 开始：${escapeMarkup(new Date(run.startedAt).toLocaleString())} · 耗时：${run.durationMs} ms</p><p class="${run.status}">结果：${escapeMarkup(run.status)} · 通过 ${run.passed} · 失败 ${run.failed}</p><h2>证据说明</h2><p>通信响应来自实际会话；人工确认仅代表操作人员确认；固件与端点快照只用于追溯，不单独证明测试通过。</p><h2>通信会话</h2><ul>${communications || "<li>本次流程未建立通信会话</li>"}</ul><h2>运行环境</h2><ul>${environment || "<li>无公开变量</li>"}</ul><h2>步骤</h2><table><tr><th>步骤</th><th>类型</th><th>通道</th><th>结果</th><th>耗时</th><th>证据类型</th><th>观测/失败</th></tr>${rows}</table><h2>执行日志</h2><pre>${logs}</pre></body></html>`;
     downloadText(
       `embedkit-report-${run.id}.html`,
       html,
@@ -2478,17 +2398,7 @@ export default function TestAutomationPage() {
               </section>
             )}
             <section className="shrink-0 rounded-xl border border-[#30363d] bg-[#0d1117] px-3 py-2">
-              <div className="grid gap-2 sm:grid-cols-3">
-                <div className="min-w-0 text-[10px] text-gray-500">
-                  <b className="block text-[11px] text-gray-300">
-                    验收对象（可选）
-                  </b>
-                  <span className="block truncate">
-                    {deviceEvidence
-                      ? `${deviceEvidence.projectName} / ${deviceEvidence.deviceName}`
-                      : "未关联设备项目，仍可独立运行"}
-                  </span>
-                </div>
+              <div className="grid gap-2 sm:grid-cols-2">
                 <label className="min-w-0 text-[10px] text-gray-500">
                   已计算固件指纹
                   <select

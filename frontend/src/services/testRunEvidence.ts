@@ -24,8 +24,11 @@ const redact = (
   );
 
 export function normalizeTestRunRecord(value: TestRunRecord): TestRunRecord {
+  const legacy = value as TestRunRecord & { projectId?: unknown; deviceId?: unknown; device?: unknown };
+  const { projectId: _projectId, deviceId: _deviceId, device: _device, ...current } = legacy;
   return {
-    ...value,
+    ...current,
+    schemaVersion: 3,
     environment: value.environment && typeof value.environment === 'object' ? value.environment : {},
     steps: Array.isArray(value.steps) ? value.steps : [],
     logs: Array.isArray(value.logs) ? value.logs.slice(-TEST_RUN_LOG_LIMIT) : [],
@@ -57,7 +60,7 @@ export function createTestRunEvidence(
   const secrets = secretValues.filter(Boolean);
   return normalizeTestRunRecord({
     ...value,
-    schemaVersion: 2,
+    schemaVersion: 3,
     environment: Object.fromEntries(
       Object.entries(value.environment).map(([name, item]) => [
         bounded(name, 100),
@@ -120,13 +123,13 @@ export function createTestRunEvidence(
 export function createTestRunJsonReport(value: TestRunRecord) {
   const run = normalizeTestRunRecord(value);
   return {
-    schema: 'embedkit.real-device-test-report',
-    version: 2,
+    schema: 'embedkit.communication-test-report',
+    version: 3,
     generatedAt: new Date().toISOString(),
     evidenceLegend: {
       deviceResponse: '由真实通信会话接收的数据形成。',
       manualConfirmation: '由操作人员确认，不等价于设备自动响应。',
-      configuration: '设备、固件和端点快照用于追溯，不单独证明测试通过。',
+      configuration: '固件和端点快照用于追溯，不单独证明测试通过。',
     },
     run,
   };

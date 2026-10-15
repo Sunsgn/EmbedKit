@@ -3,8 +3,8 @@ import { CheckCircle2, ExternalLink, FolderDown, MonitorCog, RefreshCw, Square, 
 import { AgentClientError, getAgentStatus, hasAgentCapability } from '../services/agentClient';
 import { cancelSoftwareInstallJob, createSoftwareInstallJob, getSoftwareInstallJob, listSoftwareInstallManifests, resolveEnvironmentRequirements, scanDevelopmentSoftware } from '../services/developmentEnvironment';
 import { revokeLocalPath, selectLocalDirectory, type LocalPathSelection } from '../services/localFiles';
-import { listDeviceProjects } from '../services/productStorage';
-import type { DeviceProject } from '../types/product';
+import { listEngineeringProjects } from '../services/productStorage';
+import type { EngineeringProject } from '../types/product';
 import type { SoftwareEnvironmentScan, SoftwareInstallJob, SoftwareInstallManifest } from '../types/developmentEnvironment';
 
 const statusStyle = {
@@ -14,7 +14,7 @@ const statusStyle = {
 interface PendingInstall { manifest: SoftwareInstallManifest; selection: LocalPathSelection }
 
 export default function DevelopmentEnvironmentPage() {
-  const [projects, setProjects] = useState<DeviceProject[]>([]), [projectId, setProjectId] = useState(''), [scan, setScan] = useState<SoftwareEnvironmentScan | null>(null), [manifests, setManifests] = useState<SoftwareInstallManifest[]>([]), [installationSupported, setInstallationSupported] = useState(false), [state, setState] = useState<'loading' | 'ready' | 'offline' | 'incompatible' | 'error'>('loading'), [message, setMessage] = useState('');
+  const [projects, setProjects] = useState<EngineeringProject[]>([]), [projectId, setProjectId] = useState(''), [scan, setScan] = useState<SoftwareEnvironmentScan | null>(null), [manifests, setManifests] = useState<SoftwareInstallManifest[]>([]), [installationSupported, setInstallationSupported] = useState(false), [state, setState] = useState<'loading' | 'ready' | 'offline' | 'incompatible' | 'error'>('loading'), [message, setMessage] = useState('');
   const [pending, setPending] = useState<PendingInstall | null>(null), [acceptedLicense, setAcceptedLicense] = useState(false), [installJob, setInstallJob] = useState<SoftwareInstallJob | null>(null), [installMessage, setInstallMessage] = useState('');
   const project = projects.find(item => item.id === projectId) ?? projects[0] ?? null;
   const refresh = useCallback(async () => {
@@ -30,7 +30,7 @@ export default function DevelopmentEnvironmentPage() {
       setMessage(reason instanceof Error ? reason.message : String(reason));
     }
   }, []);
-  useEffect(() => { void listDeviceProjects().then(items => { setProjects(items); setProjectId(items[0]?.id ?? ''); }).catch(reason => setMessage(reason instanceof Error ? reason.message : String(reason))); const timer = window.setTimeout(() => void refresh(), 0); return () => clearTimeout(timer); }, [refresh]);
+  useEffect(() => { void listEngineeringProjects().then(items => { setProjects(items); setProjectId(items[0]?.id ?? ''); }).catch(reason => setMessage(reason instanceof Error ? reason.message : String(reason))); const timer = window.setTimeout(() => void refresh(), 0); return () => clearTimeout(timer); }, [refresh]);
   useEffect(() => {
     if (!installJob || installJob.state !== 'running') return;
     let active = true; const timer = window.setTimeout(async () => {

@@ -10,8 +10,6 @@ import {
 
 const run = (): TestRunRecord => ({
   id: 'run-1',
-  projectId: '',
-  deviceId: '',
   suiteId: 'suite-1',
   suiteName: '联网验收',
   caseId: 'case-1',
@@ -76,7 +74,7 @@ describe('test run evidence', () => {
     }];
     const result = createTestRunEvidence(value, ['password-123']);
 
-    expect(result.schemaVersion).toBe(2);
+    expect(result.schemaVersion).toBe(3);
     expect(result.logs).toHaveLength(TEST_RUN_LOG_LIMIT);
     expect(JSON.stringify(result)).not.toContain('password-123');
     expect((result.steps[0].evidence?.observed ?? '').length).toBeLessThanOrEqual(
@@ -85,11 +83,12 @@ describe('test run evidence', () => {
   });
 
   it('keeps legacy records readable without inventing associations', () => {
-    const legacy = run();
-    const result = normalizeTestRunRecord(legacy);
+    const result = normalizeTestRunRecord({ ...run(), projectId: 'legacy-project', deviceId: 'legacy-device', device: { name: 'legacy' } } as unknown as TestRunRecord);
 
-    expect(result.schemaVersion).toBeUndefined();
-    expect(result.device).toBeUndefined();
+    expect(result.schemaVersion).toBe(3);
+    expect(result).not.toHaveProperty('projectId');
+    expect(result).not.toHaveProperty('deviceId');
+    expect(result).not.toHaveProperty('device');
     expect(result.firmware).toBeUndefined();
     expect(result.communications).toBeUndefined();
   });
@@ -97,7 +96,7 @@ describe('test run evidence', () => {
   it('labels automatic, manual, and configuration evidence in JSON reports', () => {
     const report = createTestRunJsonReport(run());
 
-    expect(report.schema).toBe('embedkit.real-device-test-report');
+    expect(report.schema).toBe('embedkit.communication-test-report');
     expect(report.evidenceLegend.manualConfirmation).toContain('不等价');
   });
 

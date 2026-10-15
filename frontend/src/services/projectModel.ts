@@ -1,6 +1,6 @@
 import {
-  DEVICE_PROJECT_SCHEMA_VERSION,
-  type DeviceProject,
+  ENGINEERING_PROJECT_SCHEMA_VERSION,
+  type EngineeringProject,
   type ProjectEnvironmentRequirement,
   type ProjectFeature,
   type ProjectFeatureSource,
@@ -53,9 +53,8 @@ function parseRequirement(value: unknown): ProjectEnvironmentRequirement | null 
   };
 }
 
-export function normalizeDeviceProject(value: unknown): DeviceProject | null {
-  if (!isObject(value) || typeof value.id !== 'string' || typeof value.name !== 'string' || !Array.isArray(value.devices) || typeof value.updatedAt !== 'string') return null;
-  if (value.devices.length > 500) return null;
+export function normalizeEngineeringProject(value: unknown): EngineeringProject | null {
+  if (!isObject(value) || typeof value.id !== 'string' || typeof value.name !== 'string' || typeof value.updatedAt !== 'string') return null;
   const rawFeatures = value.features ?? [];
   const rawRequirements = value.environmentRequirements ?? [];
   if (!Array.isArray(rawFeatures) || rawFeatures.length > PROJECT_FEATURE_LIMIT || !Array.isArray(rawRequirements) || rawRequirements.length > PROJECT_ENVIRONMENT_REQUIREMENT_LIMIT) return null;
@@ -63,8 +62,8 @@ export function normalizeDeviceProject(value: unknown): DeviceProject | null {
   const environmentRequirements = rawRequirements.map(parseRequirement);
   if (features.some(item => item === null) || environmentRequirements.some(item => item === null)) return null;
   return {
-    ...(value as unknown as DeviceProject),
-    schemaVersion: DEVICE_PROJECT_SCHEMA_VERSION,
+    schemaVersion: ENGINEERING_PROJECT_SCHEMA_VERSION,
+    id: value.id,
     name: text(value.name, 300),
     productModel: text(value.productModel, 300),
     chipModel: text(value.chipModel, 300),
@@ -74,6 +73,7 @@ export function normalizeDeviceProject(value: unknown): DeviceProject | null {
     environmentRequirements: environmentRequirements as ProjectEnvironmentRequirement[],
     resourceLinks: textList(value.resourceLinks, 500),
     createdAt: typeof value.createdAt === 'string' ? value.createdAt : value.updatedAt,
+    updatedAt: value.updatedAt,
   };
 }
 

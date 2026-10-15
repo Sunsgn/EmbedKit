@@ -4,7 +4,7 @@ import DevelopmentEnvironmentPage from './DevelopmentEnvironmentPage';
 import { AgentClientError, getAgentStatus } from '../services/agentClient';
 import { createSoftwareInstallJob, getSoftwareInstallJob, listSoftwareInstallManifests, scanDevelopmentSoftware } from '../services/developmentEnvironment';
 import { revokeLocalPath, selectLocalDirectory } from '../services/localFiles';
-import { listDeviceProjects } from '../services/productStorage';
+import { listEngineeringProjects } from '../services/productStorage';
 
 vi.mock('../services/agentClient', async importOriginal => {
   const original = await importOriginal<typeof import('../services/agentClient')>();
@@ -14,11 +14,11 @@ vi.mock('../services/developmentEnvironment', async importOriginal => {
   const original = await importOriginal<typeof import('../services/developmentEnvironment')>();
   return { ...original, scanDevelopmentSoftware: vi.fn(), listSoftwareInstallManifests: vi.fn(), createSoftwareInstallJob: vi.fn(), getSoftwareInstallJob: vi.fn(), cancelSoftwareInstallJob: vi.fn() };
 });
-vi.mock('../services/productStorage', () => ({ listDeviceProjects: vi.fn() }));
+vi.mock('../services/productStorage', () => ({ listEngineeringProjects: vi.fn() }));
 vi.mock('../services/localFiles', () => ({ selectLocalDirectory: vi.fn(), revokeLocalPath: vi.fn() }));
 
 const project = {
-  schemaVersion: 2 as const, id: 'p1', name: '控制器', productModel: '', chipModel: '', description: '', tags: [], features: [], resourceLinks: [], devices: [], createdAt: '', updatedAt: '2026-10-14T00:00:00.000Z',
+  schemaVersion: 3 as const, id: 'p1', name: '控制器', productModel: '', chipModel: '', description: '', tags: [], features: [], resourceLinks: [], createdAt: '', updatedAt: '2026-10-14T00:00:00.000Z',
   environmentRequirements: [{ id: 'r1', capabilityId: 'build.cmake', displayName: 'CMake', versionRange: '>=3.28', optional: false, source: 'user' as const, evidence: 'CMakeLists.txt' }],
 };
 const ninjaProject = { ...project, environmentRequirements: [{ ...project.environmentRequirements[0], capabilityId: 'build.ninja', displayName: 'Ninja', versionRange: '>=1.12' }] };
@@ -26,7 +26,7 @@ const manifest = { id: 'ninja-1.12.1-win32-x64', softwareId: 'build.ninja', capa
 const runningJob = { id: 'job-1', manifestId: manifest.id, softwareId: 'build.ninja', name: 'Ninja', version: '1.12.1', state: 'running' as const, progress: 10, startedAt: '', finishedAt: '', cancelRequested: false, events: [], error: '' };
 
 describe('DevelopmentEnvironmentPage', () => {
-  beforeEach(() => { vi.clearAllMocks(); vi.mocked(listDeviceProjects).mockResolvedValue([project]); vi.mocked(revokeLocalPath).mockResolvedValue({ revoked: true }); });
+  beforeEach(() => { vi.clearAllMocks(); vi.mocked(listEngineeringProjects).mockResolvedValue([project]); vi.mocked(revokeLocalPath).mockResolvedValue({ revoked: true }); });
 
   it('shows actual detected software and a satisfied project requirement', async () => {
     vi.mocked(getAgentStatus).mockResolvedValue({ available: true, name: 'Agent', version: '1', protocolVersion: 1, uptimeSeconds: 1, capabilities: ['software-environment'], serialSessions: 0, networkSessions: 0, buildJobs: 0 });
@@ -45,7 +45,7 @@ describe('DevelopmentEnvironmentPage', () => {
   });
 
   it('offers only a pinned manifest and keeps cancellation non-destructive', async () => {
-    vi.mocked(listDeviceProjects).mockResolvedValue([ninjaProject]);
+    vi.mocked(listEngineeringProjects).mockResolvedValue([ninjaProject]);
     vi.mocked(getAgentStatus).mockResolvedValue({ available: true, name: 'Agent', version: '1', protocolVersion: 1, uptimeSeconds: 1, capabilities: ['software-environment', 'software-installation'], serialSessions: 0, networkSessions: 0, buildJobs: 0 });
     vi.mocked(scanDevelopmentSoftware).mockResolvedValue({ schemaVersion: 1, platform: 'win32', architecture: 'x64', detectedAt: '', unavailable: [], installations: [] });
     vi.mocked(listSoftwareInstallManifests).mockResolvedValue([manifest]);
@@ -57,7 +57,7 @@ describe('DevelopmentEnvironmentPage', () => {
   });
 
   it('confirms installation, polls the job and rescans after verification', async () => {
-    vi.mocked(listDeviceProjects).mockResolvedValue([ninjaProject]);
+    vi.mocked(listEngineeringProjects).mockResolvedValue([ninjaProject]);
     vi.mocked(getAgentStatus).mockResolvedValue({ available: true, name: 'Agent', version: '1', protocolVersion: 1, uptimeSeconds: 1, capabilities: ['software-environment', 'software-installation'], serialSessions: 0, networkSessions: 0, buildJobs: 0 });
     vi.mocked(scanDevelopmentSoftware).mockResolvedValue({ schemaVersion: 1, platform: 'win32', architecture: 'x64', detectedAt: '', unavailable: [], installations: [] });
     vi.mocked(listSoftwareInstallManifests).mockResolvedValue([manifest]);
@@ -74,7 +74,7 @@ describe('DevelopmentEnvironmentPage', () => {
   });
 
   it('retains the verified Agent error when an installation fails', async () => {
-    vi.mocked(listDeviceProjects).mockResolvedValue([ninjaProject]);
+    vi.mocked(listEngineeringProjects).mockResolvedValue([ninjaProject]);
     vi.mocked(getAgentStatus).mockResolvedValue({ available: true, name: 'Agent', version: '1', protocolVersion: 1, uptimeSeconds: 1, capabilities: ['software-environment', 'software-installation'], serialSessions: 0, networkSessions: 0, buildJobs: 0 });
     vi.mocked(scanDevelopmentSoftware).mockResolvedValue({ schemaVersion: 1, platform: 'win32', architecture: 'x64', detectedAt: '', unavailable: [], installations: [] });
     vi.mocked(listSoftwareInstallManifests).mockResolvedValue([manifest]);
@@ -89,7 +89,7 @@ describe('DevelopmentEnvironmentPage', () => {
   });
 
   it('shows an Agent upgrade boundary when installation is unsupported', async () => {
-    vi.mocked(listDeviceProjects).mockResolvedValue([ninjaProject]);
+    vi.mocked(listEngineeringProjects).mockResolvedValue([ninjaProject]);
     vi.mocked(getAgentStatus).mockResolvedValue({ available: true, name: 'Agent', version: '1', protocolVersion: 1, uptimeSeconds: 1, capabilities: ['software-environment'], serialSessions: 0, networkSessions: 0, buildJobs: 0 });
     vi.mocked(scanDevelopmentSoftware).mockResolvedValue({ schemaVersion: 1, platform: 'win32', architecture: 'x64', detectedAt: '', unavailable: [], installations: [] });
     render(<DevelopmentEnvironmentPage />);

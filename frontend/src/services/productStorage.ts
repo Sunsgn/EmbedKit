@@ -1,24 +1,22 @@
-import type { DeviceProject, TestRunRecord } from '../types/product';
+import type { EngineeringProject, TestRunRecord } from '../types/product';
 import type { BuildArtifact, CommunicationSession, FirmwareIdentity, ProjectRevision } from '../types/lifecycle';
 import { normalizeLifecycleRecords, parseBuildArtifact, parseCommunicationSession, parseFirmwareIdentity, parseProjectRevision } from './lifecycleModel';
 import { normalizeTestRunRecord } from './testRunEvidence';
-import { normalizeDeviceProject } from './projectModel';
+import { normalizeEngineeringProject } from './projectModel';
 
 const DATABASE = 'embedkit-product';
-const VERSION = 2;
+const VERSION = 3;
 const PROJECTS = 'projects';
 const RUNS = 'test-runs';
-const SETTINGS = 'settings';
+const LEGACY_SETTINGS = 'settings';
 const PROJECT_REVISIONS = 'project-revisions';
 const BUILD_ARTIFACTS = 'build-artifacts';
 const FIRMWARE_IDENTITIES = 'firmware-identities';
 const COMMUNICATION_SESSIONS = 'communication-sessions';
-const PORTABLE_SETTINGS = new Set(['activeProjectId', 'activeDeviceId']);
 
 export interface ProductDataSnapshot {
-  projects: DeviceProject[];
+  projects: EngineeringProject[];
   runs: TestRunRecord[];
-  settings: Array<{ key: string; value: unknown }>;
   projectRevisions?: ProjectRevision[];
   buildArtifacts?: BuildArtifact[];
   firmwareIdentities?: FirmwareIdentity[];
@@ -27,7 +25,7 @@ export interface ProductDataSnapshot {
 
 export function createPortableProductData(snapshot: ProductDataSnapshot): ProductDataSnapshot {
   return {
-    projects: snapshot.projects.map(normalizeDeviceProject).filter((item): item is DeviceProject => item !== null).slice(0, 500),
+    projects: snapshot.projects.map(normalizeEngineeringProject).filter((item): item is EngineeringProject => item !== null).slice(0, 500),
     runs: snapshot.runs.map(normalizeTestRunRecord).map(run => ({
       ...run,
       environment: Object.fromEntries(Object.entries(run.environment).filter(([key]) => !/(?:password|api.?key|token|credential)/i.test(key))),
@@ -37,7 +35,6 @@ export function createPortableProductData(snapshot: ProductDataSnapshot): Produc
       })),
       logs: [],
     })).sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, 5000),
-    settings: snapshot.settings.filter(item => PORTABLE_SETTINGS.has(item.key)),
     projectRevisions: normalizeLifecycleRecords(snapshot.projectRevisions, parseProjectRevision),
     buildArtifacts: normalizeLifecycleRecords(snapshot.buildArtifacts, parseBuildArtifact),
     firmwareIdentities: normalizeLifecycleRecords(snapshot.firmwareIdentities, parseFirmwareIdentity),
@@ -48,15 +45,32 @@ export function createPortableProductData(snapshot: ProductDataSnapshot): Produc
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DATABASE, VERSION);
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const database = request.result;
       if (!database.objectStoreNames.contains(PROJECTS)) database.createObjectStore(PROJECTS, { keyPath: 'id' });
-      if (!database.objectStoreNames.contains(RUNS)) { const store = database.createObjectStore(RUNS, { keyPath: 'id' }); store.createIndex('startedAt', 'startedAt'); store.createIndex('projectId', 'projectId'); }
-      if (!database.objectStoreNames.contains(SETTINGS)) database.createObjectStore(SETTINGS, { keyPath: 'key' });
+      if (!database.objectStoreNames.contains(RUNS)) { const store = database.createObjectStore(RUNS, { keyPath: 'id' }); store.createIndex('startedAt', 'startedAt'); }
       if (!database.objectStoreNames.contains(PROJECT_REVISIONS)) { const store = database.createObjectStore(PROJECT_REVISIONS, { keyPath: 'id' }); store.createIndex('projectId', 'projectId'); store.createIndex('capturedAt', 'capturedAt'); }
       if (!database.objectStoreNames.contains(BUILD_ARTIFACTS)) { const store = database.createObjectStore(BUILD_ARTIFACTS, { keyPath: 'id' }); store.createIndex('buildId', 'buildId'); store.createIndex('projectRevisionId', 'projectRevisionId'); }
       if (!database.objectStoreNames.contains(FIRMWARE_IDENTITIES)) { const store = database.createObjectStore(FIRMWARE_IDENTITIES, { keyPath: 'id' }); store.createIndex('buildArtifactId', 'buildArtifactId'); store.createIndex('sha256', 'sha256'); }
-      if (!database.objectStoreNames.contains(COMMUNICATION_SESSIONS)) { const store = database.createObjectStore(COMMUNICATION_SESSIONS, { keyPath: 'id' }); store.createIndex('startedAt', 'startedAt'); store.createIndex('deviceId', 'deviceId'); store.createIndex('firmwareId', 'firmwareId'); }
+      if (!database.objectStoreNames.contains(COMMUNICATION_SESSIONS)) { const store = database.createObjectStore(COMMUNICATION_SESSIONS, { keyPath: 'id' }); store.createIndex('startedAt', 'startedAt'); store.createIndex('firmwareId', 'firmwareId'); }
+      if (database.objectStoreNames.contains(LEGACY_SETTINGS)) database.deleteObjectStore(LEGACY_SETTINGS);
+      if (database.objectStoreNames.contains(RUNS)) { const store = request.transaction!.objectStore(RUNS); if (store.indexNames.contains('projectId')) store.deleteIndex('projectId'); }
+      if (database.objectStoreNames.contains(COMMUNICATION_SESSIONS)) { const store = request.transaction!.objectStore(COMMUNICATION_SESSIONS); if (store.indexNames.contains('deviceId')) store.deleteIndex('deviceId'); }
+      if ((event as IDBVersionChangeEvent).oldVersion < 3) {
+        const stripFields = (storeName: string, fields: string[], patch: Record<string, unknown> = {}) => {
+          if (!database.objectStoreNames.contains(storeName)) return;
+          const cursorRequest = request.transaction!.objectStore(storeName).openCursor();
+          cursorRequest.onsuccess = () => {
+            const cursor = cursorRequest.result;
+            if (!cursor) return;
+            const source = cursor.value as Record<string, unknown>, next = { ...source, ...patch };
+            fields.forEach(field => delete next[field]); cursor.update(next); cursor.continue();
+          };
+        };
+        stripFields(PROJECTS, ['devices'], { schemaVersion: 3 });
+        stripFields(RUNS, ['projectId', 'deviceId', 'device'], { schemaVersion: 3 });
+        stripFields(COMMUNICATION_SESSIONS, ['projectId', 'deviceId']);
+      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
@@ -94,9 +108,9 @@ async function remove(storeName: string, key: IDBValidKey): Promise<void> {
   });
 }
 
-export async function listDeviceProjects() { return (await readAll<DeviceProject>(PROJECTS)).map(normalizeDeviceProject).filter((item): item is DeviceProject => item !== null).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)); }
-export async function saveDeviceProject(project: DeviceProject) { const normalized = normalizeDeviceProject({ ...project, updatedAt: new Date().toISOString() }); if (!normalized) throw new Error('工程项目数据无效或超过资源上限'); await put(PROJECTS, normalized); }
-export async function deleteDeviceProject(id: string) { await remove(PROJECTS, id); }
+export async function listEngineeringProjects() { return (await readAll<EngineeringProject>(PROJECTS)).map(normalizeEngineeringProject).filter((item): item is EngineeringProject => item !== null).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)); }
+export async function saveEngineeringProject(project: EngineeringProject) { const normalized = normalizeEngineeringProject({ ...project, updatedAt: new Date().toISOString() }); if (!normalized) throw new Error('工程项目数据无效或超过资源上限'); await put(PROJECTS, normalized); }
+export async function deleteEngineeringProject(id: string) { await remove(PROJECTS, id); }
 export async function listTestRuns() { return (await readAll<TestRunRecord>(RUNS)).map(normalizeTestRunRecord).sort((a, b) => b.startedAt.localeCompare(a.startedAt)); }
 export async function saveTestRun(run: TestRunRecord) { await put(RUNS, run); }
 export async function deleteTestRun(id: string) { await remove(RUNS, id); }
@@ -136,30 +150,25 @@ export async function saveTestRunWithCommunicationSessions(runValue: TestRunReco
   });
   return run;
 }
-export async function setProductSetting<T>(key: string, value: T) { await put(SETTINGS, { key, value }); }
-export async function getProductSetting<T>(key: string): Promise<T | null> { const database = await openDatabase(); return await new Promise((resolve, reject) => { const transaction = database.transaction(SETTINGS, 'readonly'), request = transaction.objectStore(SETTINGS).get(key); request.onsuccess = () => resolve((request.result as { value?: T } | undefined)?.value ?? null); request.onerror = () => reject(request.error); transaction.oncomplete = () => database.close(); }); }
-
 export async function exportProductData(): Promise<ProductDataSnapshot> {
-  const [projects, runs, settings, projectRevisions, buildArtifacts, firmwareIdentities, communicationSessions] = await Promise.all([
-    readAll<DeviceProject>(PROJECTS),
+  const [projects, runs, projectRevisions, buildArtifacts, firmwareIdentities, communicationSessions] = await Promise.all([
+    readAll<EngineeringProject>(PROJECTS),
     readAll<TestRunRecord>(RUNS),
-    readAll<{ key: string; value: unknown }>(SETTINGS),
     readAll<ProjectRevision>(PROJECT_REVISIONS),
     readAll<BuildArtifact>(BUILD_ARTIFACTS),
     readAll<FirmwareIdentity>(FIRMWARE_IDENTITIES),
     readAll<CommunicationSession>(COMMUNICATION_SESSIONS),
   ]);
-  return createPortableProductData({ projects, runs, settings, projectRevisions, buildArtifacts, firmwareIdentities, communicationSessions });
+  return createPortableProductData({ projects, runs, projectRevisions, buildArtifacts, firmwareIdentities, communicationSessions });
 }
 
 export async function mergeProductData(snapshot: ProductDataSnapshot): Promise<void> {
   const database = await openDatabase();
   await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction([PROJECTS, RUNS, SETTINGS, PROJECT_REVISIONS, BUILD_ARTIFACTS, FIRMWARE_IDENTITIES, COMMUNICATION_SESSIONS], 'readwrite');
-    const projects = transaction.objectStore(PROJECTS), runs = transaction.objectStore(RUNS), settings = transaction.objectStore(SETTINGS);
-    snapshot.projects.map(normalizeDeviceProject).filter((item): item is DeviceProject => item !== null).forEach(project => projects.put(project));
+    const transaction = database.transaction([PROJECTS, RUNS, PROJECT_REVISIONS, BUILD_ARTIFACTS, FIRMWARE_IDENTITIES, COMMUNICATION_SESSIONS], 'readwrite');
+    const projects = transaction.objectStore(PROJECTS), runs = transaction.objectStore(RUNS);
+    snapshot.projects.map(normalizeEngineeringProject).filter((item): item is EngineeringProject => item !== null).forEach(project => projects.put(project));
     snapshot.runs.forEach(run => runs.put(normalizeTestRunRecord(run)));
-    snapshot.settings.filter(item => PORTABLE_SETTINGS.has(item.key)).forEach(item => settings.put(item));
     normalizeLifecycleRecords(snapshot.projectRevisions, parseProjectRevision).forEach(item => transaction.objectStore(PROJECT_REVISIONS).put(item));
     normalizeLifecycleRecords(snapshot.buildArtifacts, parseBuildArtifact).forEach(item => transaction.objectStore(BUILD_ARTIFACTS).put(item));
     normalizeLifecycleRecords(snapshot.firmwareIdentities, parseFirmwareIdentity).forEach(item => transaction.objectStore(FIRMWARE_IDENTITIES).put(item));

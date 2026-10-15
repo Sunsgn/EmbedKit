@@ -1,52 +1,7 @@
 import type { EvidenceReference, Finding } from './evidence';
 
 export type ChannelKind = 'serial' | 'tcp' | 'udp' | 'websocket';
-export type NetworkRole = 'client' | 'server';
-
-export interface SerialChannelOptions {
-  path: string;
-  baudRate: number;
-  dataBits: number;
-  stopBits: number;
-  parity: 'none' | 'even' | 'odd' | 'mark' | 'space';
-  flowControl: 'none' | 'hardware';
-  dtr: boolean;
-  rts: boolean;
-  frameMode: 'auto' | 'line' | 'idle' | 'raw';
-  frameGapMs: number;
-}
-
-export interface NetworkChannelOptions {
-  role: NetworkRole;
-  host: string;
-  port: number;
-  localPort: number;
-}
-
-export interface DeviceChannel {
-  id: string;
-  name: string;
-  kind: ChannelKind;
-  enabled: boolean;
-  autoConnect: boolean;
-  reconnectEnabled: boolean;
-  reconnectIntervalMs: number;
-  reconnectMaxAttempts: number;
-  serial?: SerialChannelOptions;
-  network?: NetworkChannelOptions;
-  websocketUrl?: string;
-}
-
-export interface DeviceProfile {
-  id: string;
-  name: string;
-  serialNumber: string;
-  hardwareVersion: string;
-  firmwareVersion: string;
-  channels: DeviceChannel[];
-}
-
-export const DEVICE_PROJECT_SCHEMA_VERSION = 2 as const;
+export const ENGINEERING_PROJECT_SCHEMA_VERSION = 3 as const;
 
 export type ProjectFeatureSource = 'user' | 'project-document' | 'deterministic-analysis' | 'imported' | 'external-ai';
 export type ProjectFeatureStatus = 'draft' | 'confirmed' | 'verified';
@@ -75,8 +30,8 @@ export interface ProjectEnvironmentRequirement {
   evidence: string;
 }
 
-export interface DeviceProject {
-  schemaVersion?: typeof DEVICE_PROJECT_SCHEMA_VERSION;
+export interface EngineeringProject {
+  schemaVersion?: typeof ENGINEERING_PROJECT_SCHEMA_VERSION;
   id: string;
   name: string;
   productModel: string;
@@ -86,7 +41,6 @@ export interface DeviceProject {
   features?: ProjectFeature[];
   environmentRequirements?: ProjectEnvironmentRequirement[];
   resourceLinks?: string[];
-  devices: DeviceProfile[];
   createdAt: string;
   updatedAt: string;
 }
@@ -113,14 +67,6 @@ export interface TestStepRun {
   evidenceReferences?: EvidenceReference[];
 }
 
-export interface TestDeviceEvidence {
-  projectName: string;
-  deviceName: string;
-  serialNumber: string;
-  hardwareVersion: string;
-  firmwareVersion: string;
-}
-
 export interface TestFirmwareEvidence {
   buildId: string;
   artifactName: string;
@@ -141,10 +87,8 @@ export interface TestCommunicationEvidence {
 }
 
 export interface TestRunRecord {
-  schemaVersion?: 2;
+  schemaVersion?: 3;
   id: string;
-  projectId: string;
-  deviceId: string;
   suiteId: string;
   suiteName: string;
   caseId: string;
@@ -163,7 +107,6 @@ export interface TestRunRecord {
   testDefinitionSha256?: string;
   inputEnvironment?: Record<string, string>;
   secretInputCount?: number;
-  device?: TestDeviceEvidence;
   firmware?: TestFirmwareEvidence;
   communications?: TestCommunicationEvidence[];
   evidenceReferences?: EvidenceReference[];
@@ -173,11 +116,7 @@ export interface TestRunRecord {
   logs: Array<{ time: string; level: string; text: string }>;
 }
 
-export function createDefaultSerialChannel(name = '主串口'): DeviceChannel {
-  return { id: crypto.randomUUID(), name, kind: 'serial', enabled: true, autoConnect: true, reconnectEnabled: true, reconnectIntervalMs: 500, reconnectMaxAttempts: 8, serial: { path: '', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false, frameMode: 'auto', frameGapMs: 30 } };
-}
-
-export function createDeviceProject(name = '新设备项目'): DeviceProject {
+export function createEngineeringProject(name = '新工程项目'): EngineeringProject {
   const now = new Date().toISOString();
-  return { schemaVersion: DEVICE_PROJECT_SCHEMA_VERSION, id: crypto.randomUUID(), name, productModel: '', chipModel: '', description: '', tags: [], features: [], environmentRequirements: [], resourceLinks: [], devices: [{ id: crypto.randomUUID(), name: '测试设备 1', serialNumber: '', hardwareVersion: '', firmwareVersion: '', channels: [createDefaultSerialChannel()] }], createdAt: now, updatedAt: now };
+  return { schemaVersion: ENGINEERING_PROJECT_SCHEMA_VERSION, id: crypto.randomUUID(), name, productModel: '', chipModel: '', description: '', tags: [], features: [], environmentRequirements: [], resourceLinks: [], createdAt: now, updatedAt: now };
 }

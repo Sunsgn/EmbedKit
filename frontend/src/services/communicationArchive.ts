@@ -10,8 +10,6 @@ export interface CommunicationArchiveContext {
   runId: string;
   finishedAt: string;
   status: TestRunStatus;
-  projectId?: string;
-  deviceId?: string;
   firmwareId?: string;
 }
 
@@ -28,8 +26,6 @@ export function createCommunicationSessionRecords(evidence: ArchivedCommunicatio
       endpoint: item.endpoint,
       rxBytes: item.rxBytes,
       txBytes: item.txBytes,
-      projectId: context.projectId,
-      deviceId: context.deviceId,
       firmwareId: context.firmwareId,
       evidenceIds: [],
     });

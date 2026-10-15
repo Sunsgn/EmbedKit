@@ -5,8 +5,8 @@ const evidence: ArchivedCommunicationEvidence = { channel: 'tcp', transport: 'tc
 
 describe('communication session archive', () => {
   it('creates a stable run-scoped session with optional device and firmware links', () => {
-    expect(createCommunicationSessionRecords([evidence], { runId: 'run-1', finishedAt: '2026-10-14T00:01:00.000Z', status: 'passed', projectId: 'project-1', deviceId: 'device-1', firmwareId: 'firmware-1' })).toEqual([
-      expect.objectContaining({ id: 'run-1:tcp', sourceSessionId: 'network-1', status: 'completed', projectId: 'project-1', deviceId: 'device-1', firmwareId: 'firmware-1', rxBytes: 4, txBytes: 5 }),
+    expect(createCommunicationSessionRecords([evidence], { runId: 'run-1', finishedAt: '2026-10-14T00:01:00.000Z', status: 'passed', firmwareId: 'firmware-1' })).toEqual([
+      expect.objectContaining({ id: 'run-1:tcp', sourceSessionId: 'network-1', status: 'completed', firmwareId: 'firmware-1', rxBytes: 4, txBytes: 5 }),
     ]);
   });
 

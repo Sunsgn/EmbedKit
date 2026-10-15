@@ -122,7 +122,7 @@ export function parseCommunicationSession(value: unknown): CommunicationSession 
   const endpoint = boundedString(value.endpoint, ENDPOINT_LIMIT);
   const rxBytes = byteCount(value.rxBytes), txBytes = byteCount(value.txBytes);
   if (!id || !transports.has(transport) || !sessionStatuses.has(status) || !startedAt || (status !== 'active' && !endedAt) || (endedAt && Date.parse(endedAt) < Date.parse(startedAt)) || !endpoint || rxBytes === undefined || txBytes === undefined) return null;
-  const projectId = identifier(value.projectId), deviceId = identifier(value.deviceId), firmwareId = identifier(value.firmwareId);
+  const firmwareId = identifier(value.firmwareId);
   const sourceSessionId = identifier(value.sourceSessionId);
   const agentVersion = boundedString(value.agentVersion, 100);
   const evidenceIds = Array.isArray(value.evidenceIds)
@@ -133,8 +133,6 @@ export function parseCommunicationSession(value: unknown): CommunicationSession 
     id, transport, status, startedAt, endpoint, rxBytes, txBytes, evidenceIds,
     ...(sourceSessionId ? { sourceSessionId } : {}),
     ...(endedAt ? { endedAt } : {}),
-    ...(projectId ? { projectId } : {}),
-    ...(deviceId ? { deviceId } : {}),
     ...(firmwareId ? { firmwareId } : {}),
     ...(agentVersion ? { agentVersion } : {}),
   };

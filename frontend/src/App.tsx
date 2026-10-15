@@ -5,7 +5,7 @@ import { activatePwaUpdate, subscribePwaUpdate } from './services/pwa';
 import AppErrorBoundary from './components/AppErrorBoundary';
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
-const DeviceProjectsPage = lazy(() => import('./pages/DeviceProjectsPage'));
+const EngineeringProjectsPage = lazy(() => import('./pages/EngineeringProjectsPage'));
 const EditorPage = lazy(() => import('./pages/EditorPage'));
 const CommunicationPage = lazy(() => import('./pages/CommunicationPage'));
 const TestAutomationPage = lazy(() => import('./pages/TestAutomationPage'));
@@ -30,7 +30,7 @@ const navSections: Array<{ title: string; items: NavItem[] }> = [
     title: '开发工作区',
     items: [
       { icon: Gauge, label: '工作台', path: '/' },
-      { icon: HardDrive, label: '工程中心', path: '/devices' },
+      { icon: HardDrive, label: '工程中心', path: '/engineering', aliases: ['/devices'] },
       { icon: MonitorCog, label: '开发环境', path: '/environment' },
       { icon: Code2, label: '工程分析', path: '/projects', aliases: ['/editor'] },
       { icon: Radio, label: '通信调试', path: '/communication', aliases: ['/serial'] },
@@ -100,7 +100,8 @@ function AppShell() {
       {updateAvailable && <div className="flex shrink-0 items-center justify-center gap-2 border-b border-blue-500/20 bg-blue-500/10 px-3 py-1.5 text-[10px] text-blue-300">发现新版本<button onClick={activatePwaUpdate} className="flex items-center gap-1 rounded border border-blue-500/30 px-2 py-0.5"><RefreshCw size={10} />更新并重载</button></div>}
       <div className="min-h-0 flex-1 overflow-hidden"><AppErrorBoundary resetKey={location.pathname} onHome={() => navigate('/')}><Suspense fallback={<LoadingPage />}><Routes>
         <Route path="/" element={<DashboardPage />} />
-        <Route path="/devices" element={<DeviceProjectsPage />} />
+        <Route path="/engineering" element={<EngineeringProjectsPage />} />
+        <Route path="/devices" element={<Navigate to="/engineering" replace />} />
         <Route path="/environment" element={<DevelopmentEnvironmentPage />} />
         <Route path="/projects" element={<EditorPage />} />
         <Route path="/editor" element={<Navigate to="/projects" replace />} />

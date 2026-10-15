@@ -3,18 +3,18 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import DashboardPage from './DashboardPage';
 import { AgentClientError, getAgentStatus } from '../services/agentClient';
-import { listDeviceProjects, listTestRuns } from '../services/productStorage';
+import { listEngineeringProjects, listTestRuns } from '../services/productStorage';
 
 vi.mock('../services/agentClient', async importOriginal => {
   const original = await importOriginal<typeof import('../services/agentClient')>();
   return { ...original, getAgentStatus: vi.fn() };
 });
-vi.mock('../services/productStorage', () => ({ listDeviceProjects: vi.fn(), listTestRuns: vi.fn() }));
+vi.mock('../services/productStorage', () => ({ listEngineeringProjects: vi.fn(), listTestRuns: vi.fn() }));
 
 describe('DashboardPage Local Agent status', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(listDeviceProjects).mockResolvedValue([]);
+    vi.mocked(listEngineeringProjects).mockResolvedValue([]);
     vi.mocked(listTestRuns).mockResolvedValue([]);
   });
 

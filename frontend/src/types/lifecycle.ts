@@ -58,8 +58,6 @@ export interface CommunicationSession {
   endpoint: string;
   rxBytes: number;
   txBytes: number;
-  projectId?: string;
-  deviceId?: string;
   firmwareId?: string;
   agentVersion?: string;
   evidenceIds: string[];

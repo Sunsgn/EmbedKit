@@ -14,7 +14,7 @@ export interface TestRunComparison {
   passedDelta: number;
   failedDelta: number;
   steps: Array<{ id: string; name: string; baseline: string; current: string; durationDeltaMs?: number }>;
-  context: { suiteId: string; caseId: string; deviceId: string; firmwareIdentity: string };
+  context: { suiteId: string; caseId: string; firmwareIdentity: string };
 }
 
 const firmwareIdentity = (run: TestRunRecord) => run.firmware?.sha256?.toLowerCase() || run.firmwareId || '';
@@ -30,8 +30,6 @@ export function compareTestRuns(baseline: TestRunRecord, current: TestRunRecord)
   if ((baseline.secretInputCount ?? 0) > 0 || (current.secretInputCount ?? 0) > 0) reasons.push('存在未记录的秘密输入，无法证明输入相同');
   if (communicationContext(baseline) !== communicationContext(current)) reasons.push('通信通道或端点配置不同');
   if (baseline.agentVersion !== current.agentVersion) reasons.push('Local Agent 版本不同');
-  if (!baseline.deviceId || !current.deviceId) reasons.push('缺少设备身份，无法证明使用同一设备');
-  else if (baseline.deviceId !== current.deviceId) reasons.push('设备身份不同');
   const baselineFirmware = firmwareIdentity(baseline), currentFirmware = firmwareIdentity(current);
   if (!baselineFirmware || !currentFirmware) reasons.push('缺少固件身份或 SHA-256');
   else if (baselineFirmware !== currentFirmware) reasons.push('固件身份或 SHA-256 不同');
@@ -69,6 +67,6 @@ export function compareTestRuns(baseline: TestRunRecord, current: TestRunRecord)
     passedDelta: current.passed - baseline.passed,
     failedDelta: current.failed - baseline.failed,
     steps,
-    context: { suiteId: current.suiteId, caseId: current.caseId, deviceId: current.deviceId || '', firmwareIdentity: currentFirmware },
+    context: { suiteId: current.suiteId, caseId: current.caseId, firmwareIdentity: currentFirmware },
   };
 }

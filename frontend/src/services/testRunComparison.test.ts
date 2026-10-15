@@ -3,7 +3,7 @@ import type { TestRunRecord } from '../types/product';
 import { compareTestRuns } from './testRunComparison';
 
 const run = (id: string, status: TestRunRecord['status']): TestRunRecord => ({
-  schemaVersion: 2, id, projectId: 'project-1', deviceId: 'device-1', suiteId: 'suite-1', suiteName: 'suite', caseId: 'case-1', caseName: 'case', status, startedAt: '2026-10-14T00:00:00.000Z', finishedAt: '2026-10-14T00:00:01.000Z', durationMs: status === 'passed' ? 800 : 1000, passed: status === 'passed' ? 1 : 0, failed: status === 'passed' ? 0 : 1, agentVersion: '1', firmwareId: 'firmware-1', firmware: { buildId: 'build-1', artifactName: 'app.bin', artifactType: 'bin', size: 1, modifiedAt: '', sha256: 'a'.repeat(64), analyzedAt: '' }, testDefinitionSha256: 'c'.repeat(64), inputEnvironment: {}, secretInputCount: 0, environment: {}, steps: [{ id: 'step-1', name: 'ping', type: 'send', channel: 'tcp', status: status === 'passed' ? 'passed' : 'failed', startedAt: '', finishedAt: '', durationMs: status === 'passed' ? 80 : 100, retries: 0 }], logs: [],
+  schemaVersion: 3, id, suiteId: 'suite-1', suiteName: 'suite', caseId: 'case-1', caseName: 'case', status, startedAt: '2026-10-14T00:00:00.000Z', finishedAt: '2026-10-14T00:00:01.000Z', durationMs: status === 'passed' ? 800 : 1000, passed: status === 'passed' ? 1 : 0, failed: status === 'passed' ? 0 : 1, agentVersion: '1', firmwareId: 'firmware-1', firmware: { buildId: 'build-1', artifactName: 'app.bin', artifactType: 'bin', size: 1, modifiedAt: '', sha256: 'a'.repeat(64), analyzedAt: '' }, testDefinitionSha256: 'c'.repeat(64), inputEnvironment: {}, secretInputCount: 0, environment: {}, steps: [{ id: 'step-1', name: 'ping', type: 'send', channel: 'tcp', status: status === 'passed' ? 'passed' : 'failed', startedAt: '', finishedAt: '', durationMs: status === 'passed' ? 80 : 100, retries: 0 }], logs: [],
 });
 
 describe('test run comparison', () => {
@@ -17,14 +17,13 @@ describe('test run comparison', () => {
     expect(compareTestRuns(run('baseline', 'passed'), run('current', 'failed')).outcome).toBe('regressed');
   });
 
-  it('refuses to claim a fix when device, firmware, or case changed', () => {
+  it('refuses to claim a fix when firmware or case changed', () => {
     const baseline = run('baseline', 'failed'), current = run('current', 'passed');
-    current.deviceId = 'device-2';
     current.firmware = { ...current.firmware!, sha256: 'b'.repeat(64) };
     current.caseId = 'case-2';
     const result = compareTestRuns(baseline, current);
     expect(result.outcome).toBe('incomparable');
-    expect(result.reasons).toEqual(expect.arrayContaining(['测试套件或用例不同', '设备身份不同', '固件身份或 SHA-256 不同']));
+    expect(result.reasons).toEqual(expect.arrayContaining(['测试套件或用例不同', '固件身份或 SHA-256 不同']));
   });
 
   it('uses the content digest when equivalent firmware has different catalog IDs', () => {
@@ -33,14 +32,13 @@ describe('test run comparison', () => {
     expect(compareTestRuns(baseline, current).outcome).toBe('fixed');
   });
 
-  it('does not claim a fix when both runs omit device and firmware evidence', () => {
+  it('does not claim a fix when both runs omit firmware evidence', () => {
     const baseline = run('baseline', 'failed'), current = run('current', 'passed');
-    baseline.deviceId = ''; current.deviceId = '';
     baseline.firmwareId = undefined; current.firmwareId = undefined;
     baseline.firmware = undefined; current.firmware = undefined;
     const result = compareTestRuns(baseline, current);
     expect(result.outcome).toBe('incomparable');
-    expect(result.reasons).toEqual(expect.arrayContaining(['缺少设备身份，无法证明使用同一设备', '缺少固件身份或 SHA-256']));
+    expect(result.reasons).toContain('缺少固件身份或 SHA-256');
   });
 
   it('rejects changed test definitions, inputs, and unverifiable secrets', () => {

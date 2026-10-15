@@ -12,9 +12,8 @@ const backup = (): WorkspaceBackup => ({
     'embedkit.tool-preferences': { version: 1, favorites: ['crc'] },
   },
   product: {
-    projects: [{ id: 'project-1', name: '控制器', productModel: '', chipModel: '', description: '', tags: [], devices: [], createdAt: '', updatedAt: '2026-10-12T00:00:00.000Z' }],
-    runs: [{ id: 'run-1', projectId: '', deviceId: '', suiteId: '', suiteName: '', caseId: '', caseName: '验收', status: 'passed', startedAt: '2026-10-12T00:00:00.000Z', finishedAt: '', durationMs: 1, passed: 1, failed: 0, agentVersion: '1', environment: {}, steps: [], logs: [] }],
-    settings: [],
+    projects: [{ schemaVersion: 3, id: 'project-1', name: '控制器', productModel: '', chipModel: '', description: '', tags: [], createdAt: '', updatedAt: '2026-10-12T00:00:00.000Z' }],
+    runs: [{ schemaVersion: 3, id: 'run-1', suiteId: '', suiteName: '', caseId: '', caseName: '验收', status: 'passed', startedAt: '2026-10-12T00:00:00.000Z', finishedAt: '', durationMs: 1, passed: 1, failed: 0, agentVersion: '1', environment: {}, steps: [], logs: [] }],
   },
   privacy: { excluded: [], note: '' },
 });
@@ -34,7 +33,7 @@ describe('workspace backup', () => {
     localStorage.setItem('embedkit.tool-preferences', '{}');
     const value = backup();
     value.product.projectRevisions = [{ schemaVersion: 1, id: 'revision-1', projectId: 'project-1', source: 'manual', capturedAt: '2026-10-13T00:00:00.000Z', label: 'baseline' }];
-    const preview = previewWorkspaceBackup(value, { projects: value.product.projects, runs: value.product.runs, settings: [], projectRevisions: value.product.projectRevisions });
+    const preview = previewWorkspaceBackup(value, { projects: value.product.projects, runs: value.product.runs, projectRevisions: value.product.projectRevisions });
 
     expect(preview).toMatchObject({ projects: 1, projectConflicts: 1, runs: 1, runConflicts: 1, lifecycleRecords: 1, lifecycleConflicts: 1, localSettings: 2, localConflicts: 1 });
   });
@@ -44,7 +43,7 @@ describe('workspace backup', () => {
     expect(() => parseWorkspaceBackup('x'.repeat(WORKSPACE_BACKUP_MAX_BYTES + 1))).toThrow(/16 MiB/);
     const value = backup();
     value.product.projects = [{} as never];
-    expect(() => parseWorkspaceBackup(JSON.stringify(value))).toThrow(/设备项目数据/);
+    expect(() => parseWorkspaceBackup(JSON.stringify(value))).toThrow(/工程档案数据/);
   });
 
   it('removes raw test evidence from portable history summaries', () => {
@@ -68,11 +67,12 @@ describe('workspace backup', () => {
     value.product.projectRevisions = [{ schemaVersion: 1, id: 'revision-1', projectId: 'project-1', source: 'git', capturedAt: '2026-10-13T00:00:00.000Z', label: 'main', revision: 'abc123' }];
     value.product.buildArtifacts = [{ schemaVersion: 1, id: 'artifact-1', projectRevisionId: 'revision-1', buildId: 'build-1', kind: 'bin', fileName: 'firmware.bin', byteLength: 8, sha256: 'ab'.repeat(32), capturedAt: '2026-10-13T00:01:00.000Z' }];
     value.product.firmwareIdentities = [{ schemaVersion: 1, id: 'firmware-1', buildArtifactId: 'artifact-1', sha256: 'ab'.repeat(32), byteLength: 8, format: 'bin', capturedAt: '2026-10-13T00:01:00.000Z' }];
-    value.product.communicationSessions = [{ schemaVersion: 1, id: 'session-1', transport: 'serial', status: 'completed', startedAt: '2026-10-13T00:02:00.000Z', endedAt: '2026-10-13T00:03:00.000Z', endpoint: 'COM3', rxBytes: 8, txBytes: 4, deviceId: 'device-1', firmwareId: 'firmware-1', evidenceIds: [] }];
+    value.product.communicationSessions = [{ schemaVersion: 1, id: 'session-1', transport: 'serial', status: 'completed', startedAt: '2026-10-13T00:02:00.000Z', endedAt: '2026-10-13T00:03:00.000Z', endpoint: 'COM3', rxBytes: 8, txBytes: 4, firmwareId: 'firmware-1', evidenceIds: [] }];
     const parsed = parseWorkspaceBackup(JSON.stringify(value));
 
     expect(parsed.product.projectRevisions?.[0].id).toBe('revision-1');
-    expect(parsed.product.communicationSessions?.[0]).toMatchObject({ firmwareId: 'firmware-1', deviceId: 'device-1' });
+    expect(parsed.product.communicationSessions?.[0]).toMatchObject({ firmwareId: 'firmware-1' });
+    expect(parsed.product.communicationSessions?.[0]).not.toHaveProperty('deviceId');
   });
 
   it('does not include an active hardware session in a portable backup', () => {
