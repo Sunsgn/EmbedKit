@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Check, Clock3, Download, FileUp, Pause, Pencil, Play, Plus, Radio, Search, Send, Settings, Square, Terminal, Trash2, Wifi, WifiOff, X } from 'lucide-react';
+import { Check, Clock3, Download, FileUp, Pause, Pencil, Play, Plus, Radio, Search, Send, Settings, Square, Trash2, Wifi, WifiOff, X } from 'lucide-react';
 
 type Parity = 'none' | 'even' | 'odd';
 type FlowControl = 'none' | 'hardware';
@@ -97,7 +97,12 @@ export default function SerialPage() {
       const id = ++sessionSeq.current, name = portName(port, id), config = `${baud} ${dataBits}${parity === 'none' ? 'N' : parity[0].toUpperCase()}${stopBits}`;
       runtimes.current.set(id, { port, reader: null, reading: false, writing: false, buffer: [], timer: null, lastBytes: 0, lastTime: Date.now() });
       setSessions((all) => [...all, { id, name, state: 'connected', baud: +baud, config, entries: [], rx: 0, tx: 0, rate: 0, paused: 0 }]); setActiveId(id);
-      append(id, `已连接 ${name} · ${config}`, 'system'); if (port.setSignals) await port.setSignals({ dataTerminalReady: dtr, requestToSend: rts }); void read(id);
+      append(id, `已连接 ${name} · ${config}`, 'system');
+      // 串口读取不能依赖可选控制信号。部分 USB 转串口芯片会拒绝 DTR/RTS，
+      // 但收发数据本身仍然可用；先启动读取，再将信号失败降级为可见告警。
+      void read(id);
+      if (port.setSignals) try { await port.setSignals({ dataTerminalReady: dtr, requestToSend: rts }); }
+      catch (e) { append(id, `控制信号未应用，串口接收继续运行：${e instanceof Error ? e.message : String(e)}`, 'system'); }
     } catch (e) { const m = e instanceof Error ? e.message : String(e); if (!m.toLowerCase().includes('cancel')) alert(`连接失败：${m}`); }
     finally { setAdding(false); }
   }, [adding, append, baud, bufferSize, dataBits, dtr, flow, parity, read, rts, stopBits]);
@@ -186,13 +191,12 @@ export default function SerialPage() {
       <span className="hidden text-[10px] text-gray-600 xl:inline">RX {session?.rx.toLocaleString() ?? 0} · TX {session?.tx.toLocaleString() ?? 0}</span>
       {session?.id === activeId && <span className="shrink-0 rounded bg-blue-500/15 px-1.5 py-0.5 text-[9px] font-medium text-blue-300">发送目标</span>}
     </div>}
-    <div ref={side === 'left' ? output : secondaryOutput} className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-[#090d12] px-3 py-3 font-mono text-[12px] leading-5 scrollbar-thin lg:px-4 lg:text-[13px]">{paused && session && <div className="sticky top-0 z-10 mb-2 rounded border border-yellow-500/20 bg-[#2a2312] p-2 text-xs text-yellow-300">终端暂停显示；串口仍在接收。已跳过 {session.paused} 字节。</div>}{entries.map((e) => { const alert = /\b(error|fail|fault)\b|错误|失败/i.test(e.text), warning = /\b(warn|warning)\b|警告/i.test(e.text), success = /\b(ok|success|ready)\b|成功|就绪/i.test(e.text); return <div key={e.id} className="serial-terminal-row flex gap-2 rounded px-1"><span className="shrink-0 text-gray-700">{timestamps && e.timestamp}</span><span className={`w-7 shrink-0 text-[10px] font-semibold ${e.direction === 'rx' ? 'text-green-500' : e.direction === 'tx' ? 'text-blue-400' : 'text-yellow-500'}`}>{e.direction === 'system' ? 'SYS' : e.direction.toUpperCase()}</span><span className={`break-all whitespace-pre-wrap ${alert ? 'text-red-400' : warning ? 'text-yellow-300' : success ? 'text-green-300' : 'text-gray-300'}`}>{rxHex && e.bytes ? hex(e.bytes) : e.text}</span></div>; })}</div>
+    <div ref={side === 'left' ? output : secondaryOutput} data-testid={`browser-serial-terminal-${side}`} className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-[#090d12] px-3 py-3 font-mono text-[12px] leading-5 scrollbar-thin lg:px-4 lg:text-[13px]">{paused && session && <div className="sticky top-0 z-10 mb-2 rounded border border-yellow-500/20 bg-[#2a2312] p-2 text-xs text-yellow-300">终端暂停显示；串口仍在接收。已跳过 {session.paused} 字节。</div>}{entries.map((e) => { const alert = /\b(error|fail|fault)\b|错误|失败/i.test(e.text), warning = /\b(warn|warning)\b|警告/i.test(e.text), success = /\b(ok|success|ready)\b|成功|就绪/i.test(e.text); return <div key={e.id} className="serial-terminal-row flex gap-2 rounded px-1"><span className="shrink-0 text-gray-700">{timestamps && e.timestamp}</span><span className={`w-7 shrink-0 text-[10px] font-semibold ${e.direction === 'rx' ? 'text-green-500' : e.direction === 'tx' ? 'text-blue-400' : 'text-yellow-500'}`}>{e.direction === 'system' ? 'SYS' : e.direction.toUpperCase()}</span><span className={`break-all whitespace-pre-wrap ${alert ? 'text-red-400' : warning ? 'text-yellow-300' : success ? 'text-green-300' : 'text-gray-300'}`}>{rxHex && e.bytes ? hex(e.bytes) : e.text}</span></div>; })}</div>
   </div>;
 
   if (!supported) return <div className="h-full p-6"><div className="mx-auto max-w-4xl rounded-xl border border-yellow-500/30 bg-[#161b22] p-8 text-center"><WifiOff size={48} className="mx-auto mb-4 text-yellow-400" /><h1 className="text-xl text-yellow-300">当前浏览器不支持 Web Serial</h1><p className="mt-2 text-gray-400">请通过 HTTPS 或 localhost 使用桌面版 Chrome / Edge。</p></div></div>;
-  return <div className="serial-page h-full overflow-hidden p-3 lg:p-4"><div className="mx-auto flex h-full min-h-0 max-w-[1600px] flex-col">
-    <header className="mb-2 flex shrink-0 flex-wrap items-center justify-between gap-2"><div className="flex min-w-0 items-center gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-blue-500/20 bg-blue-500/10 text-blue-400"><Terminal size={18} /></span><div><h1 className="text-base font-semibold text-gray-100">串口通信调试</h1><p className="text-[11px] text-gray-600">多会话监听 · 快捷命令 · 广播发送 · 日志导出</p></div></div><span className={`rounded-full border px-3 py-1 text-[11px] ${onlineCount ? 'border-green-500/30 bg-green-500/10 text-green-400' : 'border-[#30363d] bg-[#161b22] text-gray-500'}`}><Activity size={11} className="mr-1 inline" />{onlineCount} 个端口在线</span></header>
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
+  return <div className="serial-page h-full overflow-hidden px-3 pb-3 pt-2 lg:px-4 lg:pb-4"><div className="mx-auto flex h-full min-h-0 max-w-[1600px] flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
     <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[#30363d] bg-[#0d1117] shadow-2xl shadow-black/20">
       <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_220px] lg:grid-rows-1">
       <div className="flex min-h-0 flex-col">

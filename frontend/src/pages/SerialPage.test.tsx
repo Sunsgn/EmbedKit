@@ -23,4 +23,28 @@ describe('SerialPage browser-direct mode', () => {
     await waitFor(() => expect(requestPort).toHaveBeenCalledOnce());
     expect(screen.queryByText(/Local Agent/)).not.toBeInTheDocument();
   });
+
+  it('starts receiving even when the adapter rejects DTR and RTS signals', async () => {
+    const readable = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode('device ready\r\n')); },
+    });
+    const port = {
+      readable,
+      writable: new WritableStream<Uint8Array>(),
+      open: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      getInfo: () => ({ usbVendorId: 0x1234, usbProductId: 0x5678 }),
+      setSignals: vi.fn().mockRejectedValue(new Error('signals unsupported')),
+    };
+    Object.defineProperty(navigator, 'serial', { configurable: true, value: { requestPort: vi.fn().mockResolvedValue(port), addEventListener: vi.fn(), removeEventListener: vi.fn() } });
+
+    const view = render(<SerialPage />);
+    fireEvent.click(screen.getByRole('button', { name: /添加/ }));
+
+    expect(await screen.findByText('device ready')).toBeVisible();
+    expect(screen.getByText(/控制信号未应用，串口接收继续运行/)).toBeVisible();
+    expect(screen.getByText('RX 14 B')).toBeVisible();
+    expect(screen.getByTestId('browser-serial-terminal-left')).toBeVisible();
+    view.unmount();
+  });
 });

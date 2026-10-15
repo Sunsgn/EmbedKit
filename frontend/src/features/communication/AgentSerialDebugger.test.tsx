@@ -33,6 +33,7 @@ describe('AgentSerialDebugger independent degradation', () => {
     expect(screen.getByRole('link', { name: '本地助手' })).toHaveAttribute('href', '#/agent');
     expect(screen.getByRole('button', { name: /连接/ })).toBeDisabled();
     expect(screen.getByPlaceholderText('搜索当前串口日志…')).toBeEnabled();
+    expect(screen.getByTestId('agent-serial-terminal-left')).toBeVisible();
     expect(screen.getAllByText(/快捷指令/).length).toBeGreaterThan(0);
   });
 
