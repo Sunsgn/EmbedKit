@@ -22,10 +22,12 @@ describe('workspace backup', () => {
   it('validates the schema and strips secret variables and unknown local keys', () => {
     const value = backup() as WorkspaceBackup & { local: Record<string, unknown> };
     value.local['embedkit-ai-config'] = { apiKey: 'should-not-import' };
+    value.local['embedkit.project-local-bindings'] = [{ projectId: 'project-1', path: 'D:\\private-source' }];
     const parsed = parseWorkspaceBackup(JSON.stringify(value));
 
     expect(JSON.stringify(parsed)).not.toContain('secret-value');
     expect(parsed.local).not.toHaveProperty('embedkit-ai-config');
+    expect(parsed.local).not.toHaveProperty('embedkit.project-local-bindings');
     expect(parsed.local['embedkit.automation.suites']).toEqual([{ id: 'suite-1', variables: [{ name: 'PASSWORD', value: '', secret: true }] }]);
   });
 

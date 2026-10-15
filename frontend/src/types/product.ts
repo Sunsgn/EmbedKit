@@ -1,7 +1,7 @@
 import type { EvidenceReference, Finding } from './evidence';
 
 export type ChannelKind = 'serial' | 'tcp' | 'udp' | 'websocket';
-export const ENGINEERING_PROJECT_SCHEMA_VERSION = 3 as const;
+export const ENGINEERING_PROJECT_SCHEMA_VERSION = 4 as const;
 
 export type ProjectFeatureSource = 'user' | 'project-document' | 'deterministic-analysis' | 'imported' | 'external-ai';
 export type ProjectFeatureStatus = 'draft' | 'confirmed' | 'verified';
@@ -30,8 +30,59 @@ export interface ProjectEnvironmentRequirement {
   evidence: string;
 }
 
+export type ProjectRecognitionCategory = 'projectTypes' | 'frameworks' | 'ides' | 'toolchains' | 'buildSystems' | 'chipCandidates';
+export type ProjectRecognitionConfidence = 'low' | 'medium' | 'high';
+
+export interface ProjectRecognitionEvidence {
+  category: ProjectRecognitionCategory;
+  value: string;
+  path: string;
+  confidence: ProjectRecognitionConfidence;
+  detail: string;
+}
+
+export interface ProjectRecognition {
+  projectTypes: string[];
+  frameworks: string[];
+  ides: string[];
+  toolchains: string[];
+  buildSystems: string[];
+  chipCandidates: string[];
+  confidence: number;
+  evidence: ProjectRecognitionEvidence[];
+  unknowns: string[];
+}
+
+export interface ProjectInventoryEntry {
+  path: string;
+  kind: 'file' | 'directory';
+  category?: 'source' | 'config' | 'artifact' | 'other';
+  byteLength?: number;
+}
+
+export interface ProjectInventory {
+  scannedAt: string;
+  fileCount: number;
+  directoryCount: number;
+  sourceFileCount: number;
+  configFileCount: number;
+  artifactCount: number;
+  maxFiles: number;
+  maxDepth: number;
+  truncated: boolean;
+  entries: ProjectInventoryEntry[];
+  warnings: string[];
+}
+
+export interface ProjectArtifactSummary {
+  path: string;
+  kind: 'bin' | 'hex' | 'elf' | 'map' | 'srec';
+  byteLength: number;
+  modifiedAt: string;
+}
+
 export interface EngineeringProject {
-  schemaVersion?: typeof ENGINEERING_PROJECT_SCHEMA_VERSION;
+  schemaVersion?: 3 | typeof ENGINEERING_PROJECT_SCHEMA_VERSION;
   id: string;
   name: string;
   productModel: string;
@@ -41,6 +92,14 @@ export interface EngineeringProject {
   features?: ProjectFeature[];
   environmentRequirements?: ProjectEnvironmentRequirement[];
   resourceLinks?: string[];
+  source?: { kind: 'local-directory' | 'archive' | 'manual'; displayName: string };
+  lastOpenedAt?: string;
+  favorite?: boolean;
+  group?: string;
+  pathStatus?: 'available' | 'missing' | 'unverified';
+  recognition?: ProjectRecognition;
+  inventory?: ProjectInventory;
+  artifacts?: ProjectArtifactSummary[];
   createdAt: string;
   updatedAt: string;
 }
@@ -118,5 +177,5 @@ export interface TestRunRecord {
 
 export function createEngineeringProject(name = '新工程项目'): EngineeringProject {
   const now = new Date().toISOString();
-  return { schemaVersion: ENGINEERING_PROJECT_SCHEMA_VERSION, id: crypto.randomUUID(), name, productModel: '', chipModel: '', description: '', tags: [], features: [], environmentRequirements: [], resourceLinks: [], createdAt: now, updatedAt: now };
+  return { schemaVersion: ENGINEERING_PROJECT_SCHEMA_VERSION, id: crypto.randomUUID(), name, productModel: '', chipModel: '', description: '', tags: [], features: [], environmentRequirements: [], resourceLinks: [], source: { kind: 'manual', displayName: '' }, lastOpenedAt: now, favorite: false, group: '', pathStatus: 'unverified', artifacts: [], createdAt: now, updatedAt: now };
 }

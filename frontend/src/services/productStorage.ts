@@ -5,7 +5,7 @@ import { normalizeTestRunRecord } from './testRunEvidence';
 import { normalizeEngineeringProject } from './projectModel';
 
 const DATABASE = 'embedkit-product';
-const VERSION = 3;
+const VERSION = 4;
 const PROJECTS = 'projects';
 const RUNS = 'test-runs';
 const LEGACY_SETTINGS = 'settings';
@@ -67,9 +67,17 @@ function openDatabase(): Promise<IDBDatabase> {
             fields.forEach(field => delete next[field]); cursor.update(next); cursor.continue();
           };
         };
-        stripFields(PROJECTS, ['devices'], { schemaVersion: 3 });
+        stripFields(PROJECTS, ['devices'], { schemaVersion: 4, source: { kind: 'manual', displayName: '' }, pathStatus: 'unverified' });
         stripFields(RUNS, ['projectId', 'deviceId', 'device'], { schemaVersion: 3 });
         stripFields(COMMUNICATION_SESSIONS, ['projectId', 'deviceId']);
+      }
+      if ((event as IDBVersionChangeEvent).oldVersion >= 3 && (event as IDBVersionChangeEvent).oldVersion < 4 && database.objectStoreNames.contains(PROJECTS)) {
+        const cursorRequest = request.transaction!.objectStore(PROJECTS).openCursor();
+        cursorRequest.onsuccess = () => {
+          const cursor = cursorRequest.result; if (!cursor) return;
+          const source = cursor.value as Record<string, unknown>;
+          cursor.update({ ...source, schemaVersion: 4, source: source.source ?? { kind: 'manual', displayName: '' }, pathStatus: source.pathStatus ?? 'unverified', artifacts: source.artifacts ?? [] }); cursor.continue();
+        };
       }
     };
     request.onsuccess = () => resolve(request.result);
