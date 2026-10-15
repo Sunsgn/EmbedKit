@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Sparkles,
   Send,
@@ -42,6 +42,7 @@ const quickPrompts = [
 const DEFAULT_PROVIDER: ProviderKey = 'local';
 const DEFAULT_MODEL = 'qwen2.5:7b';
 const DEFAULT_ENDPOINT = localProxyUrl('http://localhost:11434/v1/chat/completions');
+const NO_LOCAL_MODELS_MESSAGE = 'Ollama 服务已启动，但本机没有可用模型。请先运行 ollama pull qwen2.5:7b，完成后在 AI 设置中点击“刷新”。';
 
 function extractCode(content: string): string | undefined {
   const match = content.match(/```(\w+)?\n([\s\S]*?)```/);
@@ -91,6 +92,24 @@ export default function AiPage() {
     return { provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL, apiKey: '', customEndpoint: DEFAULT_ENDPOINT };
   });
 
+  const applyDetectedServers = useCallback((servers: LocalServer[]) => {
+    setDetectedServers(servers);
+    setServerLoading(false);
+    const available = servers.flatMap(server => server.models.map(model => ({ server, model })));
+    if (!available.length) {
+      setError(current => servers.length ? NO_LOCAL_MODELS_MESSAGE : current === NO_LOCAL_MODELS_MESSAGE ? null : current);
+      return;
+    }
+    setError(current => current === NO_LOCAL_MODELS_MESSAGE ? null : current);
+    setConfig(previous => {
+      const selected = available.find(item => item.model.id === previous.model) ?? available[0];
+      const endpoint = localProxyUrl(selected.server.chatUrl);
+      return previous.model === selected.model.id && previous.customEndpoint === endpoint
+        ? previous
+        : { ...previous, model: selected.model.id, customEndpoint: endpoint };
+    });
+  }, []);
+
   useEffect(() => {
     persistAiConfig(config);
   }, [config]);
@@ -98,34 +117,27 @@ export default function AiPage() {
   // Detect local servers when local provider is selected
   useEffect(() => {
     if (config.provider === 'local') {
-      detectLocalServers().then(servers => {
-        setDetectedServers(servers);
-        setServerLoading(false);
-        const firstModel = servers[0]?.models[0];
-        if (firstModel) {
-          setConfig(prev => {
-            if (prev.model && prev.model !== AI_PROVIDERS[prev.provider].defaultModel) return prev;
-            return {
-              ...prev,
-              model: firstModel.id,
-              customEndpoint: localProxyUrl(servers[0].chatUrl),
-            };
-          });
-        }
-      }).catch(() => setServerLoading(false));
+      detectLocalServers().then(applyDetectedServers).catch(() => setServerLoading(false));
     }
-  }, [config.provider]);
+  }, [applyDetectedServers, config.provider]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   const providerInfo = AI_PROVIDERS[config.provider];
+  const detectedLocalModels = detectedServers.flatMap(server => server.models);
+  const localServiceWithoutModels = config.provider === 'local' && !serverLoading && detectedServers.length > 0 && detectedLocalModels.length === 0;
   const isBuiltInNoKey = !providerInfo.requiresKey;
-  const isConfigured = isBuiltInNoKey || config.apiKey.length > 10 || (config.provider === 'custom' && (config.customEndpoint?.length || 0) > 5) || (config.provider === 'local' && (config.customEndpoint?.length || providerInfo.endpoint.length) > 5);
+  const isConfigured = !localServiceWithoutModels && (isBuiltInNoKey || config.apiKey.length > 10 || (config.provider === 'custom' && (config.customEndpoint?.length || 0) > 5) || (config.provider === 'local' && (config.customEndpoint?.length || providerInfo.endpoint.length) > 5));
 
   const handleSend = async () => {
     if (!input.trim() || isTyping) return;
+    if (localServiceWithoutModels) {
+      setError(NO_LOCAL_MODELS_MESSAGE);
+      setShowSettings(true);
+      return;
+    }
 
     const userMsg: Message = { role: 'user', content: input, timestamp: new Date() };
     setMessages((prev) => [...prev, userMsg]);
@@ -367,7 +379,7 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
             <Sparkles size={18} className="text-purple-400" />
             <span className="text-sm font-medium text-white">AI 助手</span>
             {!isConfigured && (
-              <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded-full">模拟模式</span>
+              <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded-full">{localServiceWithoutModels ? 'Ollama 无可用模型' : '未配置'}</span>
             )}
             {isConfigured && (
               <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full">
@@ -514,7 +526,8 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
             />
             <button
               onClick={handleSend}
-              disabled={!input.trim() || isTyping}
+              disabled={!input.trim() || isTyping || localServiceWithoutModels}
+              aria-label="发送消息"
               className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors disabled:opacity-50"
             >
               <Send size={16} />
@@ -678,9 +691,8 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
                       type="button"
                       onClick={async () => {
                         setServerLoading(true);
-                        const servers = await detectLocalServers();
-                        setDetectedServers(servers);
-                        setServerLoading(false);
+                        try { applyDetectedServers(await detectLocalServers()); }
+                        catch { setServerLoading(false); }
                       }}
                       className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
                     >
@@ -699,6 +711,7 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
                         <button
                           key={server.name}
                           type="button"
+                          disabled={!server.models.length}
                           onClick={() => {
                             const firstModel = server.models[0];
                             if (firstModel) {
@@ -709,13 +722,14 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
                               }));
                             }
                           }}
-                          className={`w-full text-left p-2 rounded-lg border transition-all ${config.customEndpoint?.includes(server.chatUrl) ? 'bg-blue-500/20 border-blue-500' : 'bg-[#0d1117] border-[#30363d] hover:border-gray-600'}`}
+                          className={`w-full text-left p-2 rounded-lg border transition-all disabled:cursor-not-allowed ${!server.models.length ? 'border-yellow-500/30 bg-yellow-500/10' : config.customEndpoint?.includes(server.chatUrl) ? 'bg-blue-500/20 border-blue-500' : 'bg-[#0d1117] border-[#30363d] hover:border-gray-600'}`}
                         >
                           <div className="flex items-center justify-between">
                             <span className="text-sm text-white font-medium">{server.name}</span>
                             <span className="text-xs text-gray-500">{server.models.length} 个模型</span>
                           </div>
                           <div className="text-xs text-gray-400 mt-1">{server.url}</div>
+                          {!server.models.length && <div className="mt-1.5 text-xs text-yellow-300">服务已启动，但尚未安装模型。运行：<code className="rounded bg-yellow-500/20 px-1">ollama pull qwen2.5:7b</code></div>}
                           <div className="flex flex-wrap gap-1 mt-1.5">
                             {server.models.slice(0, 3).map(m => (
                               <span key={m.id} className={`text-[10px] px-1.5 py-0.5 rounded ${config.model === m.id ? 'bg-blue-500/30 text-blue-300' : 'bg-gray-700 text-gray-400'}`}>
@@ -785,12 +799,15 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
 
             {/* Model Selection */}
             <div className="mb-4">
-              <label className="block text-sm text-gray-400 mb-2">模型</label>
+              <label htmlFor="ai-model-select" className="block text-sm text-gray-400 mb-2">模型</label>
               <select
+                id="ai-model-select"
                 value={config.model}
+                disabled={localServiceWithoutModels}
                 onChange={(e) => setConfig(prev => ({ ...prev, model: e.target.value }))}
                 className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
               >
+                {localServiceWithoutModels && <option value={config.model}>请先安装 Ollama 模型</option>}
                 {currentModels.map((m) => (
                   <option key={m.id} value={m.id}>{m.label}</option>
                 ))}
@@ -800,7 +817,7 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
             {/* Status & Actions */}
             <div className="flex items-center justify-between">
               <div className={`text-xs px-2 py-1 rounded-full ${isConfigured ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'}`}>
-                {isConfigured ? '✓ 已配置' : '未配置（使用模拟模式）'}
+                {isConfigured ? '✓ 已配置' : localServiceWithoutModels ? '缺少本地模型' : '未配置'}
               </div>
               <div className="flex gap-2">
                 {isConfigured && (
