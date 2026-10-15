@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Cable, Download, Search, Send, Trash2, Unplug, Wifi, X } from 'lucide-react';
+import { Braces, Cable, Download, Search, Send, Trash2, Unplug, Wifi, X } from 'lucide-react';
 import { formatHex, parseHexBytes } from '../../utils/embeddedTools';
 import { downloadTerminalLog, formatTerminalTime, MAX_TERMINAL_LOGS, terminalDirectionLabel, utf8ByteLength } from './terminalFormat';
+import { createCommunicationCapture, writePendingCommunicationCapture } from '../../services/communicationCapture';
 
 interface NetworkLog {
   id: number;
@@ -163,6 +164,12 @@ export default function WebSocketDebugger() {
     setPaused((value) => !value);
   };
   const exportLogs = () => downloadTerminalLog(logs, 'websocket');
+  const analyzeRx = () => {
+    try {
+      writePendingCommunicationCapture(createCommunicationCapture({ transport: 'websocket', sessionId: `websocket:${url}`, endpoint: url, events: logs }));
+      window.location.hash = '/toolbox/frame';
+    } catch (reason) { addLog('system', reason instanceof Error ? reason.message : String(reason)); }
+  };
 
   const connected = state === 'connected',
     rxLogs = logs.filter((log) => log.direction === 'rx'),
@@ -255,6 +262,9 @@ export default function WebSocketDebugger() {
                 <label>
                   <input type="checkbox" checked={autoScroll} onChange={(event) => setAutoScroll(event.target.checked)} /> 跟随
                 </label>
+                <button onClick={analyzeRx} disabled={!rxLogs.length} title="将当前会话 RX 原始数据送入协议工作台" aria-label="用协议工作台解析 RX" className="disabled:opacity-30">
+                  <Braces size={14} />
+                </button>
                 <button onClick={exportLogs} disabled={!logs.length} title="导出日志" className="disabled:opacity-30">
                   <Download size={14} />
                 </button>

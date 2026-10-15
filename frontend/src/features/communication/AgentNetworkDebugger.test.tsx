@@ -38,6 +38,7 @@ describe('AgentNetworkDebugger independent workflow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    sessionStorage.clear();
     vi.mocked(networkAgent.getNetworkStatus).mockResolvedValue({
       available: true,
       activeSessions: 0,
@@ -77,6 +78,17 @@ describe('AgentNetworkDebugger independent workflow', () => {
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
 
     await waitFor(() => expect(networkAgent.sendNetworkData).toHaveBeenCalledWith('network-1', 'PING', 'text'));
+  });
+
+  it('hands RX bytes to the protocol workspace without requiring a project', async () => {
+    vi.mocked(networkAgent.listNetworkSessions).mockResolvedValue([connectedSession]);
+    render(<AgentNetworkDebugger />);
+
+    const analyze = await screen.findByRole('button', { name: '用协议工作台解析 RX' });
+    fireEvent.click(analyze);
+    const stored = JSON.parse(sessionStorage.getItem('embedkit.communication-capture.pending') || '{}');
+    expect(stored).toMatchObject({ transport: 'tcp', sessionId: 'network-1', byteLength: 4 });
+    expect(stored.records[0].hex).toBe('50 4F 4E 47');
   });
 
   it('creates and closes an independent TCP Client session', async () => {

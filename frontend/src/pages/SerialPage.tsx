@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Clock3, Download, FileUp, Pause, Pencil, Play, Plus, Radio, Search, Send, Settings, Square, Trash2, Wifi, WifiOff, X } from 'lucide-react';
+import { Braces, Check, Clock3, Download, FileUp, Pause, Pencil, Play, Plus, Radio, Search, Send, Settings, Square, Trash2, Wifi, WifiOff, X } from 'lucide-react';
+import { COMMUNICATION_CAPTURE_MAX_BYTES, createCommunicationCapture, writePendingCommunicationCapture, type CaptureEventInput } from '../services/communicationCapture';
 
 type Parity = 'none' | 'even' | 'odd';
 type FlowControl = 'none' | 'hardware';
@@ -11,8 +12,9 @@ interface Port extends EventTarget { name?: string; path?: string; readable: Rea
 interface SerialManager extends EventTarget { requestPort(): Promise<Port> }
 interface Entry { id: number; timestamp: string; direction: Direction; text: string; bytes?: number[] }
 interface Shortcut { id: number; name: string; value: string; hex: boolean; intervalMs?: number }
-interface Session { id: number; name: string; state: State; baud: number; config: string; entries: Entry[]; rx: number; tx: number; rate: number; paused: number }
+interface Session { id: number; name: string; state: State; baud: number; config: string; entries: Entry[]; rx: number; tx: number; rate: number; paused: number; captureBytes: number }
 interface Runtime { port: Port; reader: ReadableStreamDefaultReader<Uint8Array> | null; reading: boolean; writing: boolean; buffer: number[]; timer: number | null; lastBytes: number; lastTime: number }
+interface RawCapture { events: CaptureEventInput[]; byteLength: number; truncated: boolean }
 
 const MAX_ENTRIES = 5000;
 const settingsKey = 'embedkit.serial.settings';
@@ -47,7 +49,7 @@ export default function SerialPage() {
   const [cyclingShortcutIds, setCyclingShortcutIds] = useState<number[]>([]);
   const [fileProgress, setFileProgress] = useState('');
   const supported = typeof navigator !== 'undefined' && 'serial' in navigator;
-  const runtimes = useRef(new Map<number, Runtime>()), sessionsRef = useRef<Session[]>([]), sessionSeq = useRef(0), entrySeq = useRef(0), output = useRef<HTMLDivElement>(null), secondaryOutput = useRef<HTMLDivElement>(null);
+  const runtimes = useRef(new Map<number, Runtime>()), rawCaptures = useRef(new Map<number, RawCapture>()), sessionsRef = useRef<Session[]>([]), sessionSeq = useRef(0), entrySeq = useRef(0), output = useRef<HTMLDivElement>(null), secondaryOutput = useRef<HTMLDivElement>(null);
   const pausedRef = useRef(paused), modeRef = useRef(frameMode), gapRef = useRef(30), lengthRef = useRef(8);
   const active = sessions.find((s) => s.id === activeId) ?? null, connected = active?.state === 'connected', onlineCount = sessions.filter((s) => s.state === 'connected').length, canSend = broadcast ? onlineCount > 0 : connected;
   const leftPane = splitView ? sessions.find((s) => s.id === leftPaneId) ?? null : active, rightPane = splitView ? sessions.find((s) => s.id === rightPaneId) ?? null : null;
@@ -82,7 +84,7 @@ export default function SerialPage() {
   }, [emit, flush]);
   const read = useCallback(async (id: number) => {
     const r = runtimes.current.get(id); if (!r?.port.readable || r.reading) return; r.reading = true; r.buffer = []; const reader = r.port.readable.getReader(); r.reader = reader;
-    try { while (r.reading) { const { value, done } = await reader.read(); if (done) break; if (value?.length) { update(id, (s) => ({ ...s, rx: s.rx + value.length })); process(id, value); } } }
+    try { while (r.reading) { const { value, done } = await reader.read(); if (done) break; if (value?.length) { const capture = rawCaptures.current.get(id) ?? { events: [], byteLength: 0, truncated: false }, remaining = COMMUNICATION_CAPTURE_MAX_BYTES - capture.byteLength, captured = value.slice(0, Math.max(0, remaining)); if (captured.length) { capture.events.push({ timestamp: new Date().toISOString(), direction: 'rx', hex: hex([...captured]) }); capture.byteLength += captured.length; } if (captured.length < value.length) capture.truncated = true; rawCaptures.current.set(id, capture); update(id, (s) => ({ ...s, rx: s.rx + value.length, captureBytes: capture.byteLength })); process(id, value); } } }
     catch (e) { if (r.reading) append(id, `读取失败：${e instanceof Error ? e.message : String(e)}`, 'system'); }
     finally { r.reading = false; if (r.reader === reader) r.reader = null; try { reader.releaseLock(); } catch { /* 已释放 */ } }
   }, [append, process, update]);
@@ -96,7 +98,8 @@ export default function SerialPage() {
       await port.open({ baudRate: +baud, dataBits: +dataBits, stopBits: +stopBits, parity, flowControl: flow, bufferSize: +bufferSize });
       const id = ++sessionSeq.current, name = portName(port, id), config = `${baud} ${dataBits}${parity === 'none' ? 'N' : parity[0].toUpperCase()}${stopBits}`;
       runtimes.current.set(id, { port, reader: null, reading: false, writing: false, buffer: [], timer: null, lastBytes: 0, lastTime: Date.now() });
-      setSessions((all) => [...all, { id, name, state: 'connected', baud: +baud, config, entries: [], rx: 0, tx: 0, rate: 0, paused: 0 }]); setActiveId(id);
+      rawCaptures.current.set(id, { events: [], byteLength: 0, truncated: false });
+      setSessions((all) => [...all, { id, name, state: 'connected', baud: +baud, config, entries: [], rx: 0, tx: 0, rate: 0, paused: 0, captureBytes: 0 }]); setActiveId(id);
       append(id, `已连接 ${name} · ${config}`, 'system');
       // 串口读取不能依赖可选控制信号。部分 USB 转串口芯片会拒绝 DTR/RTS，
       // 但收发数据本身仍然可用；先启动读取，再将信号失败降级为可见告警。
@@ -125,7 +128,7 @@ export default function SerialPage() {
     }
   }, [active, activeId, append, bufferSize, dataBits, flow, parity, read, stop, stopBits, update]);
   const remove = useCallback(async (id: number) => {
-    await stop(id); runtimes.current.delete(id);
+    await stop(id); runtimes.current.delete(id); rawCaptures.current.delete(id);
     const next = sessionsRef.current.filter((s) => s.id !== id); setSessions(next);
     setActiveId((current) => current === id ? next[0]?.id ?? null : current);
     if (next.length < 2) { setSplitView(false); setLeftPaneId(null); setRightPaneId(null); return; }
@@ -167,6 +170,16 @@ export default function SerialPage() {
   const secondaryShown = useMemo(() => visibleEntries(rightPane, filter, rxHex, showRx, showTx), [filter, rightPane, rxHex, showRx, showTx]);
   const save = (format: 'txt' | 'csv') => { if (!active?.entries.length) return; const content = format === 'csv' ? ['timestamp,port,direction,length,data', ...active.entries.map((e) => [e.timestamp, `"${active.name}"`, e.direction, e.bytes?.length ?? new TextEncoder().encode(e.text).length, `"${(e.bytes ? hex(e.bytes) : e.text).replace(/"/g, '""')}"`].join(','))].join('\n') : active.entries.map((e) => `[${e.timestamp}] [${active.name}] [${e.direction.toUpperCase()}] ${e.bytes && rxHex ? hex(e.bytes) : e.text}`).join('\n'); const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' })); const a = document.createElement('a'); a.href = url; a.download = `serial-${active.id}.${format}`; a.click(); URL.revokeObjectURL(url); };
   const saveRaw = () => { if (!active) return; const bytes = active.entries.filter((e) => e.direction === 'rx' && e.bytes).flatMap((e) => e.bytes!); if (!bytes.length) return; const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' })); const a = document.createElement('a'); a.href = url; a.download = `serial-${active.id}-rx.bin`; a.click(); URL.revokeObjectURL(url); };
+  const analyzeRx = () => {
+    if (!active) return;
+    try {
+      const raw = rawCaptures.current.get(active.id);
+      const capture = createCommunicationCapture({ transport: 'serial', sessionId: String(active.id), endpoint: `${active.name} · ${active.config || `${active.baud} baud`}`, events: raw?.events ?? [] });
+      if (raw?.truncated) capture.truncated = true;
+      writePendingCommunicationCapture(capture); window.location.hash = '/toolbox/frame';
+    } catch (reason) { append(active.id, reason instanceof Error ? reason.message : String(reason), 'system'); }
+  };
+  const clearActiveLog = () => { if (!activeId) return; rawCaptures.current.set(activeId, { events: [], byteLength: 0, truncated: false }); update(activeId, (session) => ({ ...session, entries: [], paused: 0, captureBytes: 0 })); };
   const addShortcut = () => { if (!input.trim() || shortcuts.length >= shortcutLimit) return; setShortcuts((all) => [...all, { id: Date.now(), name: shortcutName.trim() || input.slice(0, 16), value: input, hex: txHex, intervalMs: 1000 }]); setShortcutName(''); };
   const saveShortcutEdit = () => { if (!editingShortcut?.name.trim() || !editingShortcut.value.trim()) return; setShortcuts((all) => all.map((item) => item.id === editingShortcut.id ? { ...editingShortcut, name: editingShortcut.name.trim(), intervalMs: Math.max(100, Math.min(60000, editingShortcut.intervalMs || 1000)) } : item)); setEditingShortcut(null); };
   const renameSession = (session: Session) => { const value = window.prompt('设置端口名称，例如 COM3', session.name); if (value?.trim()) update(session.id, (item) => ({ ...item, name: value.trim() })); };
@@ -210,7 +223,7 @@ export default function SerialPage() {
       </aside>
       </div>
       <div className="shrink-0 border-t border-[#30363d] bg-[#0b1016] px-3 py-3">
-        <div className="mb-2 flex min-h-7 flex-wrap items-center gap-3 border-b border-[#30363d] pb-2 text-xs"><b className="text-gray-300">{active?.name ?? '未选择串口'}</b><span className={connected ? 'text-green-400' : 'text-gray-500'}>{connected ? '● 在线' : '● 离线'}</span><span className="text-gray-500">RX {(active?.rx ?? 0).toLocaleString()} B</span><span className="text-gray-500">TX {(active?.tx ?? 0).toLocaleString()} B</span><span className="text-gray-500">{active?.rate ?? 0} B/s</span><div className="ml-auto flex flex-wrap items-center gap-2 text-gray-400"><label><input type="checkbox" checked={showRx} onChange={(e) => setShowRx(e.target.checked)} /> RX</label><label><input type="checkbox" checked={showTx} onChange={(e) => setShowTx(e.target.checked)} /> TX</label><label><input type="checkbox" checked={rxHex} onChange={(e) => setRxHex(e.target.checked)} /> HEX</label><label><input type="checkbox" checked={timestamps} onChange={(e) => setTimestamps(e.target.checked)} /> 时间戳</label><label><input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} /> 跟随</label><button onClick={() => { setPaused((v) => !v); if (activeId) update(activeId, (s) => ({ ...s, paused: 0 })); }} title={paused ? '继续显示' : '暂停显示'}>{paused ? <Play size={14} /> : <Pause size={14} />}</button><button onClick={() => activeId && update(activeId, (s) => ({ ...s, entries: [], paused: 0 }))} title="清空"><Trash2 size={14} /></button><button onClick={() => save('txt')} title="文本日志"><Download size={14} /></button><button onClick={() => save('csv')}>CSV</button><button onClick={saveRaw}>RAW</button></div></div>
+        <div className="mb-2 flex min-h-7 flex-wrap items-center gap-3 border-b border-[#30363d] pb-2 text-xs"><b className="text-gray-300">{active?.name ?? '未选择串口'}</b><span className={connected ? 'text-green-400' : 'text-gray-500'}>{connected ? '● 在线' : '● 离线'}</span><span className="text-gray-500">RX {(active?.rx ?? 0).toLocaleString()} B</span><span className="text-gray-500">TX {(active?.tx ?? 0).toLocaleString()} B</span><span className="text-gray-500">{active?.rate ?? 0} B/s</span><div className="ml-auto flex flex-wrap items-center gap-2 text-gray-400"><label><input type="checkbox" checked={showRx} onChange={(e) => setShowRx(e.target.checked)} /> RX</label><label><input type="checkbox" checked={showTx} onChange={(e) => setShowTx(e.target.checked)} /> TX</label><label><input type="checkbox" checked={rxHex} onChange={(e) => setRxHex(e.target.checked)} /> HEX</label><label><input type="checkbox" checked={timestamps} onChange={(e) => setTimestamps(e.target.checked)} /> 时间戳</label><label><input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} /> 跟随</label><button onClick={() => { setPaused((v) => !v); if (activeId) update(activeId, (s) => ({ ...s, paused: 0 })); }} title={paused ? '继续显示' : '暂停显示'}>{paused ? <Play size={14} /> : <Pause size={14} />}</button><button onClick={analyzeRx} disabled={!active?.captureBytes} title="将当前会话 RX 原始数据送入协议工作台" aria-label="用协议工作台解析 RX"><Braces size={14} /></button><button onClick={clearActiveLog} title="清空"><Trash2 size={14} /></button><button onClick={() => save('txt')} title="文本日志"><Download size={14} /></button><button onClick={() => save('csv')}>CSV</button><button onClick={saveRaw}>RAW</button></div></div>
         {showSettings && <div className="serial-settings mb-3 grid grid-cols-2 gap-3 border-b border-[#30363d] pb-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-11">
           <label className="text-xs text-gray-500">数据位<select value={dataBits} onChange={(e) => setDataBits(e.target.value)} className="field"><option>7</option><option>8</option></select></label><label className="text-xs text-gray-500">停止位<select value={stopBits} onChange={(e) => setStopBits(e.target.value)} className="field"><option>1</option><option>2</option></select></label><label className="text-xs text-gray-500">校验<select value={parity} onChange={(e) => setParity(e.target.value as Parity)} className="field"><option value="none">None</option><option value="even">Even</option><option value="odd">Odd</option></select></label><label className="text-xs text-gray-500">流控<select value={flow} onChange={(e) => setFlow(e.target.value as FlowControl)} className="field"><option value="none">None</option><option value="hardware">RTS/CTS</option></select></label><label className="text-xs text-gray-500">接收缓冲<select value={bufferSize} onChange={(e) => setBufferSize(e.target.value)} className="field"><option value="4096">4 KB</option><option value="16384">16 KB</option><option value="65536">64 KB</option><option value="262144">256 KB</option></select></label><label className="text-xs text-gray-500">发送行尾<select value={lineEnding} onChange={(e) => setLineEnding(e.target.value)} className="field"><option value="\n">NL</option><option value="\r\n">CRLF</option><option value="\r">CR</option><option value="">None</option></select></label>
           <label className="text-xs text-gray-500">DTR<button onClick={() => { const n = !dtr; setDtr(n); void signal(n, rts); }} className="field">{dtr ? 'ON' : 'OFF'}</button></label><label className="text-xs text-gray-500">RTS<button onClick={() => { const n = !rts; setRts(n); void signal(dtr, n); }} className="field">{rts ? 'ON' : 'OFF'}</button></label><label className="text-xs text-gray-500">组帧<select value={frameMode} onChange={(e) => setFrameMode(e.target.value as FrameMode)} className="field"><option value="auto">自动（推荐）</option><option value="line">换行符</option><option value="idle">空闲间隔</option><option value="fixed">固定长度</option><option value="raw">原始读取块</option></select></label><label className="text-xs text-gray-500">间隔 ms<input type="number" value={frameGap} disabled={frameMode !== 'idle' && frameMode !== 'auto'} onChange={(e) => setFrameGap(e.target.value)} className="field" /></label><label className="text-xs text-gray-500">长度 Byte<input type="number" value={frameLength} disabled={frameMode !== 'fixed'} onChange={(e) => setFrameLength(e.target.value)} className="field" /></label>

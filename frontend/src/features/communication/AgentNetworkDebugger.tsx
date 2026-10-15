@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Plus, RefreshCw, Search, Send, Server, Trash2, Unplug, X } from 'lucide-react';
+import { Braces, Download, Plus, RefreshCw, Search, Send, Server, Trash2, Unplug, X } from 'lucide-react';
 import { closeNetworkSession, getNetworkStatus, listNetworkSessions, openNetworkSession, readNetworkSession, sendNetworkData, type NetworkAgentEvent as EventItem, type NetworkAgentSession as AgentSession, type NetworkMode as Mode, type NetworkProtocol as Protocol } from '../../services/networkAgent';
+import { createCommunicationCapture, writePendingCommunicationCapture } from '../../services/communicationCapture';
 import { downloadTerminalLog, formatTerminalTime, MAX_TERMINAL_LOGS, terminalDirectionLabel } from './terminalFormat';
 
 type Role = 'tcp-client' | 'tcp-server' | 'udp-client' | 'udp-server';
@@ -268,6 +269,13 @@ export default function AgentNetworkDebugger() {
       `${active.type}-${active.mode}`,
     );
   };
+  const analyzeRx = () => {
+    if (!active) return;
+    try {
+      writePendingCommunicationCapture(createCommunicationCapture({ transport: active.type, sessionId: active.id, endpoint: title(active), events: active.logs }));
+      window.location.hash = '/toolbox/frame';
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+  };
   const renderPane = (session: Session | null, logs: EventItem[], side: 'left' | 'right') => (
     <div onClick={() => session && setActiveId(session.id)} className={`flex min-h-0 min-w-0 flex-col overflow-hidden border ${session?.id === activeId ? 'border-purple-500/70' : 'border-transparent'} ${split && side === 'right' ? 'lg:border-l-[#30363d]' : ''}`}>
       {split && (
@@ -362,6 +370,9 @@ export default function AgentNetworkDebugger() {
                 <label>
                   <input type="checkbox" checked={autoScroll} onChange={(event) => setAutoScroll(event.target.checked)} /> 跟随
                 </label>
+                <button onClick={analyzeRx} disabled={!active?.logs.some((item) => item.direction === 'rx')} title="将当前会话 RX 原始数据送入协议工作台" aria-label="用协议工作台解析 RX">
+                  <Braces size={14} />
+                </button>
                 <button onClick={exportLogs} disabled={!active?.logs.length} title="导出日志">
                   <Download size={14} />
                 </button>

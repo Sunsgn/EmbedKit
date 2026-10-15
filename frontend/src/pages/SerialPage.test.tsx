@@ -25,6 +25,7 @@ describe('SerialPage browser-direct mode', () => {
   });
 
   it('starts receiving even when the adapter rejects DTR and RTS signals', async () => {
+    sessionStorage.clear();
     const readable = new ReadableStream<Uint8Array>({
       start(controller) { controller.enqueue(new TextEncoder().encode('device ready\r\n')); },
     });
@@ -45,6 +46,10 @@ describe('SerialPage browser-direct mode', () => {
     expect(screen.getByText(/控制信号未应用，串口接收继续运行/)).toBeVisible();
     expect(screen.getByText('RX 14 B')).toBeVisible();
     expect(screen.getByTestId('browser-serial-terminal-left')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '用协议工作台解析 RX' }));
+    const stored = JSON.parse(sessionStorage.getItem('embedkit.communication-capture.pending') || '{}');
+    expect(stored).toMatchObject({ transport: 'serial', byteLength: 14 });
+    expect(stored.records[0].hex).toBe('64 65 76 69 63 65 20 72 65 61 64 79 0D 0A');
     view.unmount();
   });
 });

@@ -17,6 +17,7 @@ vi.mock('../../services/serialAgent', () => ({
 describe('AgentSerialDebugger independent degradation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionStorage.clear();
     vi.mocked(serialAgent.listSerialPorts).mockReset();
     vi.mocked(serialAgent.listSerialSessions).mockReset();
   });
@@ -56,5 +57,19 @@ describe('AgentSerialDebugger independent degradation', () => {
     fireEvent.change(input, { target: { value: 'AT' } });
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
     await waitFor(() => expect(serialAgent.sendSerialData).toHaveBeenCalledWith('session-1', 'AT\r\n', 'text'));
+  });
+
+  it('hands real RX bytes to the protocol workspace with source context', async () => {
+    const session = { id: 'session-rx', path: 'COM7', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false, state: 'connected' as const, rxBytes: 4, txBytes: 0, openedAt: '2026-10-15T00:00:00Z', events: [{ id: 1, timestamp: '2026-10-15T00:00:01Z', direction: 'rx' as const, text: '', hex: 'AA 55 01 00', byteLength: 4 }] };
+    vi.mocked(serialAgent.listSerialPorts).mockResolvedValue([]);
+    vi.mocked(serialAgent.listSerialSessions).mockResolvedValue([session]);
+    vi.mocked(serialAgent.readSerialSession).mockImplementation(() => new Promise(() => undefined));
+    render(<AgentSerialDebugger />);
+
+    const analyze = await screen.findByRole('button', { name: '用协议工作台解析 RX' });
+    await waitFor(() => expect(analyze).toBeEnabled());
+    fireEvent.click(analyze);
+    const stored = JSON.parse(sessionStorage.getItem('embedkit.communication-capture.pending') || '{}');
+    expect(stored).toMatchObject({ transport: 'serial', sessionId: 'session-rx', endpoint: 'COM7 · 115200 8N1', byteLength: 4 });
   });
 });

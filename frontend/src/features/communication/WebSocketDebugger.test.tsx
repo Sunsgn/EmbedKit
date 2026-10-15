@@ -40,6 +40,7 @@ class FakeWebSocket {
 describe('WebSocketDebugger independent transport', () => {
   beforeEach(() => {
     FakeWebSocket.instances = [];
+    sessionStorage.clear();
     vi.stubGlobal('WebSocket', FakeWebSocket);
   });
 
@@ -95,6 +96,18 @@ describe('WebSocketDebugger independent transport', () => {
     expect(Array.from(new Uint8Array(socket.sent[0] as ArrayBuffer))).toEqual([0xde, 0xad, 0xbe, 0xef]);
     act(() => socket.receive(Uint8Array.from([1, 2, 255]).buffer));
     expect(screen.getByText('01 02 FF')).toBeVisible();
+  });
+
+  it('hands received frames to the protocol workspace', () => {
+    render(<WebSocketDebugger />);
+    fireEvent.click(screen.getByRole('button', { name: '连接' }));
+    const socket = FakeWebSocket.instances[0];
+    act(() => { socket.open(); socket.receive(Uint8Array.from([0xaa, 0x55, 0x01]).buffer); });
+
+    fireEvent.click(screen.getByRole('button', { name: '用协议工作台解析 RX' }));
+    const stored = JSON.parse(sessionStorage.getItem('embedkit.communication-capture.pending') || '{}');
+    expect(stored).toMatchObject({ transport: 'websocket', endpoint: 'ws://localhost:8080', byteLength: 3 });
+    expect(stored.records[0].hex).toBe('AA 55 01');
   });
 
   it('keeps receiving and counting while terminal display is paused', () => {
