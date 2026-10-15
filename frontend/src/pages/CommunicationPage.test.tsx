@@ -21,6 +21,8 @@ describe('CommunicationPage independent mode', () => {
   it('uses browser serial by default and keeps Local Agent as an optional enhancement', () => {
     render(<CommunicationPage />);
 
+    expect(screen.getByRole('group', { name: '串口连接方式' })).toBeVisible();
+    expect(screen.getByLabelText('串口连接说明')).toHaveAttribute('title', 'Chrome / Edge 可直接选择串口；后台会话与非 Web Serial 环境使用本地助手');
     fireEvent.click(screen.getByRole('button', { name: '本地助手增强' }));
     expect(screen.getByText('独立串口工作区')).toBeVisible();
     expect(sessionStorage.getItem('embedkit.communication.serial-backend')).toBe('agent');

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { LockKeyhole, Radio, Server, Wifi } from 'lucide-react';
+import { CircleHelp, LockKeyhole, Radio, Server, Wifi } from 'lucide-react';
 import AgentSerialDebugger from '../features/communication/AgentSerialDebugger';
 import AgentNetworkDebugger from '../features/communication/AgentNetworkDebugger';
 import WebSocketDebugger from '../features/communication/WebSocketDebugger';
@@ -33,9 +33,13 @@ export default function CommunicationPage() {
             </button>;
           })}
         </div>
-        <div className="hidden shrink-0 items-center gap-2 rounded-lg border border-[#30363d] bg-[#0d1117]/70 px-3 py-2 text-[10px] text-gray-500 xl:flex"><LockKeyhole size={12} className="text-green-500" />连接与日志仅在本机处理</div>
+        {tab === 'serial' ? <div data-testid="serial-backend-switcher" role="group" aria-label="串口连接方式" className="flex shrink-0 items-center gap-1 rounded-lg border border-[#30363d] bg-[#0d1117]/80 p-1">
+          <button type="button" onClick={() => selectSerialBackend('browser')} className={`rounded-md px-2.5 py-1.5 text-[10px] ${serialBackend === 'browser' ? 'bg-blue-500/15 text-blue-300' : 'text-gray-500 hover:text-gray-300'}`}>浏览器直连（默认）</button>
+          <button type="button" onClick={() => selectSerialBackend('agent')} className={`rounded-md px-2.5 py-1.5 text-[10px] ${serialBackend === 'agent' ? 'bg-purple-500/15 text-purple-300' : 'text-gray-500 hover:text-gray-300'}`}>本地助手增强</button>
+          <span aria-label="串口连接说明" title="Chrome / Edge 可直接选择串口；后台会话与非 Web Serial 环境使用本地助手" className="hidden px-1 text-gray-600 sm:inline-flex"><CircleHelp size={13} /></span>
+        </div> : <div className="hidden shrink-0 items-center gap-2 rounded-lg border border-[#30363d] bg-[#0d1117]/70 px-3 py-2 text-[10px] text-gray-500 xl:flex"><LockKeyhole size={12} className="text-green-500" />连接与日志仅在本机处理</div>}
       </div>
     </div>
-    <div className="min-h-0 flex-1">{tab === 'serial' ? <div className="flex h-full min-h-0 flex-col"><div className="flex shrink-0 items-center justify-center gap-1 border-b border-[#30363d]/70 bg-[#0d1117] px-3 py-1.5"><span className="mr-2 text-[10px] text-gray-600">串口连接方式</span><button type="button" onClick={() => selectSerialBackend('browser')} className={`rounded-md px-3 py-1 text-[10px] ${serialBackend === 'browser' ? 'bg-blue-500/15 text-blue-300' : 'text-gray-500 hover:text-gray-300'}`}>浏览器直连（默认）</button><button type="button" onClick={() => selectSerialBackend('agent')} className={`rounded-md px-3 py-1 text-[10px] ${serialBackend === 'agent' ? 'bg-purple-500/15 text-purple-300' : 'text-gray-500 hover:text-gray-300'}`}>本地助手增强</button><span className="ml-2 hidden text-[10px] text-gray-600 md:inline">Chrome / Edge 可直接选择串口；后台会话与非 Web Serial 环境使用本地助手</span></div><div className="min-h-0 flex-1">{serialBackend === 'browser' ? <SerialPage /> : <AgentSerialDebugger />}</div></div> : tab === 'websocket' ? <WebSocketDebugger /> : <AgentNetworkDebugger />}</div>
+    <div className="min-h-0 flex-1">{tab === 'serial' ? serialBackend === 'browser' ? <SerialPage /> : <AgentSerialDebugger /> : tab === 'websocket' ? <WebSocketDebugger /> : <AgentNetworkDebugger />}</div>
   </div>;
 }
