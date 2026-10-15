@@ -27,4 +27,11 @@ describe('protocol document extraction', () => {
     expect(parseProtocolDocument(JSON.stringify(confirmed), 'a.json').id).toBe(confirmed.id);
     expect(() => parseProtocolDocument('{"version":99}', 'a.json')).toThrow(/版本不受支持/);
   });
+
+  it('carries PDF pages and spreadsheet rows into field evidence', () => {
+    const definition = parseProtocolDocument('[[来源:PDF 第 12 页]]\n帧头：A5 5A\n[[来源:XLSX 工作表 Commands 行 8]]\n命令码宽度：2 字节', 'protocol.pdf');
+    expect(definition.source.kind).toBe('pdf');
+    expect(definition.evidence.find((item) => item.field === 'header')?.location).toBe('PDF 第 12 页');
+    expect(definition.evidence.find((item) => item.field === 'commandBytes')?.location).toBe('XLSX 工作表 Commands 行 8');
+  });
 });

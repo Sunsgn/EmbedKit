@@ -41,11 +41,11 @@ describe('FrameTool stream workflow', () => {
     expect(screen.getByText(/^已保存协议“/)).toBeVisible();
   });
 
-  it('explains the unsupported binary-document boundary instead of pretending to parse PDF', () => {
+  it('reports a damaged PDF instead of pretending extraction succeeded', async () => {
     render(<FrameTool />);
     const file = new File(['%PDF'], 'protocol.pdf', { type: 'application/pdf' });
     fireEvent.change(screen.getByLabelText('导入协议资料'), { target: { files: [file] } });
-    expect(screen.getByRole('alert')).toHaveTextContent(/不直接解析 PDF.*不会.*猜测/);
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/PDF 读取失败/));
   });
 
   it('loads a versioned RX capture into continuous stream analysis', async () => {
@@ -58,5 +58,17 @@ describe('FrameTool stream workflow', () => {
     expect(screen.getByLabelText('连续字节流 HEX')).toHaveValue('AA 55 03 10 01 02 15');
     expect(screen.getByText('识别 1 帧')).toBeVisible();
     expect(screen.getByText(/通信来源会写入 JSON 分析证据/)).toBeVisible();
+  });
+
+  it('extracts and deterministically decodes payload field tables', () => {
+    render(<FrameTool />);
+    const source = '帧头：AA 55\n长度字段：1 字节\n命令码宽度：1 字节\n校验：SUM8\n字段,偏移,长度,类型,字节序,倍率,单位,枚举\n温度,0,2,int16,小端,0.1,℃,\n状态,2,1,u8,大端,1,,0=关闭;1=开启';
+    fireEvent.change(screen.getByLabelText('协议资料原文'), { target: { value: source } });
+    fireEvent.click(screen.getByRole('button', { name: '提取候选结构' }));
+    expect(screen.getByText('温度')).toBeVisible();
+    expect(screen.getByText('状态')).toBeVisible();
+    fireEvent.change(screen.getByLabelText('待解析帧 HEX'), { target: { value: 'AA 55 04 10 9C FF 01 AF' } });
+    expect(screen.getByText('-10 ℃（9C FF）')).toBeVisible();
+    expect(screen.getByText('开启（01）')).toBeVisible();
   });
 });
