@@ -4,10 +4,10 @@ import net from 'node:net';
 import dgram from 'node:dgram';
 import { EventEmitter, once } from 'node:events';
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { authorizeBuildArtifact, configureFilePickerAdapter, configureSerialAdapter, createBuildCommand, decodeNetworkPayload, extractSoftwareVersion, hashBuildArtifact, isAllowedOrigin, parseBuildDiagnostic, receiveSerialData, startServer, validateHostAndPort, validateProxyTarget, validateSerialOptions } from './proxy.js';
+import { authorizeBuildArtifact, configureFilePickerAdapter, configureInstallManifestRegistry, configureSerialAdapter, configureSoftwareInstallerAdapter, createBuildCommand, decodeNetworkPayload, extractSoftwareVersion, hashBuildArtifact, isAllowedOrigin, parseBuildDiagnostic, receiveSerialData, startServer, validateArchiveEntries, validateHostAndPort, validateInstallManifest, validateProxyTarget, validateSerialOptions } from './proxy.js';
 
 class VirtualSerialPort extends EventEmitter {
   constructor(options) { super(); this.options = options; this.isOpen = false; this.signals = { dtr: false, rts: false }; }
@@ -104,6 +104,14 @@ test('extracts common development tool versions without assuming one vendor', ()
   assert.equal(extractSoftwareVersion('unknown output'), '');
 });
 
+test('validates pinned install manifests and rejects unsafe archive paths', () => {
+  const manifest = { id: 'test-tool-1.0.0', softwareId: 'test.tool', capabilityId: 'test.tool', name: 'Test', version: '1.0.0', platform: process.platform, architecture: process.arch, sourceUrl: 'https://github.com/example/test/releases/download/v1/test.zip', officialPage: 'https://github.com/example/test', sha256: 'ab'.repeat(32), byteLength: 4, license: 'MIT', requiresLicenseAcceptance: false, archive: 'zip', installSubdirectory: 'test/1.0.0', expectedExecutable: process.platform === 'win32' ? 'node.exe' : 'node', verificationArgs: ['--version'], verifiedAt: '2026-10-14' };
+  assert.equal(validateInstallManifest(manifest).id, manifest.id);
+  assert.deepEqual(validateArchiveEntries(`${manifest.expectedExecutable}\n`, manifest.expectedExecutable), [manifest.expectedExecutable]);
+  assert.throws(() => validateArchiveEntries('../escape.exe\n', 'escape.exe'), /unsafe path/);
+  assert.throws(() => validateInstallManifest({ ...manifest, sourceUrl: 'https://example.com/test.zip' }), /allowed official/);
+});
+
 test('validates serial session settings', () => {
   assert.deepEqual(validateSerialOptions({ path: 'COM11', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false }), { path: 'COM11', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false, frameMode: 'auto', frameGapMs: 30 });
   assert.throws(() => validateSerialOptions({ path: '', baudRate: 115200 }), /Invalid serial port path/);
@@ -175,6 +183,7 @@ test('reports local agent version and capabilities', async () => {
   assert.ok(result.capabilities.includes('local-file-read'));
   assert.ok(result.capabilities.includes('elf-analysis'));
   assert.ok(result.capabilities.includes('software-environment'));
+  assert.ok(result.capabilities.includes('software-installation'));
   assert.equal(response.headers.get('x-embedkit-protocol'), '1');
 });
 
@@ -185,6 +194,62 @@ test('detects installed development software with bounded structured results', a
   assert.equal(typeof result.platform, 'string');
   assert.ok(result.installations.some(item => item.capabilityId === 'runtime.node' && item.available && item.version));
   assert.ok(result.installations.every(item => typeof item.durationMs === 'number' && item.rawVersion.length <= 500));
+});
+
+test('installs a pinned portable tool only inside a user-selected directory and verifies it', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'embedkit-install-root-')), archiveBytes = Buffer.from('controlled-test-archive'), executableName = process.platform === 'win32' ? 'node.exe' : 'node';
+  const manifest = { id: 'test-node-1.0.0', softwareId: 'test.node', capabilityId: 'test.node', name: 'Test Node', version: '1.0.0', platform: process.platform, architecture: process.arch, sourceUrl: 'https://github.com/example/test/releases/download/v1/test.zip', officialPage: 'https://github.com/example/test', sha256: createHash('sha256').update(archiveBytes).digest('hex'), byteLength: archiveBytes.length, license: 'MIT', requiresLicenseAcceptance: false, archive: 'zip', installSubdirectory: 'test-node/1.0.0', expectedExecutable: executableName, verificationArgs: ['--version'], verifiedAt: '2026-10-14' };
+  configureInstallManifestRegistry([manifest]);
+  configureSoftwareInstallerAdapter({ download: async (job, selected, destination) => { await writeFile(destination, archiveBytes); job.progress = 70; return { byteLength: archiveBytes.length, sha256: selected.sha256 }; }, extract: async (_job, _selected, _archive, target) => { await copyFile(process.execPath, join(target, executableName)); } });
+  configureFilePickerAdapter({ select: async () => ({ path: directory }) });
+  try {
+    const selected = await (await fetch(`${agentBaseUrl}/api/files/select`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'directory' }) })).json();
+    const createdResponse = await fetch(`${agentBaseUrl}/api/environment/install-jobs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manifestId: manifest.id, directorySelectionId: selected.selectionId }) });
+    assert.equal(createdResponse.status, 202); let job = await createdResponse.json();
+    for (let attempt = 0; attempt < 100 && job.state === 'running'; attempt += 1) { await new Promise(resolveWait => setTimeout(resolveWait, 20)); job = await (await fetch(`${agentBaseUrl}/api/environment/install-jobs/${job.id}`)).json(); }
+    assert.equal(job.state, 'passed', JSON.stringify(job, null, 2)); assert.equal(job.progress, 100); assert.equal(job.installation.capabilityId, 'test.node');
+    assert.equal((await stat(join(directory, 'test-node', '1.0.0', executableName))).isFile(), true);
+  } finally {
+    configureInstallManifestRegistry(null); configureSoftwareInstallerAdapter(null); configureFilePickerAdapter(null); await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('removes only the new installation target when verified installation fails', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'embedkit-install-failure-')), archiveBytes = Buffer.from('controlled-test-archive');
+  const manifest = { id: 'test-failure-1.0.0', softwareId: 'test.failure', capabilityId: 'test.failure', name: 'Test Failure', version: '1.0.0', platform: process.platform, architecture: process.arch, sourceUrl: 'https://github.com/example/test/releases/download/v1/test.zip', officialPage: 'https://github.com/example/test', sha256: createHash('sha256').update(archiveBytes).digest('hex'), byteLength: archiveBytes.length, license: 'MIT', requiresLicenseAcceptance: false, archive: 'zip', installSubdirectory: 'test-failure/1.0.0', expectedExecutable: process.platform === 'win32' ? 'tool.exe' : 'tool', verificationArgs: ['--version'], verifiedAt: '2026-10-14' };
+  configureInstallManifestRegistry([manifest]);
+  configureSoftwareInstallerAdapter({ download: async (_job, selected, destination) => { await writeFile(destination, archiveBytes); return { byteLength: archiveBytes.length, sha256: selected.sha256 }; }, extract: async () => { throw new Error('Controlled extraction failure'); } });
+  configureFilePickerAdapter({ select: async () => ({ path: directory }) });
+  try {
+    const selected = await (await fetch(`${agentBaseUrl}/api/files/select`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'directory' }) })).json();
+    let job = await (await fetch(`${agentBaseUrl}/api/environment/install-jobs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manifestId: manifest.id, directorySelectionId: selected.selectionId }) })).json();
+    for (let attempt = 0; attempt < 100 && job.state === 'running'; attempt += 1) { await new Promise(resolveWait => setTimeout(resolveWait, 20)); job = await (await fetch(`${agentBaseUrl}/api/environment/install-jobs/${job.id}`)).json(); }
+    assert.equal(job.state, 'failed'); assert.match(job.error, /Controlled extraction failure/);
+    await assert.rejects(stat(join(directory, 'test-failure', '1.0.0')), { code: 'ENOENT' });
+    await assert.rejects(stat(join(directory, 'test-failure')), { code: 'ENOENT' });
+    assert.equal((await stat(directory)).isDirectory(), true);
+  } finally {
+    configureInstallManifestRegistry(null); configureSoftwareInstallerAdapter(null); configureFilePickerAdapter(null); await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('cancels between installation stages and removes task-created directories', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'embedkit-install-cancel-')), archiveBytes = Buffer.from('controlled-test-archive'); let releaseExtract;
+  const manifest = { id: 'test-cancel-1.0.0', softwareId: 'test.cancel', capabilityId: 'test.cancel', name: 'Test Cancel', version: '1.0.0', platform: process.platform, architecture: process.arch, sourceUrl: 'https://github.com/example/test/releases/download/v1/test.zip', officialPage: 'https://github.com/example/test', sha256: createHash('sha256').update(archiveBytes).digest('hex'), byteLength: archiveBytes.length, license: 'MIT', requiresLicenseAcceptance: false, archive: 'zip', installSubdirectory: 'test-cancel/1.0.0', expectedExecutable: process.platform === 'win32' ? 'tool.exe' : 'tool', verificationArgs: ['--version'], verifiedAt: '2026-10-14' };
+  configureInstallManifestRegistry([manifest]);
+  configureSoftwareInstallerAdapter({ download: async (_job, selected, destination) => { await writeFile(destination, archiveBytes); return { byteLength: archiveBytes.length, sha256: selected.sha256 }; }, extract: async () => new Promise(resolveExtract => { releaseExtract = resolveExtract; }) });
+  configureFilePickerAdapter({ select: async () => ({ path: directory }) });
+  try {
+    const selected = await (await fetch(`${agentBaseUrl}/api/files/select`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'directory' }) })).json();
+    let job = await (await fetch(`${agentBaseUrl}/api/environment/install-jobs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manifestId: manifest.id, directorySelectionId: selected.selectionId }) })).json();
+    for (let attempt = 0; attempt < 100 && typeof releaseExtract !== 'function'; attempt += 1) await new Promise(resolveWait => setTimeout(resolveWait, 10));
+    assert.equal(typeof releaseExtract, 'function');
+    const cancelResponse = await fetch(`${agentBaseUrl}/api/environment/install-jobs/${job.id}`, { method: 'DELETE' }); assert.equal(cancelResponse.status, 202); releaseExtract();
+    for (let attempt = 0; attempt < 100 && job.state === 'running'; attempt += 1) { await new Promise(resolveWait => setTimeout(resolveWait, 10)); job = await (await fetch(`${agentBaseUrl}/api/environment/install-jobs/${job.id}`)).json(); }
+    assert.equal(job.state, 'cancelled'); await assert.rejects(stat(join(directory, 'test-cancel')), { code: 'ENOENT' });
+  } finally {
+    releaseExtract?.(); configureInstallManifestRegistry(null); configureSoftwareInstallerAdapter(null); configureFilePickerAdapter(null); await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('opens a controlled system picker and validates the selected path type', async () => {

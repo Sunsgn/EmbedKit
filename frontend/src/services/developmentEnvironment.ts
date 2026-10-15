@@ -1,5 +1,5 @@
 import { agentRequest } from './agentClient';
-import type { EnvironmentResolution, SoftwareEnvironmentScan, DetectedSoftwareInstallation } from '../types/developmentEnvironment';
+import type { EnvironmentResolution, SoftwareEnvironmentScan, DetectedSoftwareInstallation, SoftwareInstallJob, SoftwareInstallManifest } from '../types/developmentEnvironment';
 import type { ProjectEnvironmentRequirement } from '../types/product';
 
 const versionParts = (value: string) => (value.match(/\d+/g) ?? []).slice(0, 4).map(Number);
@@ -48,3 +48,16 @@ export async function scanDevelopmentSoftware(timeoutMs = 20_000) {
   if (result.schemaVersion !== 1 || !Array.isArray(result.installations) || !Array.isArray(result.unavailable)) throw new Error('本地助手返回的开发环境数据无效');
   return result;
 }
+
+export async function listSoftwareInstallManifests() {
+  const result = await agentRequest<{ schemaVersion: number; manifests: SoftwareInstallManifest[] }>('/api/environment/install-manifests');
+  if (result.schemaVersion !== 1 || !Array.isArray(result.manifests)) throw new Error('本地助手返回的软件安装清单无效');
+  return result.manifests;
+}
+
+export function createSoftwareInstallJob(manifestId: string, directorySelectionId: string, acceptedLicense = false) {
+  return agentRequest<SoftwareInstallJob>('/api/environment/install-jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manifestId, directorySelectionId, acceptedLicense }) }, 20_000);
+}
+
+export function getSoftwareInstallJob(jobId: string) { return agentRequest<SoftwareInstallJob>(`/api/environment/install-jobs/${jobId}`); }
+export function cancelSoftwareInstallJob(jobId: string) { return agentRequest<SoftwareInstallJob>(`/api/environment/install-jobs/${jobId}`, { method: 'DELETE' }); }
