@@ -6,6 +6,7 @@ import { closeNetworkSession, openNetworkSession, sendNetworkData } from '../ser
 import { closeSerialSession, listSerialPorts, listSerialSessions, openSerialSession, readSerialSession, sendSerialData } from '../services/serialAgent';
 import { listBuildArtifacts, listFirmwareIdentities, listTestRuns, saveTestRunWithCommunicationSessions } from '../services/productStorage';
 import { createConfigurationFingerprint } from '../services/configurationFingerprint';
+import { writeSerialTestSessionHandoff } from '../services/testSessionHandoff';
 
 vi.mock('../services/agentClient', () => ({ getAgentStatus: vi.fn() }));
 vi.mock('../services/networkAgent', () => ({ closeNetworkSession: vi.fn(), openNetworkSession: vi.fn(), readNetworkSession: vi.fn(), sendNetworkData: vi.fn() }));
@@ -36,6 +37,8 @@ describe('TestAutomationPage centralized Agent workflow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    sessionStorage.clear();
+    window.location.hash = '';
     localStorage.setItem('embedkit.automation.suites', JSON.stringify(tcpSuite));
     vi.mocked(getAgentStatus).mockResolvedValue({ available: true, name: 'EmbedKit Local Agent', version: '1.0.0', protocolVersion: 1, uptimeSeconds: 1, capabilities: ['tcp-client'], serialSessions: 0, networkSessions: 0, buildJobs: 0 });
     vi.mocked(listSerialPorts).mockResolvedValue([]);
@@ -97,6 +100,42 @@ describe('TestAutomationPage centralized Agent workflow', () => {
     await waitFor(() => expect(sendSerialData).toHaveBeenCalledWith('shared-1', 'PING', 'text'));
     await waitFor(() => expect(saveTestRunWithCommunicationSessions).toHaveBeenCalled());
     expect(closeSerialSession).not.toHaveBeenCalledWith('shared-1');
+  });
+
+  it('accepts a live serial handoff from communication only after the user chooses a test channel', async () => {
+    localStorage.setItem('embedkit.automation.suites', JSON.stringify(serialSuite));
+    const shared = { id: 'shared-handoff', path: 'COM9', baudRate: 230400, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false, state: 'connected' as const, rxBytes: 0, txBytes: 0, openedAt: '', events: [] };
+    vi.mocked(listSerialPorts).mockResolvedValue([{ path: 'COM9', manufacturer: '', serialNumber: '', vendorId: '', productId: '', pnpId: '', friendlyName: 'Handoff Device' }]);
+    vi.mocked(listSerialSessions).mockResolvedValue([shared]);
+    writeSerialTestSessionHandoff(shared);
+    window.location.hash = '#/tests?handoff=serial';
+
+    render(<TestAutomationPage />);
+    expect(await screen.findByText('来自通信调试')).toBeVisible();
+    expect(sendSerialData).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '绑定串口 A' }));
+    expect(await screen.findByText(/已将通信调试的 COM9 绑定到串口 A/)).toBeVisible();
+    expect(sessionStorage.getItem('embedkit.test-session-handoff.pending')).toBeNull();
+    expect(sendSerialData).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '运行流程' }));
+    await waitFor(() => expect(sendSerialData).toHaveBeenCalledWith('shared-handoff', 'PING', 'text'));
+    await waitFor(() => expect(saveTestRunWithCommunicationSessions).toHaveBeenCalled());
+    expect(closeSerialSession).not.toHaveBeenCalledWith('shared-handoff');
+  });
+
+  it('rejects a stale communication handoff and keeps direct serial recovery available', async () => {
+    const stale = { id: 'stale-session', path: 'COM10', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false, state: 'connected' as const, rxBytes: 0, txBytes: 0, openedAt: '', events: [] };
+    writeSerialTestSessionHandoff(stale);
+    window.location.hash = '#/tests?handoff=serial';
+    vi.mocked(listSerialPorts).mockResolvedValue([{ path: 'COM11', manufacturer: '', serialNumber: '', vendorId: '', productId: '', pnpId: '', friendlyName: 'Replacement' }]);
+    vi.mocked(listSerialSessions).mockResolvedValue([]);
+
+    render(<TestAutomationPage />);
+    expect(await screen.findByText(/来自通信调试的 COM10 会话已失效/)).toBeVisible();
+    expect(screen.queryByText('来自通信调试')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('串口 A真实串口')).toBeEnabled();
+    expect(sessionStorage.getItem('embedkit.test-session-handoff.pending')).toBeNull();
   });
 
   it('reports a recoverable port enumeration failure without blocking flow editing', async () => {

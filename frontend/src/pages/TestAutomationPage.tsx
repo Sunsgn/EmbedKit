@@ -51,6 +51,7 @@ import { createFirmwareCatalog } from "../services/firmwareIdentity";
 import { createCommunicationSessionRecords, type ArchivedCommunicationEvidence } from "../services/communicationArchive";
 import { compareTestRuns, type RunComparisonOutcome } from "../services/testRunComparison";
 import { createConfigurationFingerprint } from "../services/configurationFingerprint";
+import { clearSerialTestSessionHandoff, readSerialTestSessionHandoff, type SerialTestSessionHandoff } from "../services/testSessionHandoff";
 import type { TestRunRecord, TestStepRun } from "../types/product";
 import { formatHex, parseHexBytes } from "../utils/embeddedTools";
 import {
@@ -362,7 +363,8 @@ export default function TestAutomationPage() {
     [serialPorts, setSerialPorts] = useState<SerialAgentPort[]>([]),
     [serialConfigs, setSerialConfigs] = useState(loadSerialConfigs),
     [serialBusy, setSerialBusy] = useState<"serial-a" | "serial-b" | "refresh" | null>(null),
-    [serialMessage, setSerialMessage] = useState("");
+    [serialMessage, setSerialMessage] = useState(""),
+    [serialHandoff, setSerialHandoff] = useState<SerialTestSessionHandoff | null>(null);
   const [wsUrl, setWsUrl] = useState("ws://127.0.0.1:8080");
   const [networkConfigs, setNetworkConfigs] = useState<
     Record<"tcp" | "udp", NetworkConfig>
@@ -417,6 +419,20 @@ export default function TestAutomationPage() {
         connected = sessions.filter((item) => item.state === "connected");
       setSerialPorts(ports);
       setSerialChoices(connected);
+      const handoff = readSerialTestSessionHandoff();
+      let handoffProblem = "";
+      if (handoff) {
+        if (connected.some(item => item.id === handoff.sessionId)) setSerialHandoff(handoff);
+        else {
+          clearSerialTestSessionHandoff(handoff.id);
+          setSerialHandoff(null);
+          handoffProblem = `来自通信调试的 ${handoff.path} 会话已失效，请重新连接或选择其他串口`;
+          setSerialMessage(handoffProblem);
+        }
+      } else {
+        setSerialHandoff(null);
+        if (!report && window.location.hash.includes("handoff=serial")) setSerialMessage("通信调试会话交接已过期或无效，请重新发起");
+      }
       setSerialSelection((previous) => ({
         "serial-a": connected.some(item => item.id === previous["serial-a"]) ? previous["serial-a"] : undefined,
         "serial-b": connected.some(item => item.id === previous["serial-b"]) ? previous["serial-b"] : undefined,
@@ -428,7 +444,7 @@ export default function TestAutomationPage() {
         }
         return next;
       });
-      if (report) setSerialMessage(`发现 ${ports.length} 个真实串口，${connected.length} 个已连接会话`);
+      if (report && !handoffProblem) setSerialMessage(`发现 ${ports.length} 个真实串口，${connected.length} 个已连接会话`);
     } catch (reason) {
       setSerialPorts([]);
       setSerialChoices([]);
@@ -652,6 +668,31 @@ export default function TestAutomationPage() {
     } finally {
       setSerialBusy(null);
     }
+  };
+  const acceptSerialHandoff = async (channel: "serial-a" | "serial-b") => {
+    if (!serialHandoff) return;
+    setSerialBusy(channel);
+    try {
+      const selected = (await listSerialSessions()).find(item => item.id === serialHandoff.sessionId && item.state === "connected");
+      if (!selected) throw new Error("原串口会话已经断开");
+      await attachSerialSession(channel, selected, false);
+      clearSerialTestSessionHandoff(serialHandoff.id);
+      setSerialHandoff(null);
+      setSerialChoices(previous => [...previous.filter(item => item.id !== selected.id), selected]);
+      setSerialMessage(`已将通信调试的 ${selected.path} 绑定到${channelLabels[channel]}；测试结束不会关闭该共享会话`);
+      addRunLog("pass", `${channelLabels[channel]}已接收通信调试会话 ${selected.path}`);
+    } catch (reason) {
+      clearSerialTestSessionHandoff(serialHandoff.id);
+      setSerialHandoff(null);
+      setSerialMessage(`会话交接失败：${reason instanceof Error ? reason.message : String(reason)}；请重新连接或直接选择串口`);
+    } finally {
+      setSerialBusy(null);
+    }
+  };
+  const cancelSerialHandoff = () => {
+    if (serialHandoff) clearSerialTestSessionHandoff(serialHandoff.id);
+    setSerialHandoff(null);
+    setSerialMessage("已取消通信调试会话交接");
   };
   const unbindSerial = async (channel: "serial-a" | "serial-b") => {
     const runtime = serials.current.get(channel);
@@ -2568,6 +2609,7 @@ export default function TestAutomationPage() {
                 </button>
               </div>
               <div className="grid gap-2 p-3">
+                {serialHandoff && <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-2"><div className="flex items-start gap-2"><Usb size={13} className="mt-0.5 shrink-0 text-cyan-400" /><div className="min-w-0 flex-1"><b className="block text-[10px] text-cyan-200">来自通信调试</b><p className="mt-0.5 truncate text-[9px] text-gray-400">{serialHandoff.path} · {serialHandoff.baudRate} baud</p><p className="mt-1 text-[8px] leading-4 text-gray-600">请明确选择测试通道；绑定不会自动运行流程，也不会关闭原会话。</p></div></div><div className="mt-2 grid grid-cols-[1fr_1fr_auto] gap-1"><button onClick={() => void acceptSerialHandoff("serial-a")} disabled={serialBusy !== null || running} className="rounded border border-cyan-500/30 px-2 py-1 text-[9px] text-cyan-300 disabled:opacity-40">绑定串口 A</button><button onClick={() => void acceptSerialHandoff("serial-b")} disabled={serialBusy !== null || running} className="rounded border border-cyan-500/30 px-2 py-1 text-[9px] text-cyan-300 disabled:opacity-40">绑定串口 B</button><button onClick={cancelSerialHandoff} disabled={serialBusy !== null || running} className="rounded border border-[#30363d] px-2 py-1 text-[9px] text-gray-500 disabled:opacity-40">取消</button></div></div>}
                 {serialMessage && <p role="status" className="rounded bg-[#111820] px-2 py-1.5 text-[9px] leading-4 text-gray-500">{serialMessage}</p>}
                 <div className="grid gap-2">
                   {(["serial-a", "serial-b"] as const).map((channel) => (

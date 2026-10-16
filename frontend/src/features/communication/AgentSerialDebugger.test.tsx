@@ -18,6 +18,7 @@ describe('AgentSerialDebugger independent degradation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionStorage.clear();
+    window.location.hash = '';
     vi.mocked(serialAgent.listSerialPorts).mockReset();
     vi.mocked(serialAgent.listSerialSessions).mockReset();
   });
@@ -57,6 +58,11 @@ describe('AgentSerialDebugger independent degradation', () => {
     fireEvent.change(input, { target: { value: 'AT' } });
     fireEvent.click(screen.getByRole('button', { name: '发送' }));
     await waitFor(() => expect(serialAgent.sendSerialData).toHaveBeenCalledWith('session-1', 'AT\r\n', 'text'));
+
+    fireEvent.click(screen.getByRole('button', { name: '用于集成测试' }));
+    expect(JSON.parse(sessionStorage.getItem('embedkit.test-session-handoff.pending') || '{}')).toMatchObject({ version: 1, transport: 'serial', sessionId: 'session-1', path: 'VIRTUAL0', baudRate: 115200 });
+    expect(window.location.hash).toBe('#/tests?handoff=serial');
+    expect(serialAgent.closeSerialSession).not.toHaveBeenCalledWith('session-1');
   });
 
   it('hands real RX bytes to the protocol workspace with source context', async () => {
