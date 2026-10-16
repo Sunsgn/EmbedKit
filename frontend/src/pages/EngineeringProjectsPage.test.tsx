@@ -28,10 +28,10 @@ describe('EngineeringProjectsPage', () => {
     renderPage();
     expect((await screen.findAllByText('控制器工程')).length).toBe(2);
     expect(screen.getByText('工程识别结果')).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: '说明与环境' }));
+    fireEvent.click(screen.getByRole('button', { name: '说明与备注' }));
     expect(screen.getByDisplayValue('控制器工程')).toBeVisible();
     expect(screen.getByText('程序功能')).toBeVisible();
-    expect(screen.getByText('开发环境需求')).toBeVisible();
+    expect(screen.getByText('可选环境备注')).toBeVisible();
     expect(screen.queryByText('测试设备')).not.toBeInTheDocument();
     expect(screen.queryByText('通道配置')).not.toBeInTheDocument();
   });

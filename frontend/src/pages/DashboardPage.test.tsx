@@ -36,12 +36,13 @@ describe('DashboardPage Local Agent status', () => {
   it('presents the narrowed local toolbox workflow while retaining optional capabilities', () => {
     vi.mocked(getAgentStatus).mockRejectedValue(new Error('offline'));
     render(<MemoryRouter><DashboardPage /></MemoryRouter>);
-    expect(screen.getByText('工程与开发环境')).toBeVisible();
+    expect(screen.getByText('工程与已有材料')).toBeVisible();
     expect(screen.getByText('资料与学习')).toBeVisible();
     expect(screen.getByText('通信与确定性工具')).toBeVisible();
     expect(screen.getByText('数据与 AI 协作')).toBeVisible();
     expect(screen.getByText('按需使用的扩展能力')).toBeVisible();
     expect(screen.getByText('工程分析')).toBeVisible();
+    expect(screen.getByText('开发环境')).toBeVisible();
     expect(screen.getByText(/AI 是可选消费者/)).toBeVisible();
   });
 });
