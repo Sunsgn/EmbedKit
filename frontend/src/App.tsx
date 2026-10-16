@@ -1,8 +1,9 @@
-import { lazy, Suspense, useEffect, useState, type ComponentType } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { HashRouter as Router, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { BookOpen, Boxes, BrainCircuit, Code2, Cpu, DatabaseBackup, FlaskConical, Gauge, HardDrive, Menu, MonitorCog, Radio, RefreshCw, WifiOff, Wrench, X } from 'lucide-react';
+import { Cpu, Menu, RefreshCw, WifiOff, X } from 'lucide-react';
 import { activatePwaUpdate, subscribePwaUpdate } from './services/pwa';
 import AppErrorBoundary from './components/AppErrorBoundary';
+import { navSections } from './appNavigation';
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const EngineeringProjectsPage = lazy(() => import('./pages/EngineeringProjectsPage'));
@@ -18,43 +19,6 @@ const DataManagementPage = lazy(() => import('./pages/DataManagementPage'));
 const LocalAgentPage = lazy(() => import('./pages/LocalAgentPage'));
 const DevelopmentEnvironmentPage = lazy(() => import('./pages/DevelopmentEnvironmentPage'));
 
-interface NavItem {
-  icon: ComponentType<{ size?: number }>;
-  label: string;
-  path: string;
-  aliases?: string[];
-}
-
-const navSections: Array<{ title: string; items: NavItem[] }> = [
-  {
-    title: '开发工作区',
-    items: [
-      { icon: Gauge, label: '工作台', path: '/' },
-      { icon: HardDrive, label: '工程中心', path: '/engineering', aliases: ['/devices'] },
-      { icon: MonitorCog, label: '开发环境', path: '/environment' },
-      { icon: Code2, label: '工程分析', path: '/projects', aliases: ['/editor'] },
-      { icon: Radio, label: '通信调试', path: '/communication', aliases: ['/serial'] },
-      { icon: FlaskConical, label: '集成测试', path: '/tests' },
-      { icon: Wrench, label: '嵌入式工具箱', path: '/toolbox' },
-      { icon: BrainCircuit, label: 'AI 助手', path: '/ai' },
-    ],
-  },
-  {
-    title: '知识中心',
-    items: [
-      { icon: Boxes, label: '资料中心', path: '/resources', aliases: ['/components', '/chips'] },
-      { icon: BookOpen, label: '学习中心', path: '/learn', aliases: ['/tutorials'] },
-    ],
-  },
-  {
-    title: '系统',
-    items: [
-      { icon: MonitorCog, label: '本地助手', path: '/agent' },
-      { icon: DatabaseBackup, label: '数据管理', path: '/data' },
-    ],
-  },
-];
-
 function LoadingPage() {
   return <div className="flex h-full items-center justify-center text-sm text-gray-500"><span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />正在加载工作区…</div>;
 }
@@ -68,7 +32,7 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (value: bo
       <div className="flex items-center justify-between border-b border-[#30363d]/80 px-4 py-[18px]">
         <button onClick={() => navigate('/')} className="flex items-center gap-2 text-left">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-lg shadow-blue-950/50"><Cpu size={19} /></span>
-          <span><b className="block bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-lg text-transparent">EmbedKit</b><small className="block text-[10px] text-gray-600">嵌入式开发工作台</small></span>
+          <span><b className="block bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-lg text-transparent">EmbedKit</b><small className="block text-[10px] text-gray-600">嵌入式本地工具箱</small></span>
         </button>
         <button onClick={() => setIsOpen(false)} className="text-gray-400 hover:text-white lg:hidden" aria-label="关闭菜单"><X size={20} /></button>
       </div>

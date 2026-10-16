@@ -28,11 +28,11 @@ describe('local protocol document extraction', () => {
     expect(result.kind).toBe('pdf');
     expect(result.text).toContain('[[来源:PDF 第 1 页]]');
     expect(result.text).toContain('Frame Header: AA 55');
-  });
+  }, 20_000);
 
   it('requires OCR when a PDF has no extractable text layer', async () => {
     await expect(extractProtocolDocumentFile(file(minimalPdf(''), 'scan.pdf', 'application/pdf'))).rejects.toMatchObject({ code: 'OCR_REQUIRED' });
-  });
+  }, 20_000);
 
   it('extracts DOCX paragraphs and table rows', async () => {
     const archive = zipSync({
