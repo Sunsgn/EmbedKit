@@ -14,6 +14,7 @@ import {
   Save,
   Trash2,
   Usb,
+  RefreshCw,
   XCircle,
 } from "lucide-react";
 import { getAgentStatus } from "../services/agentClient";
@@ -24,9 +25,13 @@ import {
   sendNetworkData,
 } from "../services/networkAgent";
 import {
+  closeSerialSession,
+  listSerialPorts,
   listSerialSessions,
+  openSerialSession,
   readSerialSession,
   sendSerialData,
+  type SerialAgentPort,
   type SerialAgentSession,
 } from "../services/serialAgent";
 import {
@@ -141,6 +146,14 @@ interface SerialRuntime {
   path: string;
   polling: boolean;
 }
+interface SerialConnectionConfig {
+  path: string;
+  baudRate: number;
+  dataBits: 7 | 8;
+  stopBits: 1 | 2;
+  parity: "none" | "even" | "odd";
+  flowControl: "none" | "hardware";
+}
 interface NetworkConfig {
   mode: "client" | "server";
   host: string;
@@ -149,6 +162,35 @@ interface NetworkConfig {
 }
 
 const STORAGE_KEY = "embedkit.automation.suites";
+const SERIAL_CONFIG_KEY = "embedkit.automation.serial-config.v1";
+const defaultSerialConnection = (): SerialConnectionConfig => ({
+  path: "",
+  baudRate: 115200,
+  dataBits: 8,
+  stopBits: 1,
+  parity: "none",
+  flowControl: "none",
+});
+const loadSerialConfigs = (): Record<"serial-a" | "serial-b", SerialConnectionConfig> => {
+  const fallback = { "serial-a": defaultSerialConnection(), "serial-b": defaultSerialConnection() };
+  try {
+    const saved = JSON.parse(localStorage.getItem(SERIAL_CONFIG_KEY) ?? "null") as Partial<Record<"serial-a" | "serial-b", Partial<SerialConnectionConfig>>> | null;
+    if (!saved) return fallback;
+    for (const channel of ["serial-a", "serial-b"] as const) {
+      const value = saved[channel];
+      if (!value) continue;
+      fallback[channel] = {
+        path: typeof value.path === "string" ? value.path.slice(0, 260) : "",
+        baudRate: Number.isInteger(value.baudRate) && Number(value.baudRate) >= 50 && Number(value.baudRate) <= 4_000_000 ? Number(value.baudRate) : 115200,
+        dataBits: value.dataBits === 7 ? 7 : 8,
+        stopBits: value.stopBits === 2 ? 2 : 1,
+        parity: value.parity === "even" || value.parity === "odd" ? value.parity : "none",
+        flowControl: value.flowControl === "hardware" ? "hardware" : "none",
+      };
+    }
+  } catch { /* damaged preferences fall back without blocking test editing */ }
+  return fallback;
+};
 const channelLabels: Record<Channel, string> = {
   "serial-a": "串口 A",
   "serial-b": "串口 B",
@@ -316,7 +358,11 @@ export default function TestAutomationPage() {
   const [serialChoices, setSerialChoices] = useState<SerialAgentSession[]>([]),
     [serialSelection, setSerialSelection] = useState<
       Partial<Record<"serial-a" | "serial-b", string>>
-    >({});
+    >({}),
+    [serialPorts, setSerialPorts] = useState<SerialAgentPort[]>([]),
+    [serialConfigs, setSerialConfigs] = useState(loadSerialConfigs),
+    [serialBusy, setSerialBusy] = useState<"serial-a" | "serial-b" | "refresh" | null>(null),
+    [serialMessage, setSerialMessage] = useState("");
   const [wsUrl, setWsUrl] = useState("ws://127.0.0.1:8080");
   const [networkConfigs, setNetworkConfigs] = useState<
     Record<"tcp" | "udp", NetworkConfig>
@@ -347,6 +393,7 @@ export default function TestAutomationPage() {
     runLogsRef = useRef<RunLog[]>([]),
     sessionEvidence = useRef(new Map<Channel, SessionEvidence>());
   const serials = useRef(new Map<Channel, SerialRuntime>()),
+    ownedSerialSessionIds = useRef(new Set<string>()),
     ws = useRef<WebSocket | null>(null),
     agentSessions = useRef(new Map<Channel, { id: string; after: number }>());
   const selectedSuite =
@@ -363,6 +410,34 @@ export default function TestAutomationPage() {
     return baseline ? compareTestRuns(baseline, current) : null;
   }, [baselineRunId, runHistory]);
 
+  const refreshSerialResources = useCallback(async (report = true) => {
+    if (report) { setSerialBusy("refresh"); setSerialMessage("正在读取本机串口…"); }
+    try {
+      const [ports, sessions] = await Promise.all([listSerialPorts(), listSerialSessions()]),
+        connected = sessions.filter((item) => item.state === "connected");
+      setSerialPorts(ports);
+      setSerialChoices(connected);
+      setSerialSelection((previous) => ({
+        "serial-a": connected.some(item => item.id === previous["serial-a"]) ? previous["serial-a"] : undefined,
+        "serial-b": connected.some(item => item.id === previous["serial-b"]) ? previous["serial-b"] : undefined,
+      }));
+      setSerialConfigs(previous => {
+        const next = { ...previous };
+        for (const channel of ["serial-a", "serial-b"] as const) {
+          if (!next[channel].path && ports.length) next[channel] = { ...next[channel], path: ports[0].path };
+        }
+        return next;
+      });
+      if (report) setSerialMessage(`发现 ${ports.length} 个真实串口，${connected.length} 个已连接会话`);
+    } catch (reason) {
+      setSerialPorts([]);
+      setSerialChoices([]);
+      if (report) setSerialMessage(`串口枚举失败：${reason instanceof Error ? reason.message : String(reason)}`);
+    } finally {
+      if (report) setSerialBusy(null);
+    }
+  }, []);
+
   useEffect(() => {
     const safeSuites = suites.map((suite) => ({
       ...suite,
@@ -372,6 +447,9 @@ export default function TestAutomationPage() {
     }));
     localStorage.setItem(STORAGE_KEY, JSON.stringify(safeSuites));
   }, [suites]);
+  useEffect(() => {
+    localStorage.setItem(SERIAL_CONFIG_KEY, JSON.stringify(serialConfigs));
+  }, [serialConfigs]);
   useEffect(() => {
     void Promise.all([
       listTestRuns(),
@@ -388,17 +466,9 @@ export default function TestAutomationPage() {
     });
   }, []);
   useEffect(() => {
-    void listSerialSessions()
-      .then((sessions) => {
-        const connected = sessions.filter((item) => item.state === "connected");
-        setSerialChoices(connected);
-        setSerialSelection((previous) => ({
-          "serial-a": previous["serial-a"] ?? connected[0]?.id,
-          "serial-b": previous["serial-b"] ?? connected[1]?.id ?? connected[0]?.id,
-        }));
-      })
-      .catch(() => setSerialChoices([]));
-  }, []);
+    const timer = window.setTimeout(() => void refreshSerialResources(false), 0);
+    return () => window.clearTimeout(timer);
+  }, [refreshSerialResources]);
   const addRunLog = useCallback((level: RunLog["level"], text: string) => {
     const date = new Date(),
       pad = (value: number, length = 2) => String(value).padStart(length, "0"),
@@ -428,13 +498,18 @@ export default function TestAutomationPage() {
   const releaseResources = useCallback(async (stop: boolean, report: boolean) => {
     if (stop) stopRequested.current = true;
     const socket = ws.current,
-      sessions = [...agentSessions.current.entries()];
+      sessions = [...agentSessions.current.entries()],
+      ownedSerialIds = [...ownedSerialSessionIds.current];
     ws.current = null;
     for (const runtime of serials.current.values()) runtime.polling = false;
     serials.current.clear();
     agentSessions.current.clear();
     if (report) setSerialNames({});
     const failures = await cleanupFlowResources([
+      ...ownedSerialIds.map((id) => ({
+        name: `串口 ${id.slice(0, 8)}`,
+        run: async () => { await closeSerialSession(id); },
+      })),
       ...(socket
         ? [{ name: "WebSocket", run: () => socket.close() }]
         : []),
@@ -445,13 +520,25 @@ export default function TestAutomationPage() {
         },
       })),
     ]);
+    const failedNames = new Set(failures.map(item => item.name)),
+      closedSerialIds = ownedSerialIds.filter(id => !failedNames.has(`串口 ${id.slice(0, 8)}`));
+    for (const id of closedSerialIds) ownedSerialSessionIds.current.delete(id);
     if (report) {
+      if (closedSerialIds.length) {
+        setSerialChoices(previous => previous.filter(item => !closedSerialIds.includes(item.id)));
+        setSerialSelection(previous => ({
+          "serial-a": previous["serial-a"] && !closedSerialIds.includes(previous["serial-a"]!) ? previous["serial-a"] : undefined,
+          "serial-b": previous["serial-b"] && !closedSerialIds.includes(previous["serial-b"]!) ? previous["serial-b"] : undefined,
+        }));
+      }
       if (failures.length)
         failures.forEach((failure) =>
           addRunLog("fail", `${failure.name} 资源清理失败：${failure.error}`),
         );
-      else if (socket || sessions.length)
-        addRunLog("pass", "测试创建的网络资源已释放");
+      else if (socket || sessions.length || ownedSerialIds.length) {
+        const releasedKinds = [ownedSerialIds.length ? "串口" : "", socket || sessions.length ? "网络" : ""].filter(Boolean).join("和");
+        addRunLog("pass", `测试创建的${releasedKinds}资源已释放`);
+      }
     }
     return failures;
   }, [addRunLog]);
@@ -498,51 +585,94 @@ export default function TestAutomationPage() {
     },
     [addRunLog, pushIncoming],
   );
+  const attachSerialSession = async (channel: "serial-a" | "serial-b", selected: SerialAgentSession, owned: boolean) => {
+    const old = serials.current.get(channel);
+    if (old) old.polling = false;
+    if (old && old.id !== selected.id && ownedSerialSessionIds.current.has(old.id)) {
+      const usedElsewhere = [...serials.current.entries()].some(([otherChannel, runtime]) => otherChannel !== channel && runtime.id === old.id);
+      if (!usedElsewhere) {
+        await closeSerialSession(old.id);
+        ownedSerialSessionIds.current.delete(old.id);
+      }
+    }
+    if (owned) ownedSerialSessionIds.current.add(selected.id);
+    const runtime = {
+      id: selected.id,
+      after: selected.events[selected.events.length - 1]?.id ?? 0,
+      path: selected.path,
+      polling: false,
+    };
+    serials.current.set(channel, runtime);
+    sessionEvidence.current.set(channel, {
+      channel,
+      transport: "serial",
+      sessionId: selected.id,
+      endpoint: selected.path,
+      rxBytes: 0,
+      txBytes: 0,
+      startedAt: new Date().toISOString(),
+    });
+    setSerialNames((previous) => ({ ...previous, [channel]: `${selected.path} · ${selected.baudRate} baud` }));
+    setSerialSelection(previous => ({ ...previous, [channel]: selected.id }));
+    startSerialReader(channel, runtime);
+  };
   const bindSerial = async (channel: "serial-a" | "serial-b") => {
     try {
       const sessions = (await listSerialSessions()).filter(
         (item) => item.state === "connected",
       );
       setSerialChoices(sessions);
-      if (!sessions.length)
-        throw new Error("请先在“通信调试 → 串口调试”中连接设备");
-      const selected =
-        sessions.find((item) => item.id === serialSelection[channel]) ??
-        sessions[0];
-      setSerialSelection((previous) => ({
-        ...previous,
-        [channel]: selected.id,
-      }));
-      const old = serials.current.get(channel);
-      if (old) old.polling = false;
-      const runtime = {
-        id: selected.id,
-        after: selected.events[selected.events.length - 1]?.id ?? 0,
-        path: selected.path,
-        polling: false,
-      };
-      serials.current.set(channel, runtime);
-      sessionEvidence.current.set(channel, {
-        channel,
-        transport: "serial",
-        sessionId: selected.id,
-        endpoint: selected.path,
-        rxBytes: 0,
-        txBytes: 0,
-        startedAt: new Date().toISOString(),
-      });
-      setSerialNames((previous) => ({
-        ...previous,
-        [channel]: `${selected.path} · ${selected.baudRate} baud`,
-      }));
-      startSerialReader(channel, runtime);
+      const selected = sessions.find((item) => item.id === serialSelection[channel]);
+      if (!selected) throw new Error("请选择一个已连接串口会话，或直接连接下方真实串口");
+      await attachSerialSession(channel, selected, ownedSerialSessionIds.current.has(selected.id));
+      setSerialMessage(`${channelLabels[channel]}正在复用 ${selected.path}，测试结束不会关闭外部会话`);
       addRunLog("pass", `${channelLabels[channel]}已共享 ${selected.path}`);
     } catch (reason) {
+      setSerialMessage(`串口绑定失败：${reason instanceof Error ? reason.message : String(reason)}`);
       addRunLog(
         "fail",
         `串口绑定失败：${reason instanceof Error ? reason.message : String(reason)}`,
       );
     }
+  };
+  const connectSerial = async (channel: "serial-a" | "serial-b") => {
+    const config = serialConfigs[channel];
+    setSerialBusy(channel);
+    try {
+      if (!config.path || !serialPorts.some(port => port.path === config.path)) throw new Error("请刷新并选择一个当前可用的真实串口");
+      const selected = await openSerialSession(config), owned = selected.reused !== true;
+      await attachSerialSession(channel, selected, owned || ownedSerialSessionIds.current.has(selected.id));
+      setSerialChoices(previous => [...previous.filter(item => item.id !== selected.id), selected]);
+      setSerialMessage(`${channelLabels[channel]}已连接 ${selected.path} · ${selected.baudRate} baud${selected.reused ? "（复用已有会话）" : "（本页创建，测试结束自动关闭）"}`);
+      addRunLog("pass", `${channelLabels[channel]}已连接 ${selected.path}`);
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : String(reason);
+      setSerialMessage(`${channelLabels[channel]}连接失败：${message}`);
+      addRunLog("fail", `${channelLabels[channel]}连接失败：${message}`);
+    } finally {
+      setSerialBusy(null);
+    }
+  };
+  const unbindSerial = async (channel: "serial-a" | "serial-b") => {
+    const runtime = serials.current.get(channel);
+    if (!runtime) return;
+    runtime.polling = false;
+    serials.current.delete(channel);
+    sessionEvidence.current.delete(channel);
+    setSerialNames(previous => ({ ...previous, [channel]: undefined }));
+    const owned = ownedSerialSessionIds.current.has(runtime.id),
+      usedElsewhere = [...serials.current.values()].some(item => item.id === runtime.id);
+    if (owned && !usedElsewhere) {
+      try {
+        await closeSerialSession(runtime.id);
+        ownedSerialSessionIds.current.delete(runtime.id);
+        setSerialChoices(previous => previous.filter(item => item.id !== runtime.id));
+        setSerialSelection(previous => ({ ...previous, [channel]: undefined }));
+        setSerialMessage(`${channelLabels[channel]}已断开 ${runtime.path}`);
+      } catch (reason) {
+        setSerialMessage(`${channelLabels[channel]}关闭失败：${reason instanceof Error ? reason.message : String(reason)}`);
+      }
+    } else setSerialMessage(`${channelLabels[channel]}已解除绑定；共享会话保持连接`);
   };
 
   const ensureWebSocket = async () => {
@@ -790,7 +920,8 @@ export default function TestAutomationPage() {
         (channel === "serial-a" || channel === "serial-b") &&
         !serials.current.has(channel)
       )
-        await bindSerial(channel);
+        if (serialSelection[channel]) await bindSerial(channel);
+        else await connectSerial(channel);
     for (const channel of requiredChannels) {
       if (sessionEvidence.current.has(channel)) continue;
       const runtime = serials.current.get(channel);
@@ -2430,41 +2561,48 @@ export default function TestAutomationPage() {
               </p>
             </section>
             <section className="shrink-0 rounded-xl border border-[#30363d] bg-[#0d1117]">
-              <div className="border-b border-[#30363d] bg-[#111820] px-3 py-2 text-xs font-semibold text-gray-300">
-                通道配置
+              <div className="flex items-center justify-between border-b border-[#30363d] bg-[#111820] px-3 py-2 text-xs font-semibold text-gray-300">
+                <span>通道配置</span>
+                <button aria-label="刷新真实串口" onClick={() => void refreshSerialResources()} disabled={running || serialBusy !== null} className="flex items-center gap-1 rounded border border-[#30363d] px-2 py-1 text-[9px] font-normal text-gray-400 disabled:opacity-40">
+                  <RefreshCw size={10} className={serialBusy === "refresh" ? "animate-spin" : ""} />刷新串口
+                </button>
               </div>
               <div className="grid gap-2 p-3">
-                <div className="grid grid-cols-2 gap-2">
+                {serialMessage && <p role="status" className="rounded bg-[#111820] px-2 py-1.5 text-[9px] leading-4 text-gray-500">{serialMessage}</p>}
+                <div className="grid gap-2">
                   {(["serial-a", "serial-b"] as const).map((channel) => (
-                    <div key={channel} className="flex items-end gap-1">
-                      <label className="min-w-0 flex-1 text-[11px] text-gray-500">
-                        {channelLabels[channel]}
-                        <select
-                          value={serialSelection[channel] ?? ""}
-                          onChange={(event) =>
-                            setSerialSelection((previous) => ({
-                              ...previous,
-                              [channel]: event.target.value,
-                            }))
-                          }
-                          className="field"
-                        >
-                          <option value="">选择已连接串口</option>
-                          {serialChoices.map((session) => (
-                            <option key={session.id} value={session.id}>
-                              {session.path} · {session.baudRate}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <button
-                        onClick={() => void bindSerial(channel)}
-                        disabled={!serialChoices.length}
-                        className={`h-[34px] shrink-0 rounded-md border px-2 text-[10px] disabled:opacity-30 ${serialNames[channel] ? "border-green-500/30 text-green-400" : "border-[#30363d] text-gray-400"}`}
-                      >
-                        <Usb size={11} className="mr-1 inline" />
-                        {serialNames[channel] ? "已绑定" : "绑定"}
-                      </button>
+                    <div key={channel} className="rounded-lg border border-[#30363d] bg-[#111820] p-2">
+                      <div className="mb-2 flex items-center justify-between"><b className="text-[10px] text-cyan-300">{channelLabels[channel]}</b><span className={serialNames[channel] ? "text-[9px] text-green-400" : "text-[9px] text-gray-600"}>{serialNames[channel] ?? "未连接"}</span></div>
+                      <div className="flex items-end gap-1">
+                        <label className="min-w-0 flex-1 text-[9px] text-gray-600">已有会话
+                          <select aria-label={`${channelLabels[channel]}已有会话`} value={serialSelection[channel] ?? ""} disabled={running} onChange={(event) => setSerialSelection((previous) => ({ ...previous, [channel]: event.target.value || undefined }))} className="field">
+                            <option value="">不复用已有会话</option>
+                            {serialChoices.map((session) => <option key={session.id} value={session.id}>{session.path} · {session.baudRate}</option>)}
+                          </select>
+                        </label>
+                        <button aria-label={`复用${channelLabels[channel]}`} onClick={() => void bindSerial(channel)} disabled={running || !serialSelection[channel]} className="h-[34px] shrink-0 rounded-md border border-[#30363d] px-2 text-[9px] text-gray-400 disabled:opacity-30">复用</button>
+                      </div>
+                      <div className="mt-2 grid grid-cols-[1fr_92px] gap-1">
+                        <label className="min-w-0 text-[9px] text-gray-600">真实串口
+                          <select aria-label={`${channelLabels[channel]}真实串口`} value={serialConfigs[channel].path} disabled={running} onChange={(event) => setSerialConfigs(previous => ({ ...previous, [channel]: { ...previous[channel], path: event.target.value } }))} className="field">
+                            <option value="">选择本机端口</option>
+                            {serialPorts.map(port => <option key={port.path} value={port.path}>{port.path}{port.friendlyName ? ` · ${port.friendlyName}` : ""}</option>)}
+                          </select>
+                        </label>
+                        <label className="text-[9px] text-gray-600">波特率
+                          <input aria-label={`${channelLabels[channel]}波特率`} type="number" min="50" max="4000000" value={serialConfigs[channel].baudRate} disabled={running} onChange={(event) => setSerialConfigs(previous => ({ ...previous, [channel]: { ...previous[channel], baudRate: Math.max(50, Math.min(4_000_000, Number(event.target.value) || 115200)) } }))} className="field" />
+                        </label>
+                      </div>
+                      <div className="mt-1 grid grid-cols-4 gap-1">
+                        <label className="text-[8px] text-gray-600">数据位<select aria-label={`${channelLabels[channel]}数据位`} value={serialConfigs[channel].dataBits} disabled={running} onChange={(event) => setSerialConfigs(previous => ({ ...previous, [channel]: { ...previous[channel], dataBits: Number(event.target.value) as 7 | 8 } }))} className="field"><option value="8">8</option><option value="7">7</option></select></label>
+                        <label className="text-[8px] text-gray-600">停止位<select aria-label={`${channelLabels[channel]}停止位`} value={serialConfigs[channel].stopBits} disabled={running} onChange={(event) => setSerialConfigs(previous => ({ ...previous, [channel]: { ...previous[channel], stopBits: Number(event.target.value) as 1 | 2 } }))} className="field"><option value="1">1</option><option value="2">2</option></select></label>
+                        <label className="text-[8px] text-gray-600">校验<select aria-label={`${channelLabels[channel]}校验位`} value={serialConfigs[channel].parity} disabled={running} onChange={(event) => setSerialConfigs(previous => ({ ...previous, [channel]: { ...previous[channel], parity: event.target.value as SerialConnectionConfig["parity"] } }))} className="field"><option value="none">无</option><option value="even">偶</option><option value="odd">奇</option></select></label>
+                        <label className="text-[8px] text-gray-600">流控<select aria-label={`${channelLabels[channel]}流控`} value={serialConfigs[channel].flowControl} disabled={running} onChange={(event) => setSerialConfigs(previous => ({ ...previous, [channel]: { ...previous[channel], flowControl: event.target.value as SerialConnectionConfig["flowControl"] } }))} className="field"><option value="none">无</option><option value="hardware">硬件</option></select></label>
+                      </div>
+                      <div className="mt-2 flex gap-1">
+                        <button aria-label={`连接${channelLabels[channel]}`} onClick={() => void connectSerial(channel)} disabled={running || serialBusy !== null || !serialConfigs[channel].path} className="flex-1 rounded-md border border-cyan-500/30 px-2 py-1.5 text-[9px] text-cyan-300 disabled:opacity-30"><Usb size={10} className="mr-1 inline" />{serialBusy === channel ? "连接中…" : "连接并绑定"}</button>
+                        <button aria-label={`解除${channelLabels[channel]}`} onClick={() => void unbindSerial(channel)} disabled={running || !serialNames[channel]} className="rounded-md border border-[#30363d] px-2 py-1.5 text-[9px] text-gray-400 disabled:opacity-30">解除/断开</button>
+                      </div>
                     </div>
                   ))}
                 </div>

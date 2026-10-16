@@ -1,15 +1,15 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import TestAutomationPage from './TestAutomationPage';
 import { getAgentStatus } from '../services/agentClient';
 import { closeNetworkSession, openNetworkSession, sendNetworkData } from '../services/networkAgent';
-import { listSerialSessions } from '../services/serialAgent';
+import { closeSerialSession, listSerialPorts, listSerialSessions, openSerialSession, readSerialSession, sendSerialData } from '../services/serialAgent';
 import { listBuildArtifacts, listFirmwareIdentities, listTestRuns, saveTestRunWithCommunicationSessions } from '../services/productStorage';
 import { createConfigurationFingerprint } from '../services/configurationFingerprint';
 
 vi.mock('../services/agentClient', () => ({ getAgentStatus: vi.fn() }));
 vi.mock('../services/networkAgent', () => ({ closeNetworkSession: vi.fn(), openNetworkSession: vi.fn(), readNetworkSession: vi.fn(), sendNetworkData: vi.fn() }));
-vi.mock('../services/serialAgent', () => ({ listSerialSessions: vi.fn(), readSerialSession: vi.fn(), sendSerialData: vi.fn() }));
+vi.mock('../services/serialAgent', () => ({ closeSerialSession: vi.fn(), listSerialPorts: vi.fn(), listSerialSessions: vi.fn(), openSerialSession: vi.fn(), readSerialSession: vi.fn(), sendSerialData: vi.fn() }));
 vi.mock('../services/productStorage', () => ({ deleteTestRun: vi.fn(), listBuildArtifacts: vi.fn(), listFirmwareIdentities: vi.fn(), listTestRuns: vi.fn(), saveTestRunWithCommunicationSessions: vi.fn() }));
 
 const tcpSuite = [{
@@ -25,6 +25,12 @@ const tcpSuite = [{
     steps: [{ id: 'step-1', name: '发送 PING', type: 'send', stage: 'test', channel: 'tcp', data: 'PING', hex: false, durationMs: 0, timeoutMs: 1000, retryCount: 0, matchMode: 'contains', expected: '', failurePattern: '', onFailure: 'stop' }],
   }],
 }];
+const serialSuite = [{
+  id: 'suite-serial', name: '真实串口流程', variables: [], cases: [{
+    id: 'case-serial', name: '串口发送', sharedChannel: true, channel: 'serial-a', lineEnding: 'none',
+    steps: [{ id: 'step-serial', name: '发送 PING', type: 'send', stage: 'test', channel: 'serial-a', data: 'PING', hex: false, durationMs: 0, timeoutMs: 1000, retryCount: 0, matchMode: 'contains', expected: '', failurePattern: '', onFailure: 'stop' }],
+  }],
+}];
 
 describe('TestAutomationPage centralized Agent workflow', () => {
   beforeEach(() => {
@@ -32,7 +38,11 @@ describe('TestAutomationPage centralized Agent workflow', () => {
     localStorage.clear();
     localStorage.setItem('embedkit.automation.suites', JSON.stringify(tcpSuite));
     vi.mocked(getAgentStatus).mockResolvedValue({ available: true, name: 'EmbedKit Local Agent', version: '1.0.0', protocolVersion: 1, uptimeSeconds: 1, capabilities: ['tcp-client'], serialSessions: 0, networkSessions: 0, buildJobs: 0 });
+    vi.mocked(listSerialPorts).mockResolvedValue([]);
     vi.mocked(listSerialSessions).mockResolvedValue([]);
+    vi.mocked(readSerialSession).mockResolvedValue({ id: 'serial-1', path: 'COM7', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false, state: 'connected', rxBytes: 0, txBytes: 0, openedAt: '', events: [] });
+    vi.mocked(sendSerialData).mockResolvedValue({ sent: 4 });
+    vi.mocked(closeSerialSession).mockResolvedValue({ closed: true });
     vi.mocked(listTestRuns).mockResolvedValue([]);
     vi.mocked(listBuildArtifacts).mockResolvedValue([]);
     vi.mocked(listFirmwareIdentities).mockResolvedValue([]);
@@ -52,6 +62,50 @@ describe('TestAutomationPage centralized Agent workflow', () => {
     await waitFor(() => expect(closeNetworkSession).toHaveBeenCalledWith('network-1'));
     await waitFor(() => expect(saveTestRunWithCommunicationSessions).toHaveBeenCalledWith(expect.objectContaining({ schemaVersion: 3, caseName: '发送与清理', status: 'passed', agentVersion: '1.0.0', passed: 1, failed: 0, communications: [expect.objectContaining({ transport: 'tcp', sessionId: 'network-1', txBytes: 4, rxBytes: 0 })], communicationSessionIds: [expect.stringMatching(/:tcp$/)] }), [expect.objectContaining({ sourceSessionId: 'network-1', transport: 'tcp', status: 'completed', txBytes: 4, rxBytes: 0 })]));
     expect(screen.getByText(/测试创建的网络资源已释放/)).toBeVisible();
+  });
+
+  it('selects and opens a real serial port inside the test page, then closes the owned session', async () => {
+    localStorage.setItem('embedkit.automation.suites', JSON.stringify(serialSuite));
+    vi.mocked(listSerialPorts).mockResolvedValue([{ path: 'COM7', manufacturer: 'FTDI', serialNumber: 'A1', vendorId: '0403', productId: '6001', pnpId: '', friendlyName: 'USB Serial Port' }]);
+    vi.mocked(openSerialSession).mockResolvedValue({ id: 'serial-1', path: 'COM7', baudRate: 230400, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false, state: 'connected', rxBytes: 0, txBytes: 0, openedAt: '', events: [], reused: false });
+
+    render(<TestAutomationPage />);
+    await waitFor(() => expect(within(screen.getByLabelText('串口 A真实串口')).getByRole('option', { name: /COM7.*USB Serial Port/ })).toBeVisible());
+    fireEvent.change(screen.getByLabelText('串口 A波特率'), { target: { value: '230400' } });
+    fireEvent.click(screen.getByRole('button', { name: '连接串口 A' }));
+
+    await waitFor(() => expect(openSerialSession).toHaveBeenCalledWith({ path: 'COM7', baudRate: 230400, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' }));
+    expect(await screen.findByText(/本页创建，测试结束自动关闭/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '运行流程' }));
+    await waitFor(() => expect(sendSerialData).toHaveBeenCalledWith('serial-1', 'PING', 'text'));
+    await waitFor(() => expect(closeSerialSession).toHaveBeenCalledWith('serial-1'));
+    expect(await screen.findByText(/测试创建的串口资源已释放/)).toBeVisible();
+  });
+
+  it('reuses an existing real serial session without closing the external owner', async () => {
+    localStorage.setItem('embedkit.automation.suites', JSON.stringify(serialSuite));
+    const shared = { id: 'shared-1', path: 'COM8', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false, state: 'connected' as const, rxBytes: 0, txBytes: 0, openedAt: '', events: [] };
+    vi.mocked(listSerialPorts).mockResolvedValue([{ path: 'COM8', manufacturer: '', serialNumber: '', vendorId: '', productId: '', pnpId: '', friendlyName: 'Existing Device' }]);
+    vi.mocked(listSerialSessions).mockResolvedValue([shared]);
+
+    render(<TestAutomationPage />);
+    await waitFor(() => expect(within(screen.getByLabelText('串口 A已有会话')).getByRole('option', { name: 'COM8 · 115200' })).toBeVisible());
+    fireEvent.change(screen.getByLabelText('串口 A已有会话'), { target: { value: 'shared-1' } });
+    fireEvent.click(screen.getByRole('button', { name: '复用串口 A' }));
+    expect(await screen.findByText(/测试结束不会关闭外部会话/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '运行流程' }));
+    await waitFor(() => expect(sendSerialData).toHaveBeenCalledWith('shared-1', 'PING', 'text'));
+    await waitFor(() => expect(saveTestRunWithCommunicationSessions).toHaveBeenCalled());
+    expect(closeSerialSession).not.toHaveBeenCalledWith('shared-1');
+  });
+
+  it('reports a recoverable port enumeration failure without blocking flow editing', async () => {
+    vi.mocked(listSerialPorts).mockRejectedValue(new Error('串口权限不可用'));
+    render(<TestAutomationPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '刷新真实串口' }));
+    expect(await screen.findByText(/串口枚举失败：串口权限不可用/)).toBeVisible();
+    expect(screen.getByText('发送 PING')).toBeVisible();
+    expect(screen.getByRole('button', { name: '运行流程' })).toBeEnabled();
   });
 
   it('links a rerun to its baseline and reports a same-context candidate fix', async () => {
