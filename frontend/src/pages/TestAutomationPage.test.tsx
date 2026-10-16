@@ -73,6 +73,8 @@ describe('TestAutomationPage centralized Agent workflow', () => {
     vi.mocked(openSerialSession).mockResolvedValue({ id: 'serial-1', path: 'COM7', baudRate: 230400, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false, state: 'connected', rxBytes: 0, txBytes: 0, openedAt: '', events: [], reused: false });
 
     render(<TestAutomationPage />);
+    expect(screen.queryByLabelText('串口 A真实串口')).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: '新建或复用连接' })[0]);
     await waitFor(() => expect(within(screen.getByLabelText('串口 A真实串口')).getByRole('option', { name: /COM7.*USB Serial Port/ })).toBeVisible());
     fireEvent.change(screen.getByLabelText('串口 A波特率'), { target: { value: '230400' } });
     fireEvent.click(screen.getByRole('button', { name: '连接串口 A' }));
@@ -92,6 +94,7 @@ describe('TestAutomationPage centralized Agent workflow', () => {
     vi.mocked(listSerialSessions).mockResolvedValue([shared]);
 
     render(<TestAutomationPage />);
+    fireEvent.click(screen.getAllByRole('button', { name: '新建或复用连接' })[0]);
     await waitFor(() => expect(within(screen.getByLabelText('串口 A已有会话')).getByRole('option', { name: 'COM8 · 115200' })).toBeVisible());
     fireEvent.change(screen.getByLabelText('串口 A已有会话'), { target: { value: 'shared-1' } });
     fireEvent.click(screen.getByRole('button', { name: '复用串口 A' }));
@@ -115,6 +118,8 @@ describe('TestAutomationPage centralized Agent workflow', () => {
     expect(sendSerialData).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '绑定串口 A' }));
     expect(await screen.findByText(/已将通信调试的 COM9 绑定到串口 A/)).toBeVisible();
+    expect(screen.queryByLabelText('串口 A真实串口')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '更换连接' })).toHaveAttribute('aria-expanded', 'false');
     expect(sessionStorage.getItem('embedkit.test-session-handoff.pending')).toBeNull();
     expect(sendSerialData).not.toHaveBeenCalled();
 
@@ -134,6 +139,7 @@ describe('TestAutomationPage centralized Agent workflow', () => {
     render(<TestAutomationPage />);
     expect(await screen.findByText(/来自通信调试的 COM10 会话已失效/)).toBeVisible();
     expect(screen.queryByText('来自通信调试')).not.toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole('button', { name: '新建或复用连接' })[0]);
     expect(screen.getByLabelText('串口 A真实串口')).toBeEnabled();
     expect(sessionStorage.getItem('embedkit.test-session-handoff.pending')).toBeNull();
   });

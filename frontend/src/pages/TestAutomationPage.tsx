@@ -362,6 +362,10 @@ export default function TestAutomationPage() {
     >({}),
     [serialPorts, setSerialPorts] = useState<SerialAgentPort[]>([]),
     [serialConfigs, setSerialConfigs] = useState(loadSerialConfigs),
+    [serialSetupOpen, setSerialSetupOpen] = useState<Record<"serial-a" | "serial-b", boolean>>({
+      "serial-a": false,
+      "serial-b": false,
+    }),
     [serialBusy, setSerialBusy] = useState<"serial-a" | "serial-b" | "refresh" | null>(null),
     [serialMessage, setSerialMessage] = useState(""),
     [serialHandoff, setSerialHandoff] = useState<SerialTestSessionHandoff | null>(null);
@@ -619,6 +623,7 @@ export default function TestAutomationPage() {
       polling: false,
     };
     serials.current.set(channel, runtime);
+    setSerialSetupOpen(previous => ({ ...previous, [channel]: false }));
     sessionEvidence.current.set(channel, {
       channel,
       transport: "serial",
@@ -714,6 +719,7 @@ export default function TestAutomationPage() {
         setSerialMessage(`${channelLabels[channel]}关闭失败：${reason instanceof Error ? reason.message : String(reason)}`);
       }
     } else setSerialMessage(`${channelLabels[channel]}已解除绑定；共享会话保持连接`);
+    setSerialSetupOpen(previous => ({ ...previous, [channel]: true }));
   };
 
   const ensureWebSocket = async () => {
@@ -2614,37 +2620,45 @@ export default function TestAutomationPage() {
                 <div className="grid gap-2">
                   {(["serial-a", "serial-b"] as const).map((channel) => (
                     <div key={channel} className="rounded-lg border border-[#30363d] bg-[#111820] p-2">
-                      <div className="mb-2 flex items-center justify-between"><b className="text-[10px] text-cyan-300">{channelLabels[channel]}</b><span className={serialNames[channel] ? "text-[9px] text-green-400" : "text-[9px] text-gray-600"}>{serialNames[channel] ?? "未连接"}</span></div>
-                      <div className="flex items-end gap-1">
-                        <label className="min-w-0 flex-1 text-[9px] text-gray-600">已有会话
-                          <select aria-label={`${channelLabels[channel]}已有会话`} value={serialSelection[channel] ?? ""} disabled={running} onChange={(event) => setSerialSelection((previous) => ({ ...previous, [channel]: event.target.value || undefined }))} className="field">
-                            <option value="">不复用已有会话</option>
-                            {serialChoices.map((session) => <option key={session.id} value={session.id}>{session.path} · {session.baudRate}</option>)}
-                          </select>
-                        </label>
-                        <button aria-label={`复用${channelLabels[channel]}`} onClick={() => void bindSerial(channel)} disabled={running || !serialSelection[channel]} className="h-[34px] shrink-0 rounded-md border border-[#30363d] px-2 text-[9px] text-gray-400 disabled:opacity-30">复用</button>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="min-w-0"><b className="block text-[10px] text-cyan-300">{channelLabels[channel]}</b><span className={serialNames[channel] ? "block truncate text-[9px] text-green-400" : "block text-[9px] text-gray-600"}>{serialNames[channel] ?? "未绑定串口会话"}</span></div>
+                        <div className="flex shrink-0 gap-1">
+                          <button aria-expanded={serialSetupOpen[channel]} aria-controls={`${channel}-serial-setup`} onClick={() => setSerialSetupOpen(previous => ({ ...previous, [channel]: !previous[channel] }))} disabled={running} className="rounded-md border border-[#30363d] px-2 py-1.5 text-[9px] text-gray-400 disabled:opacity-30">{serialNames[channel] ? "更换连接" : "新建或复用连接"}</button>
+                          {serialNames[channel] && <button aria-label={`解除${channelLabels[channel]}`} onClick={() => void unbindSerial(channel)} disabled={running} className="rounded-md border border-[#30363d] px-2 py-1.5 text-[9px] text-gray-400 disabled:opacity-30">解除</button>}
+                        </div>
                       </div>
-                      <div className="mt-2 grid grid-cols-[1fr_92px] gap-1">
-                        <label className="min-w-0 text-[9px] text-gray-600">真实串口
-                          <select aria-label={`${channelLabels[channel]}真实串口`} value={serialConfigs[channel].path} disabled={running} onChange={(event) => setSerialConfigs(previous => ({ ...previous, [channel]: { ...previous[channel], path: event.target.value } }))} className="field">
-                            <option value="">选择本机端口</option>
-                            {serialPorts.map(port => <option key={port.path} value={port.path}>{port.path}{port.friendlyName ? ` · ${port.friendlyName}` : ""}</option>)}
-                          </select>
-                        </label>
-                        <label className="text-[9px] text-gray-600">波特率
-                          <input aria-label={`${channelLabels[channel]}波特率`} type="number" min="50" max="4000000" value={serialConfigs[channel].baudRate} disabled={running} onChange={(event) => setSerialConfigs(previous => ({ ...previous, [channel]: { ...previous[channel], baudRate: Math.max(50, Math.min(4_000_000, Number(event.target.value) || 115200)) } }))} className="field" />
-                        </label>
-                      </div>
-                      <div className="mt-1 grid grid-cols-4 gap-1">
-                        <label className="text-[8px] text-gray-600">数据位<select aria-label={`${channelLabels[channel]}数据位`} value={serialConfigs[channel].dataBits} disabled={running} onChange={(event) => setSerialConfigs(previous => ({ ...previous, [channel]: { ...previous[channel], dataBits: Number(event.target.value) as 7 | 8 } }))} className="field"><option value="8">8</option><option value="7">7</option></select></label>
-                        <label className="text-[8px] text-gray-600">停止位<select aria-label={`${channelLabels[channel]}停止位`} value={serialConfigs[channel].stopBits} disabled={running} onChange={(event) => setSerialConfigs(previous => ({ ...previous, [channel]: { ...previous[channel], stopBits: Number(event.target.value) as 1 | 2 } }))} className="field"><option value="1">1</option><option value="2">2</option></select></label>
-                        <label className="text-[8px] text-gray-600">校验<select aria-label={`${channelLabels[channel]}校验位`} value={serialConfigs[channel].parity} disabled={running} onChange={(event) => setSerialConfigs(previous => ({ ...previous, [channel]: { ...previous[channel], parity: event.target.value as SerialConnectionConfig["parity"] } }))} className="field"><option value="none">无</option><option value="even">偶</option><option value="odd">奇</option></select></label>
-                        <label className="text-[8px] text-gray-600">流控<select aria-label={`${channelLabels[channel]}流控`} value={serialConfigs[channel].flowControl} disabled={running} onChange={(event) => setSerialConfigs(previous => ({ ...previous, [channel]: { ...previous[channel], flowControl: event.target.value as SerialConnectionConfig["flowControl"] } }))} className="field"><option value="none">无</option><option value="hardware">硬件</option></select></label>
-                      </div>
-                      <div className="mt-2 flex gap-1">
-                        <button aria-label={`连接${channelLabels[channel]}`} onClick={() => void connectSerial(channel)} disabled={running || serialBusy !== null || !serialConfigs[channel].path} className="flex-1 rounded-md border border-cyan-500/30 px-2 py-1.5 text-[9px] text-cyan-300 disabled:opacity-30"><Usb size={10} className="mr-1 inline" />{serialBusy === channel ? "连接中…" : "连接并绑定"}</button>
-                        <button aria-label={`解除${channelLabels[channel]}`} onClick={() => void unbindSerial(channel)} disabled={running || !serialNames[channel]} className="rounded-md border border-[#30363d] px-2 py-1.5 text-[9px] text-gray-400 disabled:opacity-30">解除/断开</button>
-                      </div>
+                      {serialSetupOpen[channel] && <div id={`${channel}-serial-setup`} className="mt-2 border-t border-[#30363d] pt-2">
+                        {serialChoices.length > 0 && <div className="flex items-end gap-1">
+                          <label className="min-w-0 flex-1 text-[9px] text-gray-600">复用已连接会话
+                            <select aria-label={`${channelLabels[channel]}已有会话`} value={serialSelection[channel] ?? ""} disabled={running} onChange={(event) => setSerialSelection((previous) => ({ ...previous, [channel]: event.target.value || undefined }))} className="field">
+                              <option value="">选择已有会话</option>
+                              {serialChoices.map((session) => <option key={session.id} value={session.id}>{session.path} · {session.baudRate}</option>)}
+                            </select>
+                          </label>
+                          <button aria-label={`复用${channelLabels[channel]}`} onClick={() => void bindSerial(channel)} disabled={running || !serialSelection[channel]} className="h-[34px] shrink-0 rounded-md border border-[#30363d] px-2 text-[9px] text-gray-400 disabled:opacity-30">复用</button>
+                        </div>}
+                        <div className={`${serialChoices.length > 0 ? "mt-2" : ""} grid grid-cols-[1fr_92px] gap-1`}>
+                          <label className="min-w-0 text-[9px] text-gray-600">新建串口连接
+                            <select aria-label={`${channelLabels[channel]}真实串口`} value={serialConfigs[channel].path} disabled={running} onChange={(event) => setSerialConfigs(previous => ({ ...previous, [channel]: { ...previous[channel], path: event.target.value } }))} className="field">
+                              <option value="">选择本机端口</option>
+                              {serialPorts.map(port => <option key={port.path} value={port.path}>{port.path}{port.friendlyName ? ` · ${port.friendlyName}` : ""}</option>)}
+                            </select>
+                          </label>
+                          <label className="text-[9px] text-gray-600">波特率
+                            <input aria-label={`${channelLabels[channel]}波特率`} type="number" min="50" max="4000000" value={serialConfigs[channel].baudRate} disabled={running} onChange={(event) => setSerialConfigs(previous => ({ ...previous, [channel]: { ...previous[channel], baudRate: Math.max(50, Math.min(4_000_000, Number(event.target.value) || 115200)) } }))} className="field" />
+                          </label>
+                        </div>
+                        <details className="mt-1 rounded border border-[#30363d] px-2 py-1">
+                          <summary className="cursor-pointer text-[8px] text-gray-500">高级串口参数</summary>
+                          <div className="mt-1 grid grid-cols-4 gap-1">
+                            <label className="text-[8px] text-gray-600">数据位<select aria-label={`${channelLabels[channel]}数据位`} value={serialConfigs[channel].dataBits} disabled={running} onChange={(event) => setSerialConfigs(previous => ({ ...previous, [channel]: { ...previous[channel], dataBits: Number(event.target.value) as 7 | 8 } }))} className="field"><option value="8">8</option><option value="7">7</option></select></label>
+                            <label className="text-[8px] text-gray-600">停止位<select aria-label={`${channelLabels[channel]}停止位`} value={serialConfigs[channel].stopBits} disabled={running} onChange={(event) => setSerialConfigs(previous => ({ ...previous, [channel]: { ...previous[channel], stopBits: Number(event.target.value) as 1 | 2 } }))} className="field"><option value="1">1</option><option value="2">2</option></select></label>
+                            <label className="text-[8px] text-gray-600">校验<select aria-label={`${channelLabels[channel]}校验位`} value={serialConfigs[channel].parity} disabled={running} onChange={(event) => setSerialConfigs(previous => ({ ...previous, [channel]: { ...previous[channel], parity: event.target.value as SerialConnectionConfig["parity"] } }))} className="field"><option value="none">无</option><option value="even">偶</option><option value="odd">奇</option></select></label>
+                            <label className="text-[8px] text-gray-600">流控<select aria-label={`${channelLabels[channel]}流控`} value={serialConfigs[channel].flowControl} disabled={running} onChange={(event) => setSerialConfigs(previous => ({ ...previous, [channel]: { ...previous[channel], flowControl: event.target.value as SerialConnectionConfig["flowControl"] } }))} className="field"><option value="none">无</option><option value="hardware">硬件</option></select></label>
+                          </div>
+                        </details>
+                        <button aria-label={`连接${channelLabels[channel]}`} onClick={() => void connectSerial(channel)} disabled={running || serialBusy !== null || !serialConfigs[channel].path} className="mt-2 w-full rounded-md border border-cyan-500/30 px-2 py-1.5 text-[9px] text-cyan-300 disabled:opacity-30"><Usb size={10} className="mr-1 inline" />{serialBusy === channel ? "连接中…" : "连接并绑定"}</button>
+                      </div>}
                     </div>
                   ))}
                 </div>
