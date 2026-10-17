@@ -108,6 +108,7 @@ interface TestStep {
   captureName?: string;
   captureRegex?: string;
   onFailure?: "stop" | "continue";
+  lineEnding?: LineEnding;
 }
 interface TestCase {
   id: string;
@@ -234,6 +235,14 @@ const stageLabels: Record<StepStage, string> = {
   test: "测试",
   teardown: "清理",
 };
+const lineEndingLabels: Record<LineEnding, string> = {
+  none: "不追加",
+  crlf: "回车换行（CRLF）",
+  cr: "仅回车（CR）",
+  lf: "仅换行（LF）",
+};
+const isLineEnding = (value: unknown): value is LineEnding =>
+  value === "none" || value === "crlf" || value === "cr" || value === "lf";
 const createStep = (type: StepType = "command"): TestStep => ({
   id: crypto.randomUUID(),
   name: typeLabels[type],
@@ -818,7 +827,14 @@ export default function TestAutomationPage() {
     const resolved = resolveVariables(step.data, runtimeVariables.current),
       data = step.hex
         ? resolved
-        : applyLineEnding(resolved, selectedCase?.lineEnding);
+        : applyLineEnding(
+            resolved,
+            isLineEnding(step.lineEnding)
+              ? step.lineEnding
+              : isLineEnding(selectedCase?.lineEnding)
+                ? selectedCase.lineEnding
+                : "none",
+          );
     const bytes = step.hex
       ? parseHexBytes(data)
       : new TextEncoder().encode(data);
@@ -1638,10 +1654,13 @@ export default function TestAutomationPage() {
             id: crypto.randomUUID(),
             sharedChannel: item.sharedChannel ?? true,
             channel,
-            lineEnding: item.lineEnding ?? "none",
+            lineEnding: isLineEnding(item.lineEnding) ? item.lineEnding : "none",
             steps: item.steps.map((step) => ({
               ...createStep(step.type),
               ...step,
+              lineEnding: isLineEnding(step.lineEnding)
+                ? step.lineEnding
+                : undefined,
               stage: step.stage ?? "test",
               channel: item.sharedChannel === false ? step.channel : channel,
               id: crypto.randomUUID(),
@@ -2146,6 +2165,32 @@ export default function TestAutomationPage() {
                       />
                     </label>
                   )}
+                  {selectedStep.type === "send" && (
+                    <label className="text-[11px] text-gray-500">
+                      步骤发送行尾
+                      <select
+                        aria-label="步骤发送行尾"
+                        value={selectedStep.lineEnding ?? "inherit"}
+                        onChange={(event) =>
+                          updateStep({
+                            lineEnding:
+                              event.target.value === "inherit"
+                                ? undefined
+                                : (event.target.value as LineEnding),
+                          })
+                        }
+                        disabled={running || selectedStep.hex}
+                        className="field"
+                      >
+                        <option value="inherit">
+                          继承用例（{lineEndingLabels[isLineEnding(selectedCase.lineEnding) ? selectedCase.lineEnding : "none"]}）
+                        </option>
+                        {Object.entries(lineEndingLabels).map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
                   {selectedStep.type === "set-variable" && (
                     <div className="grid grid-cols-[110px_1fr] gap-2">
                       <label className="text-[11px] text-gray-500">变量名<input value={selectedStep.captureName ?? ""} onChange={(event) => updateStep({ captureName: event.target.value.toUpperCase().replace(/\W/g, "_") })} placeholder="VARIABLE" className="field" /></label>
@@ -2373,19 +2418,18 @@ export default function TestAutomationPage() {
                     </select>
                   </label>
                   <label className="text-[11px] text-gray-500">
-                    发送行尾
+                    默认发送行尾
                     <select
-                      value={selectedCase.lineEnding ?? "none"}
+                      value={isLineEnding(selectedCase.lineEnding) ? selectedCase.lineEnding : "none"}
                       onChange={(event) =>
                         setLineEnding(event.target.value as LineEnding)
                       }
                       disabled={running}
                       className="field"
                     >
-                      <option value="none">不追加</option>
-                      <option value="crlf">回车换行（CRLF）</option>
-                      <option value="cr">仅回车（CR）</option>
-                      <option value="lf">仅换行（LF）</option>
+                      {Object.entries(lineEndingLabels).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
                     </select>
                   </label>
                 </div>
@@ -2399,7 +2443,7 @@ export default function TestAutomationPage() {
                   后续步骤跟随统一通道
                 </label>
                 <p className="mt-1 text-[9px] text-gray-600">
-                  AT 指令通常选择 CRLF；HEX 数据不会自动追加行尾。
+                  这是步骤的默认值；发送步骤可以单独覆盖。HEX 数据不会自动追加行尾。
                 </p>
                 <button
                   onClick={() => addStep("command")}
@@ -2512,6 +2556,30 @@ export default function TestAutomationPage() {
                       />
                     </label>
                   </div>
+                  <label className="text-[11px] text-gray-500">
+                    指令发送行尾
+                    <select
+                      aria-label="指令发送行尾"
+                      value={selectedStep.lineEnding ?? "inherit"}
+                      onChange={(event) =>
+                        updateStep({
+                          lineEnding:
+                            event.target.value === "inherit"
+                              ? undefined
+                              : (event.target.value as LineEnding),
+                        })
+                      }
+                      disabled={running || selectedStep.hex}
+                      className="field"
+                    >
+                      <option value="inherit">
+                        继承用例（{lineEndingLabels[isLineEnding(selectedCase.lineEnding) ? selectedCase.lineEnding : "none"]}）
+                      </option>
+                      {Object.entries(lineEndingLabels).map(([value, label]) => (
+                        <option key={value} value={value}>{label}</option>
+                      ))}
+                    </select>
+                  </label>
                   <div className="flex items-center justify-between">
                     <label className="text-[11px] text-gray-500">
                       失败后

@@ -67,6 +67,34 @@ describe('TestAutomationPage centralized Agent workflow', () => {
     expect(screen.getByText(/测试创建的网络资源已释放/)).toBeVisible();
   });
 
+  it('overrides the case line ending for one text send step and persists the choice', async () => {
+    render(<TestAutomationPage />);
+    const lineEnding = screen.getByLabelText('步骤发送行尾');
+    expect(lineEnding).toHaveValue('inherit');
+
+    fireEvent.change(lineEnding, { target: { value: 'crlf' } });
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem('embedkit.automation.suites') ?? '[]');
+      expect(saved[0].cases[0].steps[0].lineEnding).toBe('crlf');
+    });
+    fireEvent.click(screen.getByRole('button', { name: '运行流程' }));
+
+    await waitFor(() => expect(sendNetworkData).toHaveBeenCalledWith('network-1', 'PING\r\n', 'text'));
+    await waitFor(() => expect(saveTestRunWithCommunicationSessions).toHaveBeenCalledWith(expect.objectContaining({ communications: [expect.objectContaining({ txBytes: 6 })] }), expect.any(Array)));
+  });
+
+  it('never appends a configured line ending to an explicit HEX step', async () => {
+    const suite = [{ ...tcpSuite[0], cases: [{ ...tcpSuite[0].cases[0], lineEnding: 'crlf', steps: [{ ...tcpSuite[0].cases[0].steps[0], data: '50 49 4E 47', hex: true, lineEnding: 'lf' }] }] }];
+    localStorage.setItem('embedkit.automation.suites', JSON.stringify(suite));
+
+    render(<TestAutomationPage />);
+    expect(screen.getByLabelText('步骤发送行尾')).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '运行流程' }));
+
+    await waitFor(() => expect(sendNetworkData).toHaveBeenCalledWith('network-1', '50 49 4E 47', 'hex'));
+    await waitFor(() => expect(saveTestRunWithCommunicationSessions).toHaveBeenCalledWith(expect.objectContaining({ communications: [expect.objectContaining({ txBytes: 4 })] }), expect.any(Array)));
+  });
+
   it('selects and opens a real serial port inside the test page, then closes the owned session', async () => {
     localStorage.setItem('embedkit.automation.suites', JSON.stringify(serialSuite));
     vi.mocked(listSerialPorts).mockResolvedValue([{ path: 'COM7', manufacturer: 'FTDI', serialNumber: 'A1', vendorId: '0403', productId: '6001', pnpId: '', friendlyName: 'USB Serial Port' }]);
