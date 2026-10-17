@@ -95,6 +95,29 @@ describe('TestAutomationPage centralized Agent workflow', () => {
     await waitFor(() => expect(saveTestRunWithCommunicationSessions).toHaveBeenCalledWith(expect.objectContaining({ communications: [expect.objectContaining({ txBytes: 4 })] }), expect.any(Array)));
   });
 
+  it('keeps secondary step and flow settings collapsed until requested', () => {
+    render(<TestAutomationPage />);
+
+    expect(screen.getByLabelText('步骤发送行尾')).toBeVisible();
+    expect(screen.getByLabelText('步骤名称')).not.toBeVisible();
+    fireEvent.click(screen.getByText(/基础属性 ·/));
+    expect(screen.getByLabelText('步骤名称')).toBeVisible();
+
+    expect(screen.getByLabelText('默认发送行尾')).not.toBeVisible();
+    fireEvent.click(screen.getByText(/流程默认值 ·/));
+    expect(screen.getByLabelText('默认发送行尾')).toBeVisible();
+  });
+
+  it('hides command failure matching and capture fields behind advanced settings', () => {
+    localStorage.removeItem('embedkit.automation.suites');
+    render(<TestAutomationPage />);
+
+    expect(screen.getByLabelText('指令发送行尾')).toBeVisible();
+    expect(screen.getByLabelText('失败响应（正则）')).not.toBeVisible();
+    fireEvent.click(screen.getByText(/高级断言与响应提取/));
+    expect(screen.getByLabelText('失败响应（正则）')).toBeVisible();
+  });
+
   it('selects and opens a real serial port inside the test page, then closes the owned session', async () => {
     localStorage.setItem('embedkit.automation.suites', JSON.stringify(serialSuite));
     vi.mocked(listSerialPorts).mockResolvedValue([{ path: 'COM7', manufacturer: 'FTDI', serialNumber: 'A1', vendorId: '0403', productId: '6001', pnpId: '', friendlyName: 'USB Serial Port' }]);
@@ -187,6 +210,7 @@ describe('TestAutomationPage centralized Agent workflow', () => {
     vi.mocked(listFirmwareIdentities).mockResolvedValue([{ schemaVersion: 1, id: 'firmware-1', buildArtifactId: 'artifact-1', sha256: 'b'.repeat(64), byteLength: 64, format: 'bin', capturedAt: '2026-10-14T00:00:00.000Z' }]);
     vi.mocked(listTestRuns).mockResolvedValue([{ schemaVersion: 3, id: 'baseline-1', suiteId: 'suite-1', suiteName: 'TCP 设备流程', caseId: 'case-1', caseName: '发送与清理', status: 'failed', startedAt: '2026-10-13T00:00:00.000Z', finishedAt: '2026-10-13T00:00:01.000Z', durationMs: 1000, passed: 0, failed: 1, agentVersion: '1.0.0', firmwareId: 'firmware-1', firmware: { buildId: 'build-1', artifactName: 'verified.bin', artifactType: 'bin', size: 64, modifiedAt: '', sha256: 'b'.repeat(64), analyzedAt: '' }, testDefinitionSha256, inputEnvironment: {}, secretInputCount: 0, communications: [{ channel: 'tcp', transport: 'tcp', sessionId: 'old-network', endpoint: 'client:127.0.0.1:9000', rxBytes: 0, txBytes: 4 }], environment: {}, steps: [{ id: 'step-1', name: '发送 PING', type: 'send', channel: 'tcp', status: 'failed', startedAt: '', finishedAt: '', durationMs: 1000, retries: 0 }], logs: [] }]);
     render(<TestAutomationPage />);
+    fireEvent.click(screen.getByText(/运行上下文 ·/));
     await waitFor(() => expect(screen.getByRole('option', { name: /failed/ })).toBeVisible());
     fireEvent.change(screen.getByLabelText('已计算固件指纹'), { target: { value: 'firmware-1' } });
     fireEvent.change(screen.getByLabelText('修复复测基线'), { target: { value: 'baseline-1' } });
@@ -226,6 +250,7 @@ describe('TestAutomationPage centralized Agent workflow', () => {
       ]),
     );
     render(<TestAutomationPage />);
+    fireEvent.click(screen.getByText(/运行上下文 ·/));
     await waitFor(() => expect(screen.getByRole('option', { name: /release\.bin/ })).toBeVisible());
     fireEvent.change(screen.getByLabelText('已计算固件指纹'), {
       target: { value: 'build-1:0' },
@@ -251,6 +276,7 @@ describe('TestAutomationPage centralized Agent workflow', () => {
     vi.mocked(listFirmwareIdentities).mockResolvedValue([{ schemaVersion: 1, id: 'firmware-1', buildArtifactId: 'artifact-1', sha256: 'b'.repeat(64), byteLength: 64, format: 'bin', capturedAt: '2026-10-14T00:00:00.000Z' }]);
 
     render(<TestAutomationPage />);
+    fireEvent.click(screen.getByText(/运行上下文 ·/));
     await waitFor(() => expect(screen.getByRole('option', { name: /verified\.bin/ })).toBeVisible());
     fireEvent.change(screen.getByLabelText('已计算固件指纹'), { target: { value: 'firmware-1' } });
     fireEvent.click(screen.getByRole('button', { name: '运行流程' }));

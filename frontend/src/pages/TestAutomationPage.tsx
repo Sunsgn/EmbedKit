@@ -2082,74 +2082,29 @@ export default function TestAutomationPage() {
               </div>
               {selectedStep ? (
                 <div className="grid gap-2 p-3">
-                  <label className="text-[11px] text-gray-500">
-                    步骤名称
-                    <input
-                      value={selectedStep.name}
-                      onChange={(event) =>
-                        updateStep({ name: event.target.value })
-                      }
-                      disabled={running}
-                      className="field"
-                    />
-                  </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    <label className="text-[11px] text-gray-500">
-                      阶段
-                      <select
-                        value={selectedStep.stage ?? "test"}
-                        onChange={(event) =>
-                          updateStep({ stage: event.target.value as StepStage })
-                        }
-                        disabled={running}
-                        className="field"
-                      >
-                        {Object.entries(stageLabels).map(([value, label]) => (
-                          <option key={value} value={value}>{label}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="text-[11px] text-gray-500">
-                      类型
-                      <select
-                        value={selectedStep.type}
-                        onChange={(event) =>
-                          setStepType(event.target.value as StepType)
-                        }
-                        disabled={running}
-                        className="field"
-                      >
-                        {Object.entries(typeLabels).map(([value, label]) => (
-                          <option key={value} value={value}>
-                            {label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    {stepUsesChannel(selectedStep.type) && (
+                  <details className="rounded-lg border border-[#30363d] bg-[#111820] px-2 py-1.5">
+                    <summary className="cursor-pointer text-[10px] text-gray-400">
+                      基础属性 · {stageLabels[selectedStep.stage ?? "test"]} / {typeLabels[selectedStep.type]}{stepUsesChannel(selectedStep.type) ? ` / ${channelLabels[selectedStep.channel]}` : ""}
+                    </summary>
+                    <div className="mt-2 grid gap-2 border-t border-[#30363d] pt-2">
                       <label className="text-[11px] text-gray-500">
-                        通道
-                        <select
-                          value={selectedStep.channel}
+                        步骤名称
+                        <input
+                          value={selectedStep.name}
                           onChange={(event) =>
-                            updateStep({
-                              channel: event.target.value as Channel,
-                            })
+                            updateStep({ name: event.target.value })
                           }
                           disabled={running}
                           className="field"
-                        >
-                          {Object.entries(channelLabels).map(
-                            ([value, label]) => (
-                              <option key={value} value={value}>
-                                {label}
-                              </option>
-                            ),
-                          )}
-                        </select>
+                        />
                       </label>
-                    )}
-                  </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <label className="text-[11px] text-gray-500">阶段<select value={selectedStep.stage ?? "test"} onChange={(event) => updateStep({ stage: event.target.value as StepStage })} disabled={running} className="field">{Object.entries(stageLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                        <label className="text-[11px] text-gray-500">类型<select value={selectedStep.type} onChange={(event) => setStepType(event.target.value as StepType)} disabled={running} className="field">{Object.entries(typeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+                        {stepUsesChannel(selectedStep.type) && <label className="text-[11px] text-gray-500">通道<select value={selectedStep.channel} onChange={(event) => updateStep({ channel: event.target.value as Channel })} disabled={running} className="field">{Object.entries(channelLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
+                      </div>
+                    </div>
+                  </details>
                   {(selectedStep.type === "send" ||
                     selectedStep.type === "match") && (
                     <label className="text-[11px] text-gray-500">
@@ -2166,30 +2121,16 @@ export default function TestAutomationPage() {
                     </label>
                   )}
                   {selectedStep.type === "send" && (
-                    <label className="text-[11px] text-gray-500">
-                      步骤发送行尾
-                      <select
-                        aria-label="步骤发送行尾"
-                        value={selectedStep.lineEnding ?? "inherit"}
-                        onChange={(event) =>
-                          updateStep({
-                            lineEnding:
-                              event.target.value === "inherit"
-                                ? undefined
-                                : (event.target.value as LineEnding),
-                          })
-                        }
-                        disabled={running || selectedStep.hex}
-                        className="field"
-                      >
-                        <option value="inherit">
-                          继承用例（{lineEndingLabels[isLineEnding(selectedCase.lineEnding) ? selectedCase.lineEnding : "none"]}）
-                        </option>
-                        {Object.entries(lineEndingLabels).map(([value, label]) => (
-                          <option key={value} value={value}>{label}</option>
-                        ))}
-                      </select>
-                    </label>
+                    <div className="grid grid-cols-[1fr_auto] items-end gap-2">
+                      <label className="text-[11px] text-gray-500">
+                        步骤发送行尾
+                        <select aria-label="步骤发送行尾" value={selectedStep.lineEnding ?? "inherit"} onChange={(event) => updateStep({ lineEnding: event.target.value === "inherit" ? undefined : (event.target.value as LineEnding) })} disabled={running || selectedStep.hex} className="field">
+                          <option value="inherit">继承用例（{lineEndingLabels[isLineEnding(selectedCase.lineEnding) ? selectedCase.lineEnding : "none"]}）</option>
+                          {Object.entries(lineEndingLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                        </select>
+                      </label>
+                      <label className="flex h-[34px] items-center gap-1 text-xs text-gray-400"><input type="checkbox" checked={selectedStep.hex} onChange={(event) => updateStep({ hex: event.target.checked })} />HEX 数据</label>
+                    </div>
                   )}
                   {selectedStep.type === "set-variable" && (
                     <div className="grid grid-cols-[110px_1fr] gap-2">
@@ -2249,8 +2190,7 @@ export default function TestAutomationPage() {
                         />
                       </label>
                     ) : null}
-                    {(selectedStep.type === "send" ||
-                      selectedStep.type === "match") && (
+                    {selectedStep.type === "match" && (
                       <label className="mt-5 flex items-center gap-1 text-xs text-gray-400">
                         <input
                           type="checkbox"
@@ -2270,11 +2210,11 @@ export default function TestAutomationPage() {
                 </div>
               )}
             </section>
-            <section className="shrink-0 rounded-xl border border-[#30363d] bg-[#0d1117]">
-              <div className="flex items-center justify-between border-b border-[#30363d] bg-[#111820] px-3 py-2">
-                <span className="text-xs font-semibold text-gray-300">
-                  流程变量
-                </span>
+            <details className="shrink-0 rounded-xl border border-[#30363d] bg-[#0d1117]">
+              <summary className="cursor-pointer bg-[#111820] px-3 py-2 text-[10px] text-gray-400">
+                流程变量 · {(selectedSuite.variables ?? []).length} 项
+              </summary>
+              <div className="flex justify-end border-t border-[#30363d] px-2 pt-2">
                 <button
                   onClick={addVariable}
                   disabled={running}
@@ -2391,10 +2331,13 @@ export default function TestAutomationPage() {
                   导出流程
                 </button>
               </div>
-            </section>
+            </details>
             {selectedCase && (
-              <section className="shrink-0 rounded-xl border border-[#30363d] bg-[#0d1117] px-3 py-2">
-                <div className="grid grid-cols-[1fr_90px] items-end gap-2">
+              <details className="shrink-0 rounded-xl border border-[#30363d] bg-[#0d1117] px-3 py-2">
+                <summary className="cursor-pointer text-[10px] text-gray-400">
+                  流程默认值 · {channelLabels[sharedFlowChannel(selectedCase)]} / {lineEndingLabels[isLineEnding(selectedCase.lineEnding) ? selectedCase.lineEnding : "none"]}
+                </summary>
+                <div className="mt-2 grid grid-cols-[1fr_90px] items-end gap-2 border-t border-[#30363d] pt-2">
                   <label className="min-w-0 text-[11px] text-gray-500">
                     流程统一通道
                     <select
@@ -2453,7 +2396,7 @@ export default function TestAutomationPage() {
                   <Plus size={11} />
                   新增发送并断言
                 </button>
-              </section>
+              </details>
             )}
             {selectedStep?.type === "command" && (
               <section className="max-h-72 shrink-0 overflow-y-auto rounded-xl border border-cyan-500/20 bg-[#0d1117] p-3 scrollbar-thin">
@@ -2501,85 +2444,28 @@ export default function TestAutomationPage() {
                       </select>
                     </label>
                   </div>
+                  <details className="rounded-lg border border-[#30363d] bg-[#111820] px-2 py-1.5">
+                    <summary className="cursor-pointer text-[10px] text-gray-400">
+                      高级断言与响应提取{selectedStep.captureName ? ` · ${selectedStep.captureName}` : ""}
+                    </summary>
+                    <div className="mt-2 grid gap-2 border-t border-[#30363d] pt-2">
+                      <label className="text-[11px] text-gray-500">失败响应（正则）<input value={selectedStep.failurePattern ?? "ERROR|FAIL"} onChange={(event) => updateStep({ failurePattern: event.target.value })} disabled={running} className="field" /></label>
+                      <div className="grid grid-cols-[92px_1fr] gap-2">
+                        <label className="text-[11px] text-gray-500">提取到变量<input value={selectedStep.captureName ?? ""} onChange={(event) => updateStep({ captureName: event.target.value.toUpperCase().replace(/\W/g, "_") })} disabled={running} placeholder="DEVICE_IP" className="field" /></label>
+                        <label className="text-[11px] text-gray-500">提取正则（首个捕获组）<input value={selectedStep.captureRegex ?? ""} onChange={(event) => updateStep({ captureRegex: event.target.value })} disabled={running} placeholder={'例如 STAIP,"([^"]+)"'} className="field" /></label>
+                      </div>
+                    </div>
+                  </details>
                   <div className="grid grid-cols-[1fr_82px] gap-2">
                     <label className="text-[11px] text-gray-500">
-                      失败响应（正则）
-                      <input
-                        value={selectedStep.failurePattern ?? "ERROR|FAIL"}
-                        onChange={(event) =>
-                          updateStep({ failurePattern: event.target.value })
-                        }
-                        disabled={running}
-                        className="field"
-                      />
+                      指令发送行尾
+                      <select aria-label="指令发送行尾" value={selectedStep.lineEnding ?? "inherit"} onChange={(event) => updateStep({ lineEnding: event.target.value === "inherit" ? undefined : (event.target.value as LineEnding) })} disabled={running || selectedStep.hex} className="field">
+                        <option value="inherit">继承用例（{lineEndingLabels[isLineEnding(selectedCase.lineEnding) ? selectedCase.lineEnding : "none"]}）</option>
+                        {Object.entries(lineEndingLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                      </select>
                     </label>
-                    <label className="text-[11px] text-gray-500">
-                      超时 ms
-                      <input
-                        type="number"
-                        value={selectedStep.timeoutMs}
-                        onChange={(event) =>
-                          updateStep({ timeoutMs: Number(event.target.value) })
-                        }
-                        disabled={running}
-                        className="field"
-                      />
-                    </label>
+                    <label className="text-[11px] text-gray-500">超时 ms<input type="number" value={selectedStep.timeoutMs} onChange={(event) => updateStep({ timeoutMs: Number(event.target.value) })} disabled={running} className="field" /></label>
                   </div>
-                  <div className="grid grid-cols-[92px_1fr] gap-2">
-                    <label className="text-[11px] text-gray-500">
-                      提取到变量
-                      <input
-                        value={selectedStep.captureName ?? ""}
-                        onChange={(event) =>
-                          updateStep({
-                            captureName: event.target.value
-                              .toUpperCase()
-                              .replace(/\W/g, "_"),
-                          })
-                        }
-                        disabled={running}
-                        placeholder="DEVICE_IP"
-                        className="field"
-                      />
-                    </label>
-                    <label className="text-[11px] text-gray-500">
-                      提取正则（首个捕获组）
-                      <input
-                        value={selectedStep.captureRegex ?? ""}
-                        onChange={(event) =>
-                          updateStep({ captureRegex: event.target.value })
-                        }
-                        disabled={running}
-                        placeholder={'例如 STAIP,"([^"]+)"'}
-                        className="field"
-                      />
-                    </label>
-                  </div>
-                  <label className="text-[11px] text-gray-500">
-                    指令发送行尾
-                    <select
-                      aria-label="指令发送行尾"
-                      value={selectedStep.lineEnding ?? "inherit"}
-                      onChange={(event) =>
-                        updateStep({
-                          lineEnding:
-                            event.target.value === "inherit"
-                              ? undefined
-                              : (event.target.value as LineEnding),
-                        })
-                      }
-                      disabled={running || selectedStep.hex}
-                      className="field"
-                    >
-                      <option value="inherit">
-                        继承用例（{lineEndingLabels[isLineEnding(selectedCase.lineEnding) ? selectedCase.lineEnding : "none"]}）
-                      </option>
-                      {Object.entries(lineEndingLabels).map(([value, label]) => (
-                        <option key={value} value={value}>{label}</option>
-                      ))}
-                    </select>
-                  </label>
                   <div className="flex items-center justify-between">
                     <label className="text-[11px] text-gray-500">
                       失败后
@@ -2614,8 +2500,11 @@ export default function TestAutomationPage() {
               </section>
             )}
             {selectedStep && (
-              <section className="shrink-0 rounded-xl border border-[#30363d] bg-[#0d1117] px-3 py-2">
-                <label className="flex items-center justify-between gap-3 text-[11px] text-gray-500">
+              <details className="shrink-0 rounded-xl border border-[#30363d] bg-[#0d1117] px-3 py-2">
+                <summary className="cursor-pointer text-[10px] text-gray-400">
+                  重试策略 · {selectedStep.retryCount || 0} 次
+                </summary>
+                <label className="mt-2 flex items-center justify-between gap-3 border-t border-[#30363d] pt-2 text-[11px] text-gray-500">
                   <span>
                     {selectedStep.type === "command"
                       ? "完整指令事务重试"
@@ -2641,10 +2530,13 @@ export default function TestAutomationPage() {
                     次
                   </span>
                 </label>
-              </section>
+              </details>
             )}
-            <section className="shrink-0 rounded-xl border border-[#30363d] bg-[#0d1117] px-3 py-2">
-              <div className="grid gap-2 sm:grid-cols-2">
+            <details className="shrink-0 rounded-xl border border-[#30363d] bg-[#0d1117] px-3 py-2">
+              <summary className="cursor-pointer text-[10px] text-gray-400">
+                运行上下文 · {selectedFirmwareId ? "已关联固件" : "未关联固件"}{baselineRunId ? " / 已选复测基线" : ""}
+              </summary>
+              <div className="mt-2 grid gap-2 border-t border-[#30363d] pt-2 sm:grid-cols-2">
                 <label className="min-w-0 text-[10px] text-gray-500">
                   已计算固件指纹
                   <select
@@ -2674,7 +2566,7 @@ export default function TestAutomationPage() {
               <p className="mt-1 text-[9px] text-gray-600">
                 仅接受真实计算的 SHA-256；文件名不会被当作固件版本证明。
               </p>
-            </section>
+            </details>
             <section className="shrink-0 rounded-xl border border-[#30363d] bg-[#0d1117]">
               <div className="flex items-center justify-between border-b border-[#30363d] bg-[#111820] px-3 py-2 text-xs font-semibold text-gray-300">
                 <span>通道配置</span>
