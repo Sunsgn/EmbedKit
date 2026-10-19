@@ -184,7 +184,20 @@ test('reports local agent version and capabilities', async () => {
   assert.ok(result.capabilities.includes('elf-analysis'));
   assert.ok(result.capabilities.includes('software-environment'));
   assert.ok(result.capabilities.includes('software-installation'));
+  assert.ok(result.capabilities.includes('part-source-status'));
+  assert.ok(result.capabilities.includes('part-details-online'));
   assert.equal(response.headers.get('x-embedkit-protocol'), '1');
+});
+
+test('reports bounded online part-source capabilities without claiming parametric search', async () => {
+  const response = await fetch(`${agentBaseUrl}/api/parts/sources`);
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.schemaVersion, 1);
+  assert.equal(result.limits.automaticPdfDownload, false);
+  assert.equal(result.limits.parametricSearch, false);
+  assert.ok(result.sources.some(source => source.kind === 'manufacturer' && source.authoritative));
+  assert.ok(result.sources.every(source => Array.isArray(source.capabilities) && typeof source.dataScope === 'string'));
 });
 
 test('detects installed development software with bounded structured results', async () => {

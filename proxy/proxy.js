@@ -1451,7 +1451,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === '/api/agent/status' && req.method === 'GET') {
-    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: ['serial', 'tcp-client', 'tcp-server', 'udp-client', 'udp-server', 'session-restore', 'network-session-restore', 'structured-errors', 'project-build', 'project-scan', 'local-picker', 'local-file-read', 'elf-analysis', 'software-environment', 'software-installation'] });
+    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: ['serial', 'tcp-client', 'tcp-server', 'udp-client', 'udp-server', 'session-restore', 'network-session-restore', 'structured-errors', 'project-build', 'project-scan', 'local-picker', 'local-file-read', 'elf-analysis', 'software-environment', 'software-installation', 'part-source-status', 'part-details-online'] });
     return;
   }
 
@@ -1680,6 +1680,18 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     jsonRes(res, 405, { error: 'Unsupported operation for network session' });
+    return;
+  }
+
+  if (pathname === '/api/parts/sources' && req.method === 'GET') {
+    jsonRes(res, 200, {
+      schemaVersion: 1,
+      sources: [
+        { id: 'snapmagic', name: 'SnapMagic', kind: 'aggregator', state: 'configured', capabilities: ['keyword-details', 'datasheet-link'], dataScope: '仅发送用户输入的器件型号', authoritative: false },
+        { id: 'manufacturer-navigation', name: '厂商官方资料导航', kind: 'manufacturer', state: 'configured', capabilities: ['product-page-link'], dataScope: '仅使用器件型号生成官方入口', authoritative: true },
+      ],
+      limits: { queryLength: 120, automaticPdfDownload: false, parametricSearch: false },
+    });
     return;
   }
 
