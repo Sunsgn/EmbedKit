@@ -16,6 +16,19 @@ export type {
   ProjectRevision,
   ProjectRevisionSource,
 } from './lifecycle';
+export type {
+  PartDocument,
+  PartDocumentKind,
+  PartEvidenceReference,
+  PartLifecycleStatus,
+  PartParameter,
+  PartParameterStatus,
+  PartParameterValueType,
+  PartRecord,
+  PartSource,
+  PartSourceKind,
+  PartVariant,
+} from './parts';
 
 export interface Chip {
   id: string;
