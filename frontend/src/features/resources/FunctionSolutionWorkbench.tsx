@@ -59,6 +59,12 @@ export default function FunctionSolutionWorkbench({ initialSolution, initialRole
       ...current,
       roles: current.roles.map((item) => (item.id === next.id ? next : item)),
     }));
+  const changeRoleCategory = (nextCategoryId: string) => {
+    if (!role || nextCategoryId === role.categoryId) return;
+    if (role.constraints.length && !window.confirm('修改器件类别会清空当前角色的选型条件，候选和资料仍会保留。是否继续？')) return;
+    updateRole({ ...role, categoryId: nextCategoryId, name: role.categoryId === 'custom' ? categoryNames[nextCategoryId] || role.name : role.name, constraints: [], selectedPartId: undefined });
+    setMessage('已修改器件类别；请根据新类别重新确认选型条件');
+  };
   const applyTemplate = (templateId: string) => {
     if (!window.confirm('创建新方案会替换当前未保存的工作区，是否继续？')) return;
     const next = createFunctionSolution(functionTemplates.find((item) => item.id === templateId) ?? functionTemplates[2]);
@@ -260,9 +266,14 @@ export default function FunctionSolutionWorkbench({ initialSolution, initialRole
                     {role.purpose || '尚未填写角色用途'} · 当前候选 {candidates.length}
                   </p>
                 </div>
-                <button onClick={loadCatalog} className="rounded border border-blue-500/30 px-3 py-1.5 text-xs text-blue-300">
-                  加载本地候选
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select aria-label="当前角色类别" value={role.categoryId} onChange={(event) => changeRoleCategory(event.target.value)} className="rounded border border-[#30363d] bg-[#0d1117] px-2 py-1.5 text-xs text-gray-300">
+                    {Object.entries(categoryNames).map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+                  </select>
+                  <button onClick={loadCatalog} className="rounded border border-blue-500/30 px-3 py-1.5 text-xs text-blue-300">
+                    加载本地候选
+                  </button>
+                </div>
               </div>
               <nav aria-label="角色工作区" className="mb-4 flex border-b border-[#30363d]">
                 {(
