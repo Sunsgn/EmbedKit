@@ -1,7 +1,7 @@
 import { LOCAL_PROXY_BASE } from './aiService';
 
 export const AGENT_PROTOCOL_VERSION = 1;
-export type AgentErrorKind = 'offline' | 'timeout' | 'incompatible' | 'http' | 'invalid-response';
+export type AgentErrorKind = 'offline' | 'timeout' | 'cancelled' | 'incompatible' | 'http' | 'invalid-response';
 export interface AgentStatus { available: boolean; name: string; version: string; protocolVersion: number; uptimeSeconds: number; capabilities: string[]; serialSessions: number; networkSessions: number; buildJobs: number }
 
 export class AgentClientError extends Error {
@@ -17,7 +17,7 @@ export async function agentRequest<T>(path: string, init: RequestInit = {}, time
   try {
     let response: Response;
     try { response = await fetch(`${LOCAL_PROXY_BASE}${path}`, { ...init, headers, signal: init.signal ?? controller.signal }); }
-    catch (error) { if (error instanceof DOMException && error.name === 'AbortError') throw new AgentClientError('timeout', `本地助手请求超时（${timeoutMs} ms）`); throw new AgentClientError('offline', '无法连接本地助手，请确认已安装并启动 EmbedKit Local Agent'); }
+    catch (error) { if (error instanceof DOMException && error.name === 'AbortError') { if (init.signal?.aborted) throw new AgentClientError('cancelled', '操作已取消'); throw new AgentClientError('timeout', `本地助手请求超时（${timeoutMs} ms）`); } throw new AgentClientError('offline', '无法连接本地助手，请确认已安装并启动 EmbedKit Local Agent'); }
     const responseProtocol = Number(response.headers.get('X-EmbedKit-Protocol') || 0);
     if (responseProtocol !== AGENT_PROTOCOL_VERSION) throw new AgentClientError('incompatible', `本地助手协议不兼容：网页 ${AGENT_PROTOCOL_VERSION}，Agent ${responseProtocol || '未声明'}`);
     let result: unknown; try { result = await response.json(); } catch { throw new AgentClientError('invalid-response', '本地助手返回了无法解析的响应', response.status); }

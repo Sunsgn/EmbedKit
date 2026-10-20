@@ -14,10 +14,10 @@ export async function getPartSourceStatus(): Promise<PartSourceStatus> {
   return result;
 }
 
-export async function lookupOnlinePart(model: string): Promise<OnlinePartDetails> {
+export async function lookupOnlinePart(model: string, signal?: AbortSignal): Promise<OnlinePartDetails> {
   const query = model.trim();
   if (query.length < 2 || query.length > 120 || !/^[\p{L}\p{N}][\p{L}\p{N}._+\-/ ]*$/u.test(query)) throw new AgentClientError('invalid-response', '请输入 2～120 个字符的完整器件型号');
-  const raw = await agentRequest<Record<string, unknown>>(`/api/component-details?part=${encodeURIComponent(query)}`, {}, 12000);
+  const raw = await agentRequest<Record<string, unknown>>(`/api/component-details?part=${encodeURIComponent(query)}`, { signal }, 12000);
   if (raw.error) throw new AgentClientError('http', text(raw.error, 500) || '在线来源没有找到该型号');
   const specs: Record<string, string> = {};
   if (raw.specs && typeof raw.specs === 'object' && !Array.isArray(raw.specs)) for (const [key, value] of Object.entries(raw.specs).slice(0, 64)) { const label = text(key, 120), detail = text(value, 500); if (label && detail) specs[label] = detail; }
