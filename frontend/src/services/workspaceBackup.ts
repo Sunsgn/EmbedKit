@@ -16,6 +16,7 @@ const PORTABLE_LOCAL_KEYS = [
   'embedkit.automation.suites',
   'embedkit-learning-progress',
   'embedkit.build-analysis-records',
+  'embedkit.part-selection-records',
 ] as const;
 
 type PortableValue = null | boolean | number | string | PortableValue[] | { [key: string]: PortableValue };

@@ -40,6 +40,15 @@ describe('workspace backup', () => {
     expect(preview).toMatchObject({ projects: 1, projectConflicts: 1, runs: 1, runConflicts: 1, lifecycleRecords: 1, lifecycleConflicts: 1, localSettings: 2, localConflicts: 1 });
   });
 
+  it('accepts selection records as portable local data', async () => {
+    const value = backup() as WorkspaceBackup & { local: Record<string, unknown> };
+    value.local['embedkit.part-selection-records'] = [];
+    const parsed = parseWorkspaceBackup(JSON.stringify(value));
+    expect(parsed.local['embedkit.part-selection-records']).toEqual([]);
+    await applyWorkspaceBackup(parsed, localStorage, async () => undefined);
+    expect(localStorage.getItem('embedkit.part-selection-records')).toBe('[]');
+  });
+
   it('rejects incompatible, oversized, and structurally invalid backups', () => {
     expect(() => parseWorkspaceBackup('{}')).toThrow(/格式或版本/);
     expect(() => parseWorkspaceBackup('x'.repeat(WORKSPACE_BACKUP_MAX_BYTES + 1))).toThrow(/16 MiB/);
