@@ -16,7 +16,7 @@ describe('RecommendationCandidateImporter', () => {
     fireEvent.change(screen.getByLabelText('推荐文本'), { target: { value: '- STM32G474RET6：支持 CAN FD' } });
     fireEvent.click(screen.getByRole('button', { name: '提取候选' }));
     expect(screen.getByText('STM32G474RET6')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '核验并加入当前角色' }));
+    fireEvent.click(screen.getByRole('button', { name: '查询并加入当前角色' }));
     await waitFor(() => expect(onAdd).toHaveBeenCalledTimes(1));
     expect(onAdd.mock.calls[0][0][0]).toMatchObject({ mpn: 'STM32G474RET6', parameters: [{ key: 'raw:operating-temperature', status: 'imported' }] });
     expect(onAdd.mock.calls[0][0][0].evidence.at(-1).note).toContain('不作为器件参数证据');
