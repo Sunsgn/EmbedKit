@@ -18,4 +18,11 @@ describe('MCU selection catalog', () => {
     expect(results.some(item => item.mpn === 'STM32F103RCT6' && item.outcome === 'needs-verification')).toBe(true);
     expect(results.some(item => item.outcome === 'excluded' && item.mismatched > 0)).toBe(true);
   });
+
+  it('decodes supported STM32 ordering temperature suffixes without inventing ranges for other vendors', () => {
+    const stm32 = mcuSelectionCatalog.find(part => part.mpn === 'STM32F103RCT6');
+    expect(stm32?.parameters.find(parameter => parameter.key === 'temperature-c')).toMatchObject({ min: -40, max: 85, unit: '°C', status: 'imported' });
+    const otherVendor = mcuSelectionCatalog.find(part => part.manufacturer !== 'STMicroelectronics');
+    expect(otherVendor?.parameters.find(parameter => parameter.key === 'temperature-c')).toBeUndefined();
+  });
 });

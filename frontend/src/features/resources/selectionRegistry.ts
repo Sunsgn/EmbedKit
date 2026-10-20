@@ -27,9 +27,11 @@ export const parameterDefinitions: ParameterDefinition[] = [
   definition({ id: 'mcu.flash', categoryId: 'mcu', parameterKey: 'flash-kb', label: 'Flash 容量', valueType: 'number', canonicalUnit: 'KB', allowedUnits: ['KB', 'MB'], supportedOperators: numericOperators, description: '片上非易失程序存储容量。' }),
   definition({ id: 'mcu.ram', categoryId: 'mcu', parameterKey: 'ram-kb', label: 'RAM 容量', valueType: 'number', canonicalUnit: 'KB', allowedUnits: ['KB', 'MB'], supportedOperators: numericOperators, description: '片上易失数据存储容量。' }),
   definition({ id: 'mcu.peripheral', categoryId: 'mcu', parameterKey: 'peripheral', label: '外设能力', valueType: 'enum', enumValues: ['CAN', 'USB', 'ETH', 'UART', 'I2C', 'SPI', 'BLE', 'WIFI'], supportedOperators: ['equals', 'not-equals', 'contains-any', 'contains-all'], description: '芯片集成的通信或控制外设。' }),
+  definition({ id: 'mcu.temperature', categoryId: 'mcu', parameterKey: 'temperature-c', label: '工作温度', aliases: ['温度', '工作温度范围', '运行温度', 'operating temperature', 'temperature range'], valueType: 'range', canonicalUnit: '°C', allowedUnits: ['°C', 'K'], supportedOperators: ['contains-range', 'within-range', 'manual-verification'], description: '具体订货型号允许的环境或结温工作范围，以数据手册订货信息为准。' }),
   definition({ id: 'transceiver.standard', categoryId: 'communication-transceiver', parameterKey: 'bus-standard', label: '总线标准', valueType: 'enum', enumValues: ['CAN', 'CAN FD', 'RS-485', 'RS-422'], supportedOperators: ['equals', 'not-equals', 'contains-any', 'contains-all'], description: '物理层收发器支持的总线标准。' }),
   definition({ id: 'transceiver.rate', categoryId: 'communication-transceiver', parameterKey: 'data-rate-mbps', label: '最高数据速率', valueType: 'number', canonicalUnit: 'Mbps', allowedUnits: ['Mbps', 'kbps'], supportedOperators: numericOperators, description: '器件可支持的最高标称数据速率。' }),
   definition({ id: 'transceiver.supply', categoryId: 'communication-transceiver', parameterKey: 'supply-voltage-v', label: '供电电压', valueType: 'range', canonicalUnit: 'V', allowedUnits: ['V', 'mV'], supportedOperators: ['contains-range', 'within-range', 'manual-verification'], description: '器件允许的供电电压范围。' }),
+  definition({ id: 'transceiver.temperature', categoryId: 'communication-transceiver', parameterKey: 'temperature-c', label: '工作温度', aliases: ['温度', '工作温度范围', '运行温度', 'operating temperature', 'temperature range'], valueType: 'range', canonicalUnit: '°C', allowedUnits: ['°C', 'K'], supportedOperators: ['contains-range', 'within-range', 'manual-verification'], description: '具体订货型号允许的工作温度范围。' }),
 ];
 
 export const functionTemplates: FunctionTemplate[] = [
@@ -62,6 +64,13 @@ export const functionTemplates: FunctionTemplate[] = [
 
 export function getParameterDefinitions(categoryId: string) {
   return parameterDefinitions.filter(item => item.categoryId === categoryId);
+}
+
+const normalizedLabel = (value: string) => value.toLocaleLowerCase().replace(/[\s_\-/（）()]+/g, '');
+
+export function findParameterDefinition(categoryId: string, name: string) {
+  const target = normalizedLabel(name);
+  return getParameterDefinitions(categoryId).find(item => [item.label, item.parameterKey, ...(item.aliases ?? [])].some(alias => normalizedLabel(alias) === target));
 }
 
 export function getRoleCatalog(categoryId: string): PartRecord[] {

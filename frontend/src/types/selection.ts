@@ -29,6 +29,7 @@ export interface ParameterDefinition {
   canonicalUnit?: string;
   allowedUnits?: string[];
   enumValues?: string[];
+  aliases?: string[];
   supportedOperators: ConstraintOperator[];
   description: string;
 }

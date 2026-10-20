@@ -16,11 +16,14 @@ function imported(key: string, label: string, valueType: PartParameter['valueTyp
 
 function toSelectionPart(chip: Chip): PartRecord {
   const part = migrateChip(chip), evidenceId = part.evidence[0].id;
-  return { ...part, parameters: [
+  const temperatureCode = chip.manufacturer === 'STMicroelectronics' ? chip.name.match(/([367])$/)?.[1] : undefined;
+  const temperature = temperatureCode ? { '3': [-40, 125], '6': [-40, 85], '7': [-40, 105] }[temperatureCode] : undefined;
+  return { ...part, variants: part.variants.map(variant => temperature ? { ...variant, temperatureMinC: temperature[0], temperatureMaxC: temperature[1] } : variant), parameters: [
     imported('clock-mhz', '最高主频', 'number', numberFrom(chip.frequency), evidenceId, 'MHz'),
     imported('flash-kb', 'Flash', 'number', capacityKb(chip.flash), evidenceId, 'KB'),
     imported('ram-kb', 'RAM', 'number', capacityKb(chip.ram), evidenceId, 'KB'),
     imported('peripheral', '外设能力', 'enum', peripheralAliases(chip.peripherals), evidenceId),
+    ...(temperature ? [{ key: 'temperature-c', label: '工作温度', valueType: 'range' as const, min: temperature[0], max: temperature[1], unit: '°C', conditions: ['按完整 STM32 订货后缀温度代码解析；设计前需核对对应型号数据手册。'], evidenceIds: [evidenceId], status: 'imported' as const }] : []),
   ] };
 }
 

@@ -37,4 +37,28 @@ describe('dynamic selection engine', () => {
     const result = evaluateDynamicPartSelection(part('mcu', [parameter({ key: 'dma', label: 'DMA', valueType: 'boolean', value: true })]), [constraint], parameterDefinitions);
     expect(result).toMatchObject({ outcome: 'eligible', requiredMatched: 1 });
   });
+
+  it('matches arbitrary custom names to raw candidate fields and parses text ranges', () => {
+    const constraint: SelectionConstraint = { id: 'temperature', customName: '工作温度', valueType: 'range', operator: 'contains-range', min: -20, max: 70, unit: '°C', priority: 'required', source: 'user' };
+    const result = evaluateDynamicPartSelection(part('online-mcu', [parameter({ key: 'online-7', label: '工作温度范围', valueType: 'text', value: '-40 – 85 °C', status: 'imported' })]), [constraint], parameterDefinitions);
+    expect(result.outcome).toBe('needs-verification');
+    expect(result.evaluations[0]).toMatchObject({ outcome: 'match', parameterStatus: 'imported' });
+  });
+
+  it('supports unregistered numeric fields without adding product code', () => {
+    const constraint: SelectionConstraint = { id: 'current', customName: '待机电流', valueType: 'number', operator: 'at-most', value: 20, unit: 'mA', priority: 'required', source: 'user' };
+    const result = evaluateDynamicPartSelection(part('custom', [parameter({ key: 'raw-current', label: '待机电流', valueType: 'text', value: '12 mA' })]), [constraint], []);
+    expect(result).toMatchObject({ outcome: 'eligible', requiredMatched: 1 });
+  });
+
+  it('does not guess when multiple raw fields could satisfy one custom name', () => {
+    const constraint: SelectionConstraint = { id: 'temperature', customName: '工作温度', valueType: 'range', operator: 'contains-range', min: -20, max: 70, unit: '°C', priority: 'required', source: 'user' };
+    const result = evaluateDynamicPartSelection(part('ambiguous', [
+      parameter({ key: 'ambient', label: '工作温度（环境）', valueType: 'text', value: '-40–85 °C' }),
+      parameter({ key: 'junction', label: '工作温度（结温）', valueType: 'text', value: '-40–125 °C' }),
+    ]), [constraint], parameterDefinitions);
+    expect(result.outcome).toBe('needs-verification');
+    expect(result.evaluations[0]).toMatchObject({ outcome: 'unknown' });
+    expect(result.evaluations[0].message).toMatch(/手动指定参数键/);
+  });
 });

@@ -1,5 +1,5 @@
 import type { ConstraintPriority, PartParameter, PartParameterStatus, PartRecord, ParameterDefinition, SelectionConstraint } from '../../types';
-import { convertUnit } from './selectionRegistry';
+import { convertUnit, unitDefinitions } from './selectionRegistry';
 
 export type SelectionCriterion =
   | { id: string; key: string; label: string; required: true; operator: 'equals'; value: string | boolean }
@@ -112,10 +112,28 @@ export interface DynamicPartSelectionEvaluation {
 
 const stringValues = (parameter: PartParameter) => (Array.isArray(parameter.value) ? parameter.value : [parameter.value])
   .filter((value): value is string => typeof value === 'string')
-  .map(value => value.toLocaleLowerCase());
+  .flatMap(value => [value, ...value.split(/[,;/|、]+/)])
+  .map(value => value.trim().toLocaleLowerCase())
+  .filter(Boolean);
 
-function constraintKey(constraint: SelectionConstraint, definitions: ParameterDefinition[]) {
-  return constraint.parameterKey || definitions.find(item => item.id === constraint.parameterId)?.parameterKey;
+const normalizedParameterName = (value: string) => value.toLocaleLowerCase().replace(/[\s_\-/（）()]+/g, '');
+
+function resolveDynamicParameter(part: PartRecord, constraint: SelectionConstraint, definition?: ParameterDefinition): { parameter?: PartParameter; message?: string } {
+  const key = constraint.parameterKey || definition?.parameterKey;
+  const keyedParameter = key ? findParameter(part, key) : undefined;
+  if (keyedParameter) return { parameter: keyedParameter };
+  const names = [constraint.customName, definition?.label, ...(definition?.aliases ?? [])].filter((value): value is string => Boolean(value)).map(normalizedParameterName);
+  if (!names.length) return { message: '条件缺少名称和参数键，不能匹配候选字段' };
+  const exact = part.parameters.filter(parameter => names.includes(normalizedParameterName(parameter.label)) || names.includes(normalizedParameterName(parameter.key)));
+  if (exact.length === 1) return { parameter: exact[0] };
+  if (exact.length > 1) return { message: `候选存在 ${exact.length} 个同名字段，请手动指定参数键` };
+  const partial = part.parameters.filter(parameter => {
+    const labels = [normalizedParameterName(parameter.label), normalizedParameterName(parameter.key)];
+    return names.some(name => name.length >= 3 && labels.some(label => label.includes(name) || name.includes(label)));
+  });
+  if (partial.length === 1) return { parameter: partial[0] };
+  if (partial.length > 1) return { message: `候选存在 ${partial.length} 个近似字段，请手动指定参数键` };
+  return { message: `候选资料中没有与“${constraint.customName || definition?.label || key || '当前条件'}”匹配的字段` };
 }
 
 function unknownDynamic(constraint: SelectionConstraint, message: string, parameter?: PartParameter): DynamicCriterionEvaluation {
@@ -130,22 +148,43 @@ function unknownDynamic(constraint: SelectionConstraint, message: string, parame
   };
 }
 
+function textNumbers(parameter: PartParameter) {
+  if (typeof parameter.value !== 'string') return [];
+  return (parameter.value.replace(/−/g, '-').match(/[-+]?\d+(?:\.\d+)?/g) ?? []).map(Number).filter(Number.isFinite);
+}
+
+function inferredTextUnit(parameter: PartParameter, preferred?: string) {
+  if (typeof parameter.value !== 'string') return parameter.unit;
+  const compact = parameter.value.replace(/\s+/g, '').replace(/℃/g, '°C');
+  if (preferred && compact.toLocaleLowerCase().includes(preferred.toLocaleLowerCase())) return preferred;
+  return [...unitDefinitions].sort((left, right) => right.symbol.length - left.symbol.length).find(item => compact.toLocaleLowerCase().includes(item.symbol.toLocaleLowerCase()))?.symbol;
+}
+
 function numericParameterValue(parameter: PartParameter) {
   if (typeof parameter.value === 'number') return parameter.value;
-  return parameter.typical ?? parameter.max ?? parameter.min;
+  const structured = parameter.typical ?? parameter.max ?? parameter.min;
+  if (structured !== undefined) return structured;
+  const parsed = textNumbers(parameter);
+  return parsed.length === 1 ? parsed[0] : undefined;
+}
+
+function rangeParameterValue(parameter: PartParameter) {
+  if (parameter.min !== undefined && parameter.max !== undefined) return { min: parameter.min, max: parameter.max };
+  const parsed = textNumbers(parameter);
+  return parsed.length === 2 ? { min: Math.min(...parsed), max: Math.max(...parsed) } : undefined;
 }
 
 function evaluateDynamicCriterion(part: PartRecord, constraint: SelectionConstraint, definitions: ParameterDefinition[]): DynamicCriterionEvaluation {
-  const definition = definitions.find(item => item.id === constraint.parameterId);
+  const customName = constraint.customName ? normalizedParameterName(constraint.customName) : '';
+  const definition = definitions.find(item => item.id === constraint.parameterId || (customName && [item.label, ...(item.aliases ?? [])].some(alias => normalizedParameterName(alias) === customName)));
   const label = constraint.customName || definition?.label || constraint.parameterId || '自定义条件';
   if (constraint.priority === 'undetermined') return unknownDynamic(constraint, '条件尚未确定，不参与筛选');
   if (constraint.operator === 'manual-verification') return unknownDynamic(constraint, '该条件需要人工核验');
-  const key = constraintKey(constraint, definitions);
-  if (!key) return unknownDynamic(constraint, '自定义条件缺少参数键，不能与候选数据映射');
-  const parameter = findParameter(part, key);
+  const resolved = resolveDynamicParameter(part, constraint, definition);
+  const parameter = resolved.parameter;
   if (!parameter || parameter.status === 'unknown' || parameter.status === 'conflict') return unknownDynamic(
     constraint,
-    parameter?.status === 'conflict' ? '多个来源存在冲突，不能自动判断' : '候选缺少可靠参数，需要核验资料',
+    parameter?.status === 'conflict' ? '多个来源存在冲突，不能自动判断' : resolved.message || '候选缺少可靠参数，需要核验资料',
     parameter,
   );
 
@@ -155,7 +194,8 @@ function evaluateDynamicCriterion(part: PartRecord, constraint: SelectionConstra
       (['equals', 'not-equals'].includes(constraint.operator) && typeof constraint.value === 'number')) {
       const available = numericParameterValue(parameter);
       if (available === undefined || typeof constraint.value !== 'number' || !Number.isFinite(constraint.value)) return unknownDynamic(constraint, '条件或候选不是可比较的有限数值', parameter);
-      const normalized = convertUnit(available, parameter.unit, constraint.unit || definition?.canonicalUnit || parameter.unit);
+      const sourceUnit = parameter.unit || inferredTextUnit(parameter, constraint.unit || definition?.canonicalUnit);
+      const normalized = convertUnit(available, sourceUnit, constraint.unit || definition?.canonicalUnit || sourceUnit);
       if (constraint.operator === 'at-least') matches = normalized >= constraint.value;
       else if (constraint.operator === 'at-most') matches = normalized <= constraint.value;
       else if (constraint.operator === 'greater-than') matches = normalized > constraint.value;
@@ -163,10 +203,12 @@ function evaluateDynamicCriterion(part: PartRecord, constraint: SelectionConstra
       else if (constraint.operator === 'not-equals') matches = normalized !== constraint.value;
       else matches = normalized === constraint.value;
     } else if (constraint.operator === 'contains-range' || constraint.operator === 'within-range') {
-      if (parameter.min === undefined || parameter.max === undefined || constraint.min === undefined || constraint.max === undefined || constraint.min > constraint.max) return unknownDynamic(constraint, '缺少有效的候选或目标范围', parameter);
-      const targetUnit = constraint.unit || definition?.canonicalUnit || parameter.unit;
-      const minimum = convertUnit(parameter.min, parameter.unit, targetUnit);
-      const maximum = convertUnit(parameter.max, parameter.unit, targetUnit);
+      const range = rangeParameterValue(parameter);
+      if (!range || constraint.min === undefined || constraint.max === undefined || constraint.min > constraint.max) return unknownDynamic(constraint, typeof parameter.value === 'string' && textNumbers(parameter).length > 2 ? '候选文本包含多个数值，无法确定哪两个是范围端点' : '缺少有效的候选或目标范围', parameter);
+      const sourceUnit = parameter.unit || inferredTextUnit(parameter, constraint.unit || definition?.canonicalUnit);
+      const targetUnit = constraint.unit || definition?.canonicalUnit || sourceUnit;
+      const minimum = convertUnit(range.min, sourceUnit, targetUnit);
+      const maximum = convertUnit(range.max, sourceUnit, targetUnit);
       matches = constraint.operator === 'contains-range'
         ? minimum <= constraint.min && maximum >= constraint.max
         : minimum >= constraint.min && maximum <= constraint.max;
