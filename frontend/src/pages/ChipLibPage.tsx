@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BookOpen, Boxes, CheckCircle, Cpu, ExternalLink, FileText, Filter, Info, Layers, Loader2, PackageSearch, ReplaceAll, Search, ShoppingCart, Tag } from 'lucide-react';
+import { BookOpen, Boxes, CheckCircle, Cpu, ExternalLink, FileText, Filter, History, Info, Layers, Lightbulb, Loader2, PackageSearch, ReplaceAll, Search, ShoppingCart, Tag } from 'lucide-react';
 import { chips } from '../data/chips';
 import { components } from '../data/components';
 import { LOCAL_PROXY_BASE } from '../services/aiService';
 import KnowledgeSourcePanel from '../features/resources/KnowledgeSourcePanel';
 import FunctionalSelectionCenter from '../features/resources/FunctionalSelectionCenter';
+import FunctionSolutionRecords from '../features/resources/FunctionSolutionRecords';
+import type { FunctionSolution } from '../types';
 
 interface CatalogItem {
   id: string;
@@ -111,9 +113,15 @@ function hasChipDocumentation(item: CatalogItem) {
 }
 
 export default function ChipLibPage() {
+  const [mode, setMode] = useState<'catalog' | 'solution' | 'records'>(() => {
+    const stored = localStorage.getItem('embedkit.resources-mode');
+    return stored === 'solution' || stored === 'records' ? stored : 'catalog';
+  });
+  const [openedSolution, setOpenedSolution] = useState<FunctionSolution>();
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
   const [manufacturer, setManufacturer] = useState('');
+  useEffect(() => localStorage.setItem('embedkit.resources-mode', mode), [mode]);
   const query = search.trim();
   const filtered = useMemo(() => {
     const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -129,7 +137,15 @@ export default function ChipLibPage() {
   return <div className="h-full overflow-y-auto p-4 scrollbar-thin lg:p-6"><div className="mx-auto max-w-[1500px]">
     <header className="mb-6 flex flex-wrap items-end justify-between gap-3"><div><h1 className="flex items-center gap-2 text-2xl font-bold"><Boxes className="text-blue-400" />资料中心</h1><p className="mt-1 text-sm text-gray-400">查询芯片与元器件参数、数据手册、参考手册、CAD 模型和采购资料</p></div><div className="flex gap-2 text-xs text-gray-500"><span className="rounded-full border border-[#30363d] bg-[#161b22] px-3 py-1">{catalog.length} 个本地型号</span><span className="rounded-full border border-[#30363d] bg-[#161b22] px-3 py-1">{categories.length} 个分类</span></div></header>
 
-    <FunctionalSelectionCenter />
+    <nav aria-label="资料中心模式" className="mb-5 grid gap-2 sm:grid-cols-3">{[
+      { id: 'catalog' as const, name: '按型号查询器件', detail: '型号、手册、CAD 与来源导航', icon: Search },
+      { id: 'solution' as const, name: '按功能设计方案', detail: '功能约束、器件角色与候选核验', icon: Lightbulb },
+      { id: 'records' as const, name: '我的资料与选型记录', detail: '恢复、导出与旧记录兼容', icon: History },
+    ].map(item => <button key={item.id} onClick={() => setMode(item.id)} className={`flex items-center gap-3 rounded-xl border p-3 text-left ${mode === item.id ? 'border-blue-500/50 bg-blue-500/10' : 'border-[#30363d] bg-[#161b22] hover:border-[#484f58]'}`}><item.icon size={18} className={mode === item.id ? 'text-blue-400' : 'text-gray-500'} /><span><b className="block text-sm text-gray-200">{item.name}</b><small className="text-[10px] text-gray-600">{item.detail}</small></span></button>)}</nav>
+
+    {mode === 'solution' && <FunctionalSelectionCenter initialSolution={openedSolution} />}
+    {mode === 'records' && <FunctionSolutionRecords onOpen={solution => { setOpenedSolution(solution); setMode('solution'); }} />}
+    {mode === 'catalog' && <>
     <KnowledgeSourcePanel />
     <section className="mb-5 rounded-xl border border-[#30363d] bg-[#161b22] p-4">
       <div className="grid gap-3 md:grid-cols-[minmax(280px,1fr)_220px_220px]">
@@ -145,6 +161,7 @@ export default function ChipLibPage() {
     {filtered.length ? <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((item) => <ComponentCard key={item.id} item={item} />)}</div> : <div className="mt-4 rounded-xl border border-dashed border-[#30363d] py-12 text-center text-gray-500"><PackageSearch size={42} className="mx-auto mb-3 opacity-40" /><p>本地库没有匹配项</p>{query.length >= 2 && <p className="mt-1 text-xs">正在尝试在线查询，也可使用下方资料入口</p>}</div>}
 
     {query.length >= 2 && <section className="mt-7 space-y-6 border-t border-[#30363d] pt-6"><div><h2 className="text-lg font-semibold">“{query}”的在线元器件资料</h2><p className="mt-1 text-xs text-gray-500">完整型号能获得更准确的资料和采购结果。</p></div><LinkSection title="数据手册与技术资料" icon={FileText} color="blue" items={links.filter((item) => item.type === 'datasheet')} /><LinkSection title="符号、封装与 3D 模型" icon={Layers} color="purple" items={links.filter((item) => item.type === 'cad')} /><LinkSection title="替代型号与交叉参考" icon={ReplaceAll} color="yellow" items={links.filter((item) => item.type === 'alternative')} /><LinkSection title="库存、价格与采购" icon={ShoppingCart} color="green" items={links.filter((item) => item.type === 'distributor')} /></section>}
+    </>}
   </div></div>;
 }
 

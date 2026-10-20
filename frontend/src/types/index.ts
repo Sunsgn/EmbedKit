@@ -29,6 +29,23 @@ export type {
   PartSourceKind,
   PartVariant,
 } from './parts';
+export {
+  FUNCTION_SOLUTION_SCHEMA_VERSION,
+} from './selection';
+export type {
+  CompatibilityResult,
+  ConstraintOperator,
+  ConstraintPriority,
+  FunctionSolution,
+  FunctionTemplate,
+  GlobalConstraint,
+  ParameterDefinition,
+  PartRole,
+  SelectionConstraint,
+  SelectionValueType,
+  SolutionEvidence,
+  UnitDefinition,
+} from './selection';
 
 export interface Chip {
   id: string;
