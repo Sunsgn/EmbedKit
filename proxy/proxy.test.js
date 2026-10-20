@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { copyFile, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { authorizeBuildArtifact, configureFilePickerAdapter, configureInstallManifestRegistry, configureSerialAdapter, configureSoftwareInstallerAdapter, createBuildCommand, decodeNetworkPayload, extractSoftwareVersion, hashBuildArtifact, isAllowedOrigin, parseBuildDiagnostic, receiveSerialData, startServer, validateArchiveEntries, validateHostAndPort, validateInstallManifest, validateProxyTarget, validateSerialOptions } from './proxy.js';
+import { authorizeBuildArtifact, configureFilePickerAdapter, configureInstallManifestRegistry, configurePartDocumentFetcher, configureSerialAdapter, configureSoftwareInstallerAdapter, createBuildCommand, decodeNetworkPayload, extractOfficialDocuments, extractSoftwareVersion, hashBuildArtifact, isAllowedOrigin, parseBuildDiagnostic, receiveSerialData, startServer, validateArchiveEntries, validateHostAndPort, validateInstallManifest, validateProxyTarget, validateSerialOptions } from './proxy.js';
 
 class VirtualSerialPort extends EventEmitter {
   constructor(options) { super(); this.options = options; this.isOpen = false; this.signals = { dtr: false, rts: false }; }
@@ -198,6 +198,26 @@ test('reports bounded online part-source capabilities without claiming parametri
   assert.equal(result.limits.parametricSearch, false);
   assert.ok(result.sources.some(source => source.kind === 'manufacturer' && source.authoritative));
   assert.ok(result.sources.every(source => Array.isArray(source.capabilities) && typeof source.dataScope === 'string'));
+});
+
+test('extracts classified PDF links only from registered official domains', () => {
+  const adapter = { name: 'Example Semiconductor', domains: ['example.com'] };
+  const html = '<a href="/docs/SAFE100-datasheet.pdf">SAFE100 data sheet</a><a href="https://docs.example.com/guides/UG100.pdf">SAFE100 user guide</a><a href="https://evil.example.net/SAFE100.pdf">application note</a><a href="/products/SAFE100">SAFE100 product</a>';
+  const result = extractOfficialDocuments(html, 'https://www.example.com/products', adapter, 'SAFE100');
+  assert.deepEqual(result.documents.map(item => item.kind), ['datasheet', 'user-guide']);
+  assert.ok(result.documents.every(item => item.authoritative && item.url.startsWith('https://')));
+  assert.deepEqual(result.pages, ['https://www.example.com/products/SAFE100']);
+});
+
+test('discovers bounded official PDFs through the Local Agent endpoint', async () => {
+  configurePartDocumentFetcher(async page => ({ finalUrl: page, html: '<a href="/lit/ds/symlink/tcan1042.pdf">TCAN1042 datasheet</a><a href="/lit/ug/tcan1042-user-guide.pdf">TCAN1042 user guide</a>' }));
+  try {
+    const response = await fetch(`${agentBaseUrl}/api/parts/documents?part=TCAN1042&manufacturer=Texas%20Instruments`), result = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(result.schemaVersion, 1);
+    assert.deepEqual(result.documents.map(item => item.kind), ['datasheet', 'user-guide']);
+    assert.equal(result.limits.maxDocuments, 24);
+  } finally { configurePartDocumentFetcher(null); }
 });
 
 test('detects installed development software with bounded structured results', async () => {

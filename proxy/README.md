@@ -24,6 +24,12 @@ For a custom local server, add its origin explicitly instead of enabling arbitra
 
 Build output diagnostics are normalized for GCC/Clang `file:line:column`, Keil/Arm Compiler and MSVC `file(line,column)`, and IAR quoted-file formats. Only lines with explicit file and line evidence become source-navigation diagnostics; linker summaries and ordinary log lines remain plain output.
 
+## Official part-document discovery
+
+`GET /api/parts/documents?part=...&manufacturer=...&productUrl=...` reads only registered manufacturer HTTPS domains. It follows at most two same-manufacturer redirects, visits at most three bounded HTML pages, reads at most 2 MiB per page, and returns at most 24 official PDF links with document type, exact-model or family scope, discovery page, failures, and discovery time. Results are cached in memory for ten minutes.
+
+The optional `productUrl` is accepted only when its host belongs to the resolved manufacturer adapter. Unknown manufacturers, blocked pages, dynamic sites, timeouts, and pages without identifiable PDF anchors return an explicit empty or partial result; the Agent does not substitute aggregator links or label search results as verified PDFs. It returns links rather than downloading or permanently storing copyrighted documents.
+
 The test suite also builds a minimal public C source with an installed GNU toolchain, generates real MAP/ELF/BIN/Intel HEX artifacts in a temporary directory, analyzes them, and removes them. It never downloads a compiler or commits generated firmware. See `docs/TOOLCHAIN_ARTIFACT_FIXTURES.md` for platform and proprietary-toolchain boundaries.
 
 ## Controlled local path selection

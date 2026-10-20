@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildOfficialDocumentLinks, documentAccessLabel } from './partDocumentDiscovery';
+import { buildOfficialDocumentLinks, documentAccessLabel, mergeDiscoveredDocuments } from './partDocumentDiscovery';
 
 describe('part document discovery', () => {
   it('builds a complete MCU document package from official manufacturer navigation', () => {
     const links = buildOfficialDocumentLinks({ model: 'STM32G474RET6', manufacturer: 'STMicroelectronics', category: '微控制器与处理器', datasheetUrl: 'https://www.st.com/resource/en/datasheet/stm32g474re.pdf' });
     expect(links.map((link) => link.kind)).toEqual(expect.arrayContaining(['datasheet', 'reference-manual', 'user-guide', 'programming-manual', 'application-note', 'errata', 'hardware-design-guide', 'getting-started-guide']));
-    expect(links.find((link) => link.kind === 'datasheet')).toMatchObject({ authoritative: true, access: 'official-direct' });
+    expect(links.find((link) => link.kind === 'datasheet')).toMatchObject({ authoritative: true, access: 'official-pdf' });
     expect(links.find((link) => link.kind === 'user-guide')).toMatchObject({ authoritative: true, access: 'official-search', sourceName: 'STMicroelectronics' });
   });
 
@@ -32,5 +32,13 @@ describe('part document discovery', () => {
     const links = buildOfficialDocumentLinks({ model: 'TCAN1042', productUrl: 'https://www.ti.com/product/TCAN1042' });
     expect(links.find((link) => link.kind === 'product-page')).toMatchObject({ sourceName: 'Texas Instruments', authoritative: true });
     expect(links.find((link) => link.kind === 'user-guide')?.url).toContain('ti.com');
+  });
+
+  it('replaces search placeholders with discovered official PDFs and keeps missing fallbacks', () => {
+    const base = buildOfficialDocumentLinks({ model: 'TCAN1042', manufacturer: 'Texas Instruments' });
+    const merged = mergeDiscoveredDocuments(base, [{ kind: 'user-guide', title: 'TCAN1042 User Guide', url: 'https://www.ti.com/lit/ug/tcan1042.pdf', sourceName: 'Texas Instruments', authoritative: true, scope: 'exact-model', discoveredFrom: 'https://www.ti.com/product/TCAN1042' }]);
+    expect(merged.find((link) => link.kind === 'user-guide')).toMatchObject({ access: 'official-pdf', scope: 'exact-model' });
+    expect(documentAccessLabel(merged.find((link) => link.kind === 'user-guide')!)).toBe('打开官方 PDF');
+    expect(merged.some((link) => link.kind === 'datasheet')).toBe(true);
   });
 });

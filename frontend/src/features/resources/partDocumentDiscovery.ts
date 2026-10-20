@@ -1,6 +1,7 @@
 import type { PartDocumentKind } from '../../types';
+import type { DiscoveredPartDocument } from '../../services/partSources';
 
-export type DocumentAccess = 'official-direct' | 'official-search' | 'site-search' | 'web-search';
+export type DocumentAccess = 'official-pdf' | 'official-direct' | 'official-search' | 'site-search' | 'web-search';
 
 export interface PartDocumentLink {
   id: string;
@@ -119,6 +120,10 @@ function officialUrl(url: string, adapter?: ManufacturerAdapter) {
   return adapter.domains.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`));
 }
 
+function isPdfUrl(url: string) {
+  try { return /\.pdf$/i.test(new URL(url).pathname); } catch { return false; }
+}
+
 function searchLink(model: string, kind: PartDocumentKind, adapter?: ManufacturerAdapter): Pick<PartDocumentLink, 'url' | 'sourceName' | 'access' | 'authoritative' | 'scope'> {
   const terms = `${model} ${queries[kind] ?? 'technical document'}`.trim();
   if (adapter?.search) return { url: adapter.search(terms), sourceName: adapter.name, access: 'official-search', authoritative: true, scope: 'manufacturer-search' };
@@ -143,16 +148,36 @@ export function buildOfficialDocumentLinks(input: PartDocumentDiscoveryInput): P
   return kinds.slice(0, 12).map((kind) => {
     const url = direct.get(kind);
     const discovered = url
-      ? { url, sourceName: adapter?.name ?? input.manufacturer?.trim() ?? '外部来源', access: 'official-direct' as const, authoritative: officialUrl(url, adapter), scope: 'exact-model' as const }
+      ? { url, sourceName: adapter?.name ?? input.manufacturer?.trim() ?? '外部来源', access: isPdfUrl(url) && officialUrl(url, adapter) ? 'official-pdf' as const : 'official-direct' as const, authoritative: officialUrl(url, adapter), scope: 'exact-model' as const }
       : searchLink(model, kind, adapter);
     return { id: `${model.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'part'}:${kind}`, kind, title: titles[kind], description: descriptions[kind], ...discovered };
   });
 }
 
 export function documentAccessLabel(link: PartDocumentLink) {
+  if (link.access === 'official-pdf') return '打开官方 PDF';
   if (link.access === 'official-direct' && link.authoritative) return '官方直链';
   if (link.access === 'official-direct') return '外部直链 · 待核验';
   if (link.access === 'official-search') return '厂商官网检索';
   if (link.access === 'site-search') return '官方站点定向搜索';
   return 'Web 检索 · 厂商待确认';
+}
+
+export function mergeDiscoveredDocuments(base: PartDocumentLink[], discovered: DiscoveredPartDocument[]) {
+  const perKind = new Map<PartDocumentKind, number>();
+  const bounded = discovered.filter(document => { const count = perKind.get(document.kind) ?? 0; if (count >= 3) return false; perKind.set(document.kind, count + 1); return true; }).slice(0, 16);
+  const safeDirect = bounded.map((document, index): PartDocumentLink => ({
+    id: `discovered:${document.kind}:${index}:${document.url}`,
+    kind: document.kind,
+    title: titles[document.kind],
+    description: `${descriptions[document.kind]} · ${document.title} · ${document.scope === 'exact-model' ? '精确型号匹配' : '系列适用，使用前核对型号范围'}`,
+    url: document.url,
+    sourceName: document.sourceName,
+    access: 'official-pdf',
+    authoritative: true,
+    scope: document.scope,
+  }));
+  const directKinds = new Set(safeDirect.map(document => document.kind));
+  const merged = [...safeDirect, ...base.filter(document => !directKinds.has(document.kind))];
+  return merged.filter((document, index) => merged.findIndex(candidate => candidate.url.toLowerCase() === document.url.toLowerCase()) === index).slice(0, 16);
 }

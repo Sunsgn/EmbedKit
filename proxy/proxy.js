@@ -43,6 +43,9 @@ const NETWORK_STATE_FILE = process.env.EMBEDKIT_NETWORK_STATE_FILE || join(proce
 const AGENT_LOG_FILE = process.env.EMBEDKIT_AGENT_LOG_FILE || join(process.cwd(), '.embedkit-state', 'agent.log');
 const AGENT_LOG_MAX_BYTES = Number(process.env.EMBEDKIT_AGENT_LOG_MAX_BYTES || 1024 * 1024);
 const SOFTWARE_INSTALLATION_STATE_FILE = process.env.EMBEDKIT_SOFTWARE_STATE_FILE || join(process.cwd(), '.embedkit-state', 'software-installations.json');
+const PART_DOCUMENT_MAX_HTML_BYTES = 2 * 1024 * 1024;
+const PART_DOCUMENT_MAX_RESULTS = 24;
+const PART_DOCUMENT_CACHE_TTL_MS = 10 * 60 * 1000;
 let agentLoggingInstalled = false, logWriteQueue = Promise.resolve();
 let activeArtifactHashJobs = 0;
 const systemSerialAdapter = {
@@ -51,6 +54,7 @@ const systemSerialAdapter = {
 };
 let serialAdapter = systemSerialAdapter;
 let filePickerActive = false;
+const partDocumentCache = new Map();
 
 const softwareDefinitions = [
   { id: 'runtime.node', capabilityId: 'runtime.node', name: 'Node.js', executable: process.execPath, args: ['--version'] },
@@ -1026,6 +1030,131 @@ function fetchHTML(urlStr, timeoutMs = 8000) {
   });
 }
 
+const partDocumentAdapters = [
+  { name: 'STMicroelectronics', aliases: ['stmicro', 'st micro'], domains: ['st.com'], pages: model => [`https://www.st.com/content/st_com/en/search.html?q=${encodeURIComponent(model)}`] },
+  { name: 'NXP', aliases: ['nxp'], domains: ['nxp.com'], pages: model => [`https://www.nxp.com/part/${encodeURIComponent(model)}`] },
+  { name: 'Texas Instruments', aliases: ['texas instruments', 'texas instrument', 'ti'], domains: ['ti.com'], pages: model => [`https://www.ti.com/product/${encodeURIComponent(model)}`] },
+  { name: 'Microchip', aliases: ['microchip', 'atmel'], domains: ['microchip.com'], pages: model => [`https://www.microchip.com/en-us/product/${encodeURIComponent(model)}`] },
+  { name: 'Nordic Semiconductor', aliases: ['nordic'], domains: ['nordicsemi.com'], pages: model => [`https://www.nordicsemi.com/search?query=${encodeURIComponent(model)}`] },
+  { name: 'Infineon', aliases: ['infineon', 'cypress'], domains: ['infineon.com'], pages: model => [`https://www.infineon.com/part/${encodeURIComponent(model)}`] },
+  { name: 'Renesas', aliases: ['renesas'], domains: ['renesas.com'], pages: model => [`https://www.renesas.com/en/search?keywords=${encodeURIComponent(model)}`] },
+  { name: 'Espressif', aliases: ['espressif'], domains: ['espressif.com'], pages: model => [`https://www.espressif.com/en/search/node?keys=${encodeURIComponent(model)}`] },
+  { name: 'GigaDevice', aliases: ['gigadevice', 'gd32'], domains: ['gd-mcu.com', 'gigadevice.com'], pages: model => [`https://www.gigadevice.com/search?keyword=${encodeURIComponent(model)}`] },
+  { name: 'WCH', aliases: ['wch', 'nanjing qinheng'], domains: ['wch-ic.com'], pages: model => [`https://www.wch-ic.com/search?q=${encodeURIComponent(model)}`] },
+  { name: 'Raspberry Pi', aliases: ['raspberry pi'], domains: ['raspberrypi.com'], pages: model => [`https://www.raspberrypi.com/documentation/microcontrollers/${encodeURIComponent(model.toLowerCase())}.html`] },
+  { name: 'Bosch Sensortec', aliases: ['bosch sensortec', 'bosch'], domains: ['bosch-sensortec.com'], pages: model => [`https://www.bosch-sensortec.com/search/?tx_solr%5Bq%5D=${encodeURIComponent(model)}`] },
+  { name: 'Analog Devices', aliases: ['analog devices', 'maxim'], domains: ['analog.com'], pages: model => [`https://www.analog.com/en/products/${encodeURIComponent(model.toLowerCase())}.html`] },
+  { name: 'Silicon Labs', aliases: ['silicon labs', 'silabs'], domains: ['silabs.com'], pages: model => [`https://www.silabs.com/search#q=${encodeURIComponent(model)}`] },
+  { name: 'WIZnet', aliases: ['wiznet'], domains: ['wiznet.io'], pages: model => [`https://docs.wiznet.io/Product/iEthernet/W${encodeURIComponent(model.replace(/^W/i, ''))}/overview`] },
+  { name: 'Winbond', aliases: ['winbond'], domains: ['winbond.com'], pages: model => [`https://www.winbond.com/hq/search-result/?q=${encodeURIComponent(model)}`] },
+  { name: 'Sensirion', aliases: ['sensirion'], domains: ['sensirion.com'], pages: model => [`https://sensirion.com/products/catalog/${encodeURIComponent(model.toLowerCase())}`] },
+];
+
+function isAdapterUrl(value, adapter) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && !url.username && !url.password && adapter.domains.some(domain => url.hostname === domain || url.hostname.endsWith(`.${domain}`));
+  } catch { return false; }
+}
+
+function partDocumentAdapter(manufacturer, productUrl = '') {
+  const name = String(manufacturer || '').trim().toLowerCase();
+  const byName = partDocumentAdapters.find(adapter => adapter.aliases.some(alias => name.includes(alias)));
+  if (byName) return byName;
+  try {
+    const hostname = new URL(productUrl).hostname.toLowerCase();
+    return partDocumentAdapters.find(adapter => adapter.domains.some(domain => hostname === domain || hostname.endsWith(`.${domain}`)));
+  } catch { return undefined; }
+}
+
+function decodeHtmlText(value) {
+  return String(value || '').replace(/<[^>]*>/g, ' ').replace(/&amp;/gi, '&').replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'").replace(/&nbsp;/gi, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+}
+
+function documentKind(value) {
+  const text = value.toLowerCase().replace(/[_-]+/g, ' ');
+  if (/errata|erratum/.test(text)) return 'errata';
+  if (/programming manual|programmer.?s (?:guide|manual)/.test(text)) return 'programming-manual';
+  if (/reference manual|technical reference/.test(text)) return 'reference-manual';
+  if (/user (?:guide|manual)|usage manual|evaluation (?:board|kit).*guide/.test(text)) return 'user-guide';
+  if (/getting started|quick start/.test(text)) return 'getting-started-guide';
+  if (/hardware (?:design|integration)|layout (?:guide|guideline)|design guide/.test(text)) return 'hardware-design-guide';
+  if (/application note|app note|design note|\ban\s?\d{2,}/.test(text)) return 'application-note';
+  if (/datasheet|data sheet|\bds\d{2,}/.test(text)) return 'datasheet';
+  return 'other';
+}
+
+export function extractOfficialDocuments(html, pageUrl, adapter, model) {
+  if (typeof html !== 'string' || html.length > PART_DOCUMENT_MAX_HTML_BYTES || !isAdapterUrl(pageUrl, adapter)) return { documents: [], pages: [] };
+  const documents = [], pages = [], seen = new Set(), normalizedModel = String(model).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const anchorPattern = /<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  for (const match of html.matchAll(anchorPattern)) {
+    let url;
+    try { url = new URL(match[1], pageUrl); } catch { continue; }
+    if (!isAdapterUrl(url.toString(), adapter)) continue;
+    const label = decodeHtmlText(match[2]), filename = url.pathname.split('/').filter(Boolean).pop() || 'PDF 文档', evidenceText = `${label} ${url.pathname}`, normalizedEvidence = evidenceText.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const isPdf = /\.pdf$/i.test(url.pathname) || /\/(?:pdf|lit\/(?:pdf|gpn))(?:\/|$)/i.test(url.pathname) || /[?&](?:format|type)=pdf\b/i.test(url.search);
+    if (isPdf) {
+      const kind = /\/lit\/gpn\//i.test(url.pathname) ? 'datasheet' : documentKind(evidenceText);
+      if (kind === 'other' && normalizedModel && !normalizedEvidence.includes(normalizedModel)) continue;
+      const key = url.toString().toLowerCase();
+      if (seen.has(key) || documents.length >= PART_DOCUMENT_MAX_RESULTS) continue;
+      seen.add(key);
+      documents.push({ kind, title: !label || /^(?:download|pdf|document-pdfacrobat)$/i.test(label) ? filename : label, url: url.toString(), sourceName: adapter.name, authoritative: true, scope: normalizedModel && normalizedEvidence.includes(normalizedModel) ? 'exact-model' : 'family', discoveredFrom: pageUrl });
+      continue;
+    }
+    if (normalizedModel && normalizedEvidence.includes(normalizedModel) && pages.length < 2 && !seen.has(url.toString())) { seen.add(url.toString()); pages.push(url.toString()); }
+  }
+  return { documents, pages };
+}
+
+function fetchBoundedOfficialHtml(urlStr, adapter, redirects = 2, timeoutMs = 9000) {
+  return new Promise((resolve, reject) => {
+    if (!isAdapterUrl(urlStr, adapter)) { reject(new Error('Document page is outside the selected manufacturer domains')); return; }
+    const request = https.get(urlStr, { headers: { 'User-Agent': `EmbedKit-Agent/${AGENT_VERSION}`, Accept: 'text/html,application/xhtml+xml', 'Accept-Language': 'en-US,en;q=0.7' } }, response => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location && redirects > 0) {
+        response.resume();
+        let redirected; try { redirected = new URL(response.headers.location, urlStr).toString(); } catch { reject(new Error('Manufacturer returned an invalid redirect')); return; }
+        fetchBoundedOfficialHtml(redirected, adapter, redirects - 1, timeoutMs).then(resolve, reject); return;
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) { response.resume(); reject(new Error(`Manufacturer page returned HTTP ${response.statusCode}`)); return; }
+      let size = 0, data = '';
+      response.on('data', chunk => { size += chunk.length; if (size > PART_DOCUMENT_MAX_HTML_BYTES) { request.destroy(new Error('Manufacturer page exceeded the HTML size limit')); return; } data += chunk; });
+      response.on('end', () => resolve({ html: data, finalUrl: urlStr }));
+    });
+    request.on('error', reject);
+    request.setTimeout(timeoutMs, () => request.destroy(new Error('Manufacturer document lookup timed out')));
+  });
+}
+
+let partDocumentFetcher = fetchBoundedOfficialHtml;
+export function configurePartDocumentFetcher(fetcher) { partDocumentFetcher = fetcher || fetchBoundedOfficialHtml; partDocumentCache.clear(); }
+
+export async function discoverOfficialPartDocuments({ model, manufacturer, productUrl }) {
+  const cleanModel = String(model || '').trim();
+  if (cleanModel.length < 2 || cleanModel.length > 120 || !/^[\p{L}\p{N}][\p{L}\p{N}._+\-/ ]*$/u.test(cleanModel)) throw new Error('Invalid part model');
+  const adapter = partDocumentAdapter(manufacturer, productUrl);
+  if (!adapter) return { schemaVersion: 1, model: cleanModel, manufacturer: String(manufacturer || ''), documents: [], failures: [{ code: 'unsupported-manufacturer', message: '暂不支持自动读取该厂商页面' }], discoveredAt: new Date().toISOString() };
+  const cacheKey = `${adapter.name}:${cleanModel}:${productUrl || ''}`.toLowerCase(), cached = partDocumentCache.get(cacheKey);
+  if (cached && Date.now() - cached.savedAt < PART_DOCUMENT_CACHE_TTL_MS) return cached.result;
+  const queue = [], supplied = String(productUrl || '');
+  if (supplied && isAdapterUrl(supplied, adapter)) queue.push(supplied);
+  for (const page of adapter.pages(cleanModel)) if (!queue.includes(page)) queue.push(page);
+  const documents = [], failures = [], visited = new Set();
+  while (queue.length && visited.size < 3 && documents.length < PART_DOCUMENT_MAX_RESULTS) {
+    const page = queue.shift(); if (visited.has(page)) continue; visited.add(page);
+    try {
+      const fetched = await partDocumentFetcher(page, adapter), extracted = extractOfficialDocuments(fetched.html, fetched.finalUrl || page, adapter, cleanModel);
+      for (const document of extracted.documents) if (!documents.some(item => item.url.toLowerCase() === document.url.toLowerCase())) documents.push(document);
+      for (const nextPage of extracted.pages) if (!visited.has(nextPage) && queue.length < 4) queue.push(nextPage);
+    } catch (error) { failures.push({ code: 'manufacturer-page-unavailable', message: String(error.message || error).slice(0, 300), url: page }); }
+  }
+  const result = { schemaVersion: 1, model: cleanModel, manufacturer: adapter.name, documents: documents.slice(0, PART_DOCUMENT_MAX_RESULTS), failures: failures.slice(0, 3), discoveredAt: new Date().toISOString(), limits: { maxDocuments: PART_DOCUMENT_MAX_RESULTS, maxPages: 3, cacheSeconds: PART_DOCUMENT_CACHE_TTL_MS / 1000 } };
+  partDocumentCache.set(cacheKey, { savedAt: Date.now(), result });
+  while (partDocumentCache.size > 64) partDocumentCache.delete(partDocumentCache.keys().next().value);
+  return result;
+}
+
 function fetchSnapEDAJSON(urlStr, timeoutMs = 10000) {
   return new Promise((resolve, reject) => {
     const url = new URL(urlStr);
@@ -1456,7 +1585,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === '/api/agent/status' && req.method === 'GET') {
-    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: ['serial', 'tcp-client', 'tcp-server', 'udp-client', 'udp-server', 'session-restore', 'network-session-restore', 'structured-errors', 'project-build', 'project-scan', 'local-picker', 'local-file-read', 'elf-analysis', 'software-environment', 'software-installation', 'part-source-status', 'part-details-online'] });
+    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: ['serial', 'tcp-client', 'tcp-server', 'udp-client', 'udp-server', 'session-restore', 'network-session-restore', 'structured-errors', 'project-build', 'project-scan', 'local-picker', 'local-file-read', 'elf-analysis', 'software-environment', 'software-installation', 'part-source-status', 'part-details-online', 'part-document-discovery'] });
     return;
   }
 
@@ -1693,10 +1822,17 @@ const server = http.createServer(async (req, res) => {
       schemaVersion: 1,
       sources: [
         { id: 'snapmagic', name: 'SnapMagic', kind: 'aggregator', state: 'configured', capabilities: ['keyword-details', 'datasheet-link'], dataScope: '仅发送用户输入的器件型号', authoritative: false },
-        { id: 'manufacturer-navigation', name: '厂商官方资料导航', kind: 'manufacturer', state: 'configured', capabilities: ['product-page-link'], dataScope: '仅使用器件型号生成官方入口', authoritative: true },
+        { id: 'manufacturer-navigation', name: '厂商官方资料导航', kind: 'manufacturer', state: 'configured', capabilities: ['product-page-link', 'official-pdf-discovery'], dataScope: '仅向已注册的厂商官方域名发送器件型号并限量读取产品页面', authoritative: true },
       ],
-      limits: { queryLength: 120, automaticPdfDownload: false, parametricSearch: false },
+      limits: { queryLength: 120, automaticPdfDownload: false, parametricSearch: false, documentResults: PART_DOCUMENT_MAX_RESULTS },
     });
+    return;
+  }
+
+  if (pathname === '/api/parts/documents' && req.method === 'GET') {
+    try {
+      jsonRes(res, 200, await discoverOfficialPartDocuments({ model: requestUrl.searchParams.get('part'), manufacturer: requestUrl.searchParams.get('manufacturer'), productUrl: requestUrl.searchParams.get('productUrl') }));
+    } catch (error) { jsonRes(res, 400, { error: error.message, code: 'invalid-document-query' }); }
     return;
   }
 

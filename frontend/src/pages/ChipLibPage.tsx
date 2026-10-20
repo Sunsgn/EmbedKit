@@ -6,7 +6,8 @@ import { LOCAL_PROXY_BASE } from '../services/aiService';
 import KnowledgeSourcePanel from '../features/resources/KnowledgeSourcePanel';
 import FunctionalSelectionCenter from '../features/resources/FunctionalSelectionCenter';
 import FunctionSolutionRecords from '../features/resources/FunctionSolutionRecords';
-import { buildOfficialDocumentLinks, documentAccessLabel, type PartDocumentDiscoveryInput } from '../features/resources/partDocumentDiscovery';
+import { buildOfficialDocumentLinks, documentAccessLabel, mergeDiscoveredDocuments, type PartDocumentDiscoveryInput } from '../features/resources/partDocumentDiscovery';
+import { discoverPartDocuments, type DiscoveredPartDocument } from '../services/partSources';
 import type { FunctionSolution } from '../types';
 
 interface CatalogItem {
@@ -380,7 +381,7 @@ function QueryDetails({ query, localItem }: { query: string; localItem: CatalogI
             <p className="mt-1 text-sm leading-6 text-gray-300">{typicalUse(localItem)}</p>
           </div>
         </div>
-        {hasChipDocumentation(localItem) && <ChipManuals input={{ model: localItem.name, manufacturer: localItem.manufacturer, category: localItem.category, isMcu: localItem.isChip, datasheetUrl: localItem.datasheetUrl, referenceUrl: localItem.reference }} />}
+        {hasChipDocumentation(localItem) && <ChipManuals input={{ model: localItem.name, manufacturer: localItem.manufacturer, category: localItem.category, isMcu: localItem.isChip, datasheetUrl: localItem.datasheetUrl, referenceUrl: localItem.reference && /\.pdf(?:$|[?#])/i.test(localItem.reference) ? localItem.reference : undefined, productUrl: localItem.reference && !/\.pdf(?:$|[?#])/i.test(localItem.reference) ? localItem.reference : undefined }} />}
         <div className="p-5">
           <h3 className="mb-1 text-xs font-semibold text-gray-300">关键使用参数</h3>
           <p className="mb-3 text-[11px] text-gray-600">用于初步选型；最终设计请核对对应温度等级、封装后缀及最新版数据手册。</p>
@@ -462,7 +463,25 @@ function QueryDetails({ query, localItem }: { query: string; localItem: CatalogI
 }
 
 function ChipManuals({ input }: { input: PartDocumentDiscoveryInput }) {
-  const manuals = buildOfficialDocumentLinks(input);
+  const discoveryKey = `${input.model}\n${input.manufacturer || ''}\n${input.productUrl || ''}`;
+  const [discovery, setDiscovery] = useState<{ key: string; state: 'done' | 'failed'; documents: DiscoveredPartDocument[]; message: string }>({ key: '', state: 'failed', documents: [], message: '' });
+  const activeDiscovery = discovery.key === discoveryKey ? discovery : { key: discoveryKey, state: 'loading' as const, documents: [], message: '' };
+  const documents = activeDiscovery.documents, discoveryState = input.manufacturer || input.productUrl ? activeDiscovery.state : 'idle', discoveryMessage = activeDiscovery.message;
+  const baseManuals = useMemo(() => buildOfficialDocumentLinks({ model: input.model, manufacturer: input.manufacturer, category: input.category, isMcu: input.isMcu, datasheetUrl: input.datasheetUrl, referenceUrl: input.referenceUrl, productUrl: input.productUrl }), [input.category, input.datasheetUrl, input.isMcu, input.manufacturer, input.model, input.productUrl, input.referenceUrl]);
+  const manuals = useMemo(() => mergeDiscoveredDocuments(baseManuals, documents), [baseManuals, documents]);
+  useEffect(() => {
+    if (!input.manufacturer && !input.productUrl) return;
+    const controller = new AbortController();
+    discoverPartDocuments({ model: input.model, manufacturer: input.manufacturer, productUrl: input.productUrl }, controller.signal)
+      .then(result => {
+        setDiscovery({ key: discoveryKey, state: 'done', documents: result.documents, message: result.documents.length ? `已从 ${result.manufacturer} 官方页面发现 ${result.documents.length} 份 PDF` : result.failures[0]?.message || '厂商页面未公开可识别的 PDF' });
+      })
+      .catch(error => {
+        if (controller.signal.aborted) return;
+        setDiscovery({ key: discoveryKey, state: 'failed', documents: [], message: error instanceof Error ? error.message : '官方 PDF 发现失败' });
+      });
+    return () => controller.abort();
+  }, [discoveryKey, input.manufacturer, input.model, input.productUrl]);
   return (
     <div className="border-b border-[#30363d] bg-blue-500/[0.03] p-5">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
@@ -471,7 +490,9 @@ function ChipManuals({ input }: { input: PartDocumentDiscoveryInput }) {
             <BookOpen size={15} />
             完整技术资料包
           </h3>
-          <p className="mt-1 text-[11px] text-gray-500">直链表示已获得具体地址；检索入口仍需在厂商页面核对适用型号、版本与发布日期。</p>
+          <p className="mt-1 text-[11px] text-gray-500">优先直接打开厂商 PDF；未发现 PDF 的资料类型保留检索入口，并需核对适用型号、版本与发布日期。</p>
+          {discoveryState === 'loading' && <p className="mt-1 flex items-center gap-1.5 text-[10px] text-blue-400"><Loader2 size={11} className="animate-spin" />正在从厂商官方页面查找 PDF…</p>}
+          {(discoveryState === 'done' || discoveryState === 'failed') && <p className={`mt-1 text-[10px] ${documents.length ? 'text-green-400' : 'text-yellow-400'}`}>{discoveryMessage}</p>}
         </div>
         <span className="rounded-full border border-[#30363d] px-2.5 py-1 text-[10px] text-gray-500">{manuals.length} 类资料</span>
       </div>
