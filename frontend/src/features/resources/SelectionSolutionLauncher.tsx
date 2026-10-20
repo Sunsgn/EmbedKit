@@ -3,7 +3,8 @@ import { FileSearch, FolderOpen, LayoutTemplate, ListChecks, Play, RotateCcw } f
 import type { FunctionSolution, PartRole } from '../../types';
 import { createFunctionSolution, listFunctionSolutions } from './functionSolutions';
 import { parseRecommendationText } from './recommendationImport';
-import { functionTemplates } from './selectionRegistry';
+import { createRequirementSelection } from './requirementSelection';
+import { discoverLocalParts, functionTemplates, getRoleCatalog } from './selectionRegistry';
 import type { SelectionWorkspaceDraft } from './selectionWorkspaceDraft';
 
 export interface SelectionLaunchResult {
@@ -37,6 +38,7 @@ export default function SelectionSolutionLauncher({ draft, onStart, onDiscardDra
   const parsed = useMemo(() => parseRecommendationText(text), [text]);
   const recommendationLike = parsed.candidates.length > 0;
   const suggested = useMemo(() => suggestedTemplate(text), [text]);
+  const suggestedCandidateCount = useMemo(() => text.trim() ? (suggested.roles.length ? suggested.roles.reduce((sum, role) => sum + getRoleCatalog(role.categoryId).length, 0) : discoverLocalParts(text).length) : 0, [suggested, text]);
   const records = useMemo(() => listFunctionSolutions().slice(0, 8), []);
 
   const startCandidates = () => {
@@ -44,9 +46,8 @@ export default function SelectionSolutionLauncher({ draft, onStart, onDiscardDra
     onStart({ solution, intakeKind: 'recommendation', intakeText: text, targetRoleId: role.id });
   };
   const startRequirement = () => {
-    const solution = createFunctionSolution(suggested);
-    solution.description = text.trim().slice(0, 4_000);
-    onStart({ solution, intakeKind: 'requirement', intakeText: text, targetRoleId: solution.roles[0]?.id });
+    const prepared = createRequirementSelection(suggested, text);
+    onStart({ solution: prepared.solution, intakeKind: 'requirement', intakeText: text, targetRoleId: prepared.targetRoleId });
   };
   const startTemplate = () => {
     const template = functionTemplates.find(item => item.id === templateId) ?? functionTemplates[0];
@@ -59,7 +60,7 @@ export default function SelectionSolutionLauncher({ draft, onStart, onDiscardDra
       <h2 className="text-base font-semibold text-gray-100">方案选型与验证</h2>
       <p className="mt-1 text-xs leading-5 text-gray-500">粘贴产品需求、AI 回复或型号列表。系统只提取可确定的信息，无法确认的内容保留为待核验项。</p>
       <textarea aria-label="需求或候选内容" value={text} onChange={event => { setText(event.target.value); setView('none'); }} maxLength={64 * 1024} rows={7} placeholder="例如：需要支持 CAN FD、-40～85°C 的控制器；或直接粘贴 STM32G474RET6、S32K144……" className="mt-4 w-full resize-y rounded-lg border border-[#30363d] bg-[#0d1117] p-3 text-sm leading-6 outline-none focus:border-blue-500" />
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[10px] text-gray-600"><span>本地解析 · 最多 64 KiB</span>{recommendationLike ? <span className="text-purple-300">识别到 {parsed.candidates.length} 个可能型号</span> : text.trim() ? <span>建议结构：{suggested.name}</span> : null}</div>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[10px] text-gray-600"><span>本地解析 · 最多 64 KiB</span>{recommendationLike ? <span className="text-purple-300">识别到 {parsed.candidates.length} 个可能型号</span> : text.trim() ? <span>建议结构：{suggested.name} · {suggestedCandidateCount ? `预计加载 ${suggestedCandidateCount} 个本地候选` : '本地目录暂无匹配候选'}</span> : null}</div>
       {recommendationLike && <div className="mt-3 rounded-lg border border-purple-500/20 bg-purple-500/5 p-3"><div className="flex items-center gap-2 text-xs text-purple-300"><ListChecks size={14} />候选预览</div><div className="mt-2 flex flex-wrap gap-1">{parsed.candidates.slice(0, 12).map(item => <span key={item.id} className="rounded bg-[#0d1117] px-2 py-1 text-[10px] text-gray-300">{item.model}</span>)}</div><p className="mt-2 text-[10px] text-gray-500">推荐文字不作为参数证据；下一步查询精确型号并选择真实器件类别。</p></div>}
       <div className="mt-4 flex flex-wrap justify-end gap-2">{recommendationLike && <button onClick={startRequirement} className="rounded border border-[#30363d] px-3 py-2 text-xs text-gray-400">按完整需求建方案</button>}<button onClick={recommendationLike ? startCandidates : startRequirement} disabled={!text.trim()} className="flex items-center gap-1.5 rounded bg-blue-600 px-4 py-2 text-xs text-white disabled:opacity-40"><Play size={13} />{recommendationLike ? `核验 ${parsed.candidates.length} 个候选型号` : '按需求开始'}</button></div>
     </div>

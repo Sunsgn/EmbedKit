@@ -45,6 +45,7 @@ export default function FunctionSolutionWorkbench({ initialSolution, initialRole
   const [tab, setTab] = useState<'constraints' | 'candidates' | 'evidence'>(initialTab);
   const [message, setMessage] = useState('');
   const [showAddRole, setShowAddRole] = useState(false);
+  const [showCandidateAdd, setShowCandidateAdd] = useState(false);
   const [newRoleCategory, setNewRoleCategory] = useState('mcu');
   const [newRoleName, setNewRoleName] = useState('');
   const role = solution.roles.find((item) => item.id === roleId) ?? solution.roles[0];
@@ -291,6 +292,8 @@ export default function FunctionSolutionWorkbench({ initialSolution, initialRole
               {tab === 'constraints' && <DynamicConstraintEditor categoryId={role.categoryId} constraints={role.constraints} availableParameters={[...new Map(candidates.flatMap((part) => part.parameters).map((parameter) => [parameter.key, parameter])).values()]} onChange={(constraints) => updateRole({ ...role, constraints })} />}
               {tab === 'candidates' && (
                 <div className="space-y-2">
+                  {candidates.length > 0 && <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-green-500/20 bg-green-500/5 p-3"><span className="text-xs text-green-300">已发现 {candidates.length} 个候选，可直接按条件核验和排除</span><button onClick={() => setShowCandidateAdd(value => !value)} className="rounded border border-[#30363d] px-2.5 py-1 text-[10px] text-gray-400">{showCandidateAdd ? '收起补充入口' : '补充其他型号'}</button></div>}
+                  {(candidates.length === 0 || showCandidateAdd) && <>
                   <RecommendationCandidateImporter
                     initialText={initialRecommendationText}
                     onAdd={(parts) => {
@@ -333,8 +336,9 @@ export default function FunctionSolutionWorkbench({ initialSolution, initialRole
                       setMessage(`${part.mpn} 已加入当前角色；在线参数保持待核验状态`);
                     }}
                   />
+                  </>}
                   {evaluations.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-[#30363d] py-12 text-center text-xs text-gray-600">没有候选。可导入 AI 推荐、加载本地目录，或按完整型号在线发现。</div>
+                    <div className="rounded-lg border border-dashed border-[#30363d] py-12 text-center text-xs text-gray-600">当前本地目录没有发现候选。可切换角色类别、加载对应目录，或补充外部推荐和完整型号。</div>
                   ) : (
                     evaluations.map((result) => {
                       const part = candidates.find((item) => item.id === result.partId)!;

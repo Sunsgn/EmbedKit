@@ -34,7 +34,7 @@ export default function FunctionalSelectionCenter({ initialSolution }: { initial
     <FunctionSolutionWorkbench
       initialSolution={active.solution}
       initialRoleId={active.targetRoleId}
-      initialTab={active.intakeKind === 'recommendation' || active.intakeKind === 'models' ? 'candidates' : 'constraints'}
+      initialTab={active.intakeKind === 'recommendation' || active.intakeKind === 'models' || active.solution.parts.length > 0 ? 'candidates' : 'constraints'}
       initialRecommendationText={active.intakeKind === 'recommendation' || active.intakeKind === 'models' ? active.intakeText : ''}
       onBack={() => {
         setDraft(loadSelectionWorkspaceDraft());

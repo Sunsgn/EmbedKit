@@ -7,10 +7,15 @@ describe('FunctionalSelectionCenter', () => {
   it('starts from a pasted requirement without choosing a workflow first', () => {
     render(<FunctionalSelectionCenter />);
     fireEvent.change(screen.getByRole('textbox', { name: '需求或候选内容' }), { target: { value: '温度和压力传感器采集，需要 ADC' } });
-    expect(screen.getByText('建议结构：传感器采集节点')).toBeInTheDocument();
+    expect(screen.getByText(/建议结构：传感器采集节点 · 预计加载 \d+ 个本地候选/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '按需求开始' }));
     expect(screen.getByText('方案核验工作台')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: '功能描述' })).toHaveValue('温度和压力传感器采集，需要 ADC');
+    expect(screen.getByText('BME280')).toBeInTheDocument();
+    expect(screen.getByText(/已发现 \d+ 个候选/)).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '在线查询器件型号' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '补充其他型号' }));
+    expect(screen.getByRole('textbox', { name: '在线查询器件型号' })).toBeInTheDocument();
   });
 
   it('uses editable roles and dynamic constraints instead of fixed part-category pages', () => {

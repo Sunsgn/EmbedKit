@@ -1,4 +1,6 @@
 import type { ConstraintOperator, FunctionTemplate, ParameterDefinition, PartRecord, UnitDefinition } from '../../types';
+import { components } from '../../data/components';
+import { migrateElectronicComponent } from '../../services/partCatalog';
 import { communicationSelectionCatalog } from './communicationSelectionCatalog';
 import { mcuSelectionCatalog } from './mcuSelectionCatalog';
 
@@ -76,7 +78,32 @@ export function findParameterDefinition(categoryId: string, name: string) {
 export function getRoleCatalog(categoryId: string): PartRecord[] {
   if (categoryId === 'mcu') return mcuSelectionCatalog;
   if (categoryId === 'communication-transceiver') return communicationSelectionCatalog;
-  return [];
+  const matches = components.filter(component => {
+    const text = `${component.category} ${component.subcategory} ${component.description} ${component.tags.join(' ')}`;
+    if (categoryId === 'sensor') return component.category === '传感器';
+    if (categoryId === 'signal-conditioning') return /信号调理|运算放大器|运放|放大器/.test(text);
+    if (categoryId === 'adc') return /\bADC\b|模数|模拟.*数字/i.test(text);
+    if (categoryId === 'power') return component.category === '电源管理';
+    if (categoryId === 'isolation') return component.category === '隔离与驱动' && /隔离|光耦/.test(text);
+    if (categoryId === 'protection') return component.category === '保护器件';
+    if (categoryId === 'storage') return component.category === '存储器';
+    return false;
+  });
+  return matches.slice(0, 20).map(migrateElectronicComponent);
+}
+
+export function discoverLocalParts(requirement: string): PartRecord[] {
+  const query = requirement.toLocaleUpperCase().replace(/I²C/g, 'I2C');
+  const pool = [
+    ...mcuSelectionCatalog,
+    ...components.map(migrateElectronicComponent),
+  ];
+  const scored = pool.map(part => {
+    const labels = [...part.tags, part.category, part.subcategory, part.mpn].map(value => value.toLocaleUpperCase().replace(/I²C/g, 'I2C')).filter(value => value.length >= 2);
+    const score = labels.reduce((sum, label) => sum + (query.includes(label) ? (label === part.mpn.toLocaleUpperCase() ? 8 : 2) : 0), 0);
+    return { part, score };
+  }).filter(item => item.score > 0).sort((left, right) => right.score - left.score || left.part.mpn.localeCompare(right.part.mpn));
+  return [...new Map(scored.map(item => [item.part.id, item.part])).values()].slice(0, 20);
 }
 
 export function convertUnit(value: number, from?: string, to?: string) {
