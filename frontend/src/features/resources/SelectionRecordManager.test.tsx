@@ -10,7 +10,7 @@ beforeEach(() => localStorage.clear());
 describe('SelectionRecordManager', () => {
   it('saves, restores, and explicitly confirms deletion', () => {
     const onRestore = vi.fn(), confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    render(<SelectionRecordManager name="CAN FD 选型" criteria={criteria} parts={communicationSelectionCatalog} evaluations={rankPartSelections(communicationSelectionCatalog, criteria)} onRestore={onRestore} />);
+    render(<SelectionRecordManager scope="communication-transceiver" name="CAN FD 选型" criteria={criteria} parts={communicationSelectionCatalog} evaluations={rankPartSelections(communicationSelectionCatalog, criteria)} onRestore={onRestore} />);
     fireEvent.click(screen.getByRole('button', { name: '保存当前选型' }));
     expect(screen.getByRole('status')).toHaveTextContent('已保存');
     expect(listPartSelectionRecords()).toHaveLength(1);
