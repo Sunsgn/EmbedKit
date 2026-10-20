@@ -22,7 +22,7 @@ export async function lookupOnlinePart(model: string, signal?: AbortSignal): Pro
   const specs: Record<string, string> = {};
   if (raw.specs && typeof raw.specs === 'object' && !Array.isArray(raw.specs)) for (const [key, value] of Object.entries(raw.specs).slice(0, 64)) { const label = text(key, 120), detail = text(value, 500); if (label && detail) specs[label] = detail; }
   const features = Array.isArray(raw.features) ? raw.features.slice(0, 40).map(value => text(value, 500)).filter(Boolean) : [];
-  return { query, productName: text(raw.productName, 200) || query, manufacturer: text(raw.manufacturer, 200) || undefined, description: text(raw.description, 2000) || '在线来源未提供器件描述。', specs, features, source: text(raw.source, 120) || '在线聚合来源', productUrl: safeUrl(raw.productUrl ?? raw.stUrl), datasheetUrl: safeUrl(raw.datasheetUrl) };
+  return { query, productName: text(raw.productName, 200) || query, manufacturer: text(raw.manufacturer, 200) || text(specs.manufacturer, 200) || undefined, description: text(raw.description, 2000) || '在线来源未提供器件描述。', specs, features, source: text(raw.source, 120) || '在线聚合来源', productUrl: safeUrl(raw.productUrl), datasheetUrl: safeUrl(raw.datasheetUrl ?? raw.stUrl) };
 }
 
 export function onlineDetailsToPart(details: OnlinePartDetails): PartRecord {

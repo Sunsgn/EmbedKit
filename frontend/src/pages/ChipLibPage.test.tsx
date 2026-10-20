@@ -31,4 +31,16 @@ describe('ChipLibPage layout', () => {
     fireEvent.change(screen.getByRole('combobox', { name: '当前角色类别' }), { target: { value: 'mcu' } });
     expect(screen.getByRole('combobox', { name: '当前角色类别' })).toHaveValue('mcu');
   });
+
+  it('shows a complete document package instead of only a datasheet for an exact model', () => {
+    render(<ChipLibPage />);
+    fireEvent.change(screen.getByPlaceholderText(/搜索型号、参数或用途/), { target: { value: 'BME280' } });
+    expect(screen.getByRole('heading', { name: '完整技术资料包' })).toBeInTheDocument();
+    const datasheet = screen.getAllByRole('link').find((link) => link.textContent?.startsWith('数据手册'));
+    expect(datasheet).toHaveAttribute('href', expect.stringContaining('bosch-sensortec.com'));
+    expect(screen.getByRole('link', { name: /用户／使用手册/ })).toHaveTextContent('官方站点定向搜索');
+    expect(screen.getByRole('link', { name: /应用笔记/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /硬件设计指南/ })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /入门指南/ })).toBeInTheDocument();
+  });
 });

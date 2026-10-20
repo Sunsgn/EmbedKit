@@ -6,6 +6,7 @@ import { LOCAL_PROXY_BASE } from '../services/aiService';
 import KnowledgeSourcePanel from '../features/resources/KnowledgeSourcePanel';
 import FunctionalSelectionCenter from '../features/resources/FunctionalSelectionCenter';
 import FunctionSolutionRecords from '../features/resources/FunctionSolutionRecords';
+import { buildOfficialDocumentLinks, documentAccessLabel, type PartDocumentDiscoveryInput } from '../features/resources/partDocumentDiscovery';
 import type { FunctionSolution } from '../types';
 
 interface CatalogItem {
@@ -34,10 +35,14 @@ interface PartLink {
 interface OnlineDetails {
   productName?: string;
   productFamily?: string;
+  manufacturer?: string;
   description?: string;
   specs?: Record<string, string>;
   features?: string[];
   stUrl?: string;
+  productUrl?: string;
+  datasheetUrl?: string;
+  source?: string;
   error?: string;
 }
 
@@ -160,35 +165,6 @@ function typicalUse(item: CatalogItem) {
   return '适合通用嵌入式控制、外设驱动、数据采集和实时任务处理。';
 }
 
-function officialDomain(manufacturer: string) {
-  const name = manufacturer.toLowerCase();
-  if (name.includes('stmicro')) return 'st.com';
-  if (name.includes('espressif')) return 'espressif.com';
-  if (name.includes('microchip')) return 'microchip.com';
-  if (name.includes('nxp')) return 'nxp.com';
-  if (name.includes('texas')) return 'ti.com';
-  if (name.includes('nordic')) return 'nordicsemi.com';
-  if (name.includes('infineon')) return 'infineon.com';
-  if (name.includes('renesas')) return 'renesas.com';
-  if (name.includes('gigadevice')) return 'gd-mcu.com';
-  if (name.includes('wch')) return 'wch-ic.com';
-  if (name.includes('raspberry')) return 'raspberrypi.com';
-  return '';
-}
-
-function officialDocumentSearch(item: CatalogItem, document: string) {
-  const domain = officialDomain(item.manufacturer);
-  const terms = `${domain ? `site:${domain}` : item.manufacturer} ${item.name} ${document} PDF`;
-  if (domain === 'st.com') return `https://www.st.com/content/st_com/en/search.html#q=${encodeURIComponent(`${item.name} ${document}`)}`;
-  return `https://cn.bing.com/search?q=${encodeURIComponent(terms)}`;
-}
-
-function stm32ManualUrl(item: CatalogItem, document: 'reference' | 'programming') {
-  if (/^STM32F1/i.test(item.name) && document === 'reference') return 'https://www.st.com/resource/en/reference_manual/cd00171190.pdf';
-  if (/^STM32F1/i.test(item.name) && document === 'programming') return 'https://www.st.com/resource/en/programming_manual/cd00228163.pdf';
-  return officialDocumentSearch(item, document === 'reference' ? 'reference manual user manual' : 'programming manual');
-}
-
 function hasChipDocumentation(item: CatalogItem) {
   return item.isChip || !['无源器件', '连接器'].includes(item.category);
 }
@@ -224,7 +200,7 @@ export default function ChipLibPage() {
               <Boxes className="text-blue-400" />
               资料中心
             </h1>
-            <p className="mt-1 text-sm text-gray-400">查询芯片与元器件参数、数据手册、参考手册、CAD 模型和采购资料</p>
+            <p className="mt-1 text-sm text-gray-400">按型号查询数据手册、用户指南、参考手册、应用笔记、设计资料和官方来源</p>
           </div>
           <div className="flex gap-2 text-xs text-gray-500">
             <span className="rounded-full border border-[#30363d] bg-[#161b22] px-3 py-1">{catalog.length} 个本地型号</span>
@@ -404,7 +380,7 @@ function QueryDetails({ query, localItem }: { query: string; localItem: CatalogI
             <p className="mt-1 text-sm leading-6 text-gray-300">{typicalUse(localItem)}</p>
           </div>
         </div>
-        {hasChipDocumentation(localItem) && <ChipManuals item={localItem} />}
+        {hasChipDocumentation(localItem) && <ChipManuals input={{ model: localItem.name, manufacturer: localItem.manufacturer, category: localItem.category, isMcu: localItem.isChip, datasheetUrl: localItem.datasheetUrl, referenceUrl: localItem.reference }} />}
         <div className="p-5">
           <h3 className="mb-1 text-xs font-semibold text-gray-300">关键使用参数</h3>
           <p className="mb-3 text-[11px] text-gray-600">用于初步选型；最终设计请核对对应温度等级、封装后缀及最新版数据手册。</p>
@@ -428,27 +404,36 @@ function QueryDetails({ query, localItem }: { query: string; localItem: CatalogI
     );
   if (failed)
     return (
-      <div className="mb-4 flex gap-3 rounded-xl border border-yellow-500/20 bg-yellow-500/5 p-4">
-        <Info size={18} className="shrink-0 text-yellow-400" />
-        <div>
-          <p className="text-sm text-gray-300">暂未取得该型号的结构化参数</p>
-          <p className="mt-1 text-xs text-gray-500">请确认代理服务已启动并输入完整型号；仍可使用页面下方的数据手册和采购查询。</p>
+      <section className="mb-4 overflow-hidden rounded-xl border border-yellow-500/20 bg-[#161b22]">
+        <div className="flex gap-3 bg-yellow-500/5 p-4">
+          <Info size={18} className="shrink-0 text-yellow-400" />
+          <div>
+            <p className="text-sm text-gray-300">暂未取得该型号的结构化参数</p>
+            <p className="mt-1 text-xs text-gray-500">仍可按型号检索完整资料包；厂商未确认前，入口会明确标为 Web 检索。</p>
+          </div>
         </div>
-      </div>
+        <ChipManuals input={{ model: query }} />
+      </section>
     );
   if (!details) return null;
   const specs = details.specs ?? {};
+  const onlineManufacturer = details.manufacturer || (typeof specs.manufacturer === 'string' ? specs.manufacturer : undefined);
   return (
     <section className="mb-4 overflow-hidden rounded-xl border border-blue-500/30 bg-[#161b22]">
       <div className="border-b border-[#30363d] p-5">
         <span className="text-[10px] uppercase tracking-wider text-blue-400">在线型号详情</span>
         <h2 className="mt-1 text-xl font-bold">{details.productName || query}</h2>
         {details.productFamily && <p className="mt-1 text-xs text-blue-300">{details.productFamily}</p>}
+        <div className="mt-2 flex flex-wrap gap-2 text-xs">
+          {onlineManufacturer && <span className="rounded bg-[#0d1117] px-2 py-1 text-gray-400">厂商：{onlineManufacturer}</span>}
+          {details.source && <span className="rounded bg-[#0d1117] px-2 py-1 text-gray-500">参数来源：{details.source}</span>}
+        </div>
         <div className="mt-4 rounded-lg border border-green-500/15 bg-green-500/5 p-3">
           <h3 className="text-xs font-semibold text-green-400">功能与用途</h3>
           <p className="mt-1 text-sm leading-6 text-gray-300">{details.description || '请结合数据手册确认器件功能和推荐应用。'}</p>
         </div>
       </div>
+      <ChipManuals input={{ model: details.productName || query, manufacturer: onlineManufacturer, category: details.productFamily, datasheetUrl: details.datasheetUrl || details.stUrl, productUrl: details.productUrl }} />
       {Object.keys(specs).length > 0 && (
         <div className="p-5">
           <h3 className="mb-3 text-xs font-semibold text-gray-400">重要参数</h3>
@@ -476,70 +461,32 @@ function QueryDetails({ query, localItem }: { query: string; localItem: CatalogI
   );
 }
 
-function ChipManuals({ item }: { item: CatalogItem }) {
-  const isMcu = item.category === '微控制器与处理器';
-  const manuals = isMcu
-    ? [
-        {
-          title: '数据手册',
-          description: '引脚、封装、电气特性和极限参数',
-          link: item.datasheetUrl || officialDocumentSearch(item, 'datasheet'),
-        },
-        {
-          title: '参考手册',
-          description: '外设功能、寄存器、时钟树和使用方法',
-          link: item.reference || stm32ManualUrl(item, 'reference'),
-        },
-        {
-          title: '编程手册',
-          description: '内核、指令、异常、中断和系统控制',
-          link: stm32ManualUrl(item, 'programming'),
-        },
-        {
-          title: '勘误手册',
-          description: '已知芯片问题、受影响版本和规避方法',
-          link: officialDocumentSearch(item, 'errata sheet'),
-        },
-      ]
-    : [
-        {
-          title: '数据手册',
-          description: '引脚、封装、时序、电气特性和极限参数',
-          link: item.datasheetUrl || officialDocumentSearch(item, 'datasheet'),
-        },
-        {
-          title: '应用手册',
-          description: '典型电路、接口连接、布局和使用注意事项',
-          link: officialDocumentSearch(item, 'application note typical application'),
-        },
-        {
-          title: '设计指南',
-          description: '选型、参数计算、替代料和系统设计建议',
-          link: officialDocumentSearch(item, 'design guide selection guide'),
-        },
-        {
-          title: '官方产品页',
-          description: '厂商最新资料、软件工具和相关文档汇总',
-          link: item.reference || officialDocumentSearch(item, 'product page technical documents'),
-        },
-      ];
+function ChipManuals({ input }: { input: PartDocumentDiscoveryInput }) {
+  const manuals = buildOfficialDocumentLinks(input);
   return (
     <div className="border-b border-[#30363d] bg-blue-500/[0.03] p-5">
-      <div className="mb-3">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-blue-300">
-          <BookOpen size={15} />
-          开发与使用手册
-        </h3>
-        <p className="mt-1 text-[11px] text-gray-500">{isMcu ? '建议先看数据手册确认硬件，再用参考手册开发外设，上线前检查勘误。' : '优先查看数据手册和应用手册，确认典型电路、时序、布局及使用限制。'}</p>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-blue-300">
+            <BookOpen size={15} />
+            完整技术资料包
+          </h3>
+          <p className="mt-1 text-[11px] text-gray-500">直链表示已获得具体地址；检索入口仍需在厂商页面核对适用型号、版本与发布日期。</p>
+        </div>
+        <span className="rounded-full border border-[#30363d] px-2.5 py-1 text-[10px] text-gray-500">{manuals.length} 类资料</span>
       </div>
-      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
         {manuals.map((manual) => (
-          <a key={manual.title} href={manual.link} target="_blank" rel="noopener noreferrer" className="group rounded-lg border border-[#30363d] bg-[#0d1117] p-3 hover:border-blue-500/40">
+          <a key={manual.id} href={manual.url} target="_blank" rel="noopener noreferrer" className="group rounded-lg border border-[#30363d] bg-[#0d1117] p-3 hover:border-blue-500/40">
             <div className="flex items-center justify-between">
               <b className="text-xs text-gray-200 group-hover:text-blue-300">{manual.title}</b>
               <ExternalLink size={12} className="text-gray-600 group-hover:text-blue-400" />
             </div>
-            <p className="mt-1.5 text-[11px] leading-4 text-gray-600">{manual.description}</p>
+            <p className="mt-1.5 min-h-8 text-[11px] leading-4 text-gray-600">{manual.description}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[9px]">
+              <span className={`rounded px-1.5 py-0.5 ${manual.authoritative ? 'bg-green-500/10 text-green-400' : 'bg-yellow-500/10 text-yellow-400'}`}>{documentAccessLabel(manual)}</span>
+              <span className="truncate text-gray-600">{manual.sourceName}</span>
+            </div>
           </a>
         ))}
       </div>

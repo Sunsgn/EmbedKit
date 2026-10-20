@@ -2,7 +2,17 @@ export const PART_RECORD_SCHEMA_VERSION = 1 as const;
 
 export type PartParameterValueType = 'number' | 'range' | 'enum' | 'boolean' | 'text';
 export type PartParameterStatus = 'verified' | 'imported' | 'inferred' | 'unknown' | 'conflict';
-export type PartDocumentKind = 'datasheet' | 'reference-manual' | 'errata' | 'application-note' | 'product-page' | 'other';
+export type PartDocumentKind =
+  | 'datasheet'
+  | 'reference-manual'
+  | 'user-guide'
+  | 'programming-manual'
+  | 'application-note'
+  | 'errata'
+  | 'hardware-design-guide'
+  | 'getting-started-guide'
+  | 'product-page'
+  | 'other';
 export type PartSourceKind = 'manufacturer' | 'distributor' | 'aggregator' | 'user-import' | 'builtin';
 export type PartLifecycleStatus = 'active' | 'not-recommended' | 'last-time-buy' | 'obsolete' | 'unknown';
 

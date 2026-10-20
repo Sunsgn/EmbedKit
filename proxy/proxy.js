@@ -1061,6 +1061,9 @@ async function getSnapEDASpecs(chipName) {
     features: [],
     hierarchy: [],
     stUrl: '',
+    datasheetUrl: '',
+    productUrl: '',
+    manufacturer: '',
     source: 'SnapEDA/Mouser',
   };
 
@@ -1087,6 +1090,7 @@ async function getSnapEDASpecs(chipName) {
 
     result.productName = partData.ManufacturerPartNumber;
     result.productFamily = partData.Category || '';
+    result.manufacturer = partData.Manufacturer || '';
     result.description = partData.Description || '';
     result.specs = {
       manufacturer: partData.Manufacturer || '',
@@ -1099,6 +1103,7 @@ async function getSnapEDASpecs(chipName) {
 
     if (partData.DataSheetUrl) {
       result.stUrl = partData.DataSheetUrl;
+      result.datasheetUrl = partData.DataSheetUrl;
     }
 
     if (partData.ProductAttributes) {
