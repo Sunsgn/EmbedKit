@@ -232,19 +232,13 @@ export default function ChipLibPage() {
           </div>
         </header>
 
-        <nav aria-label="资料中心模式" className="mb-5 grid gap-2 sm:grid-cols-3">
+        <nav aria-label="资料中心模式" className="mb-5 grid gap-2 sm:grid-cols-2">
           {[
             {
               id: 'catalog' as const,
               name: '按型号查询器件',
               detail: '型号、手册、CAD 与来源导航',
               icon: Search,
-            },
-            {
-              id: 'solution' as const,
-              name: '方案选型与验证',
-              detail: '导入需求或候选，筛选、核验并保留证据',
-              icon: Lightbulb,
             },
             {
               id: 'records' as const,
@@ -276,6 +270,7 @@ export default function ChipLibPage() {
           <>
             <KnowledgeSourcePanel />
             <section className="mb-5 rounded-xl border border-[#30363d] bg-[#161b22] p-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div><h2 className="text-sm font-semibold text-gray-200">按完整型号查找</h2><p className="mt-1 text-[10px] text-gray-600">推荐型号可由 AI 提供；这里负责查找资料、核对型号和保留来源。</p></div><button onClick={() => { setOpenedSolution(undefined); setMode('solution'); }} className="flex items-center gap-1.5 rounded border border-purple-500/30 px-3 py-2 text-xs text-purple-300"><Lightbulb size={13} />批量核验 AI 给出的型号</button></div>
               <div className="grid gap-3 md:grid-cols-[minmax(280px,1fr)_220px_220px]">
                 <label className="relative">
                   <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
