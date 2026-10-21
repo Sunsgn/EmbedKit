@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { BookOpen, Boxes, CheckCircle, Cpu, ExternalLink, FileText, Filter, History, Info, Layers, Lightbulb, Loader2, PackageSearch, ReplaceAll, Search, ShoppingCart, Tag } from 'lucide-react';
 import { chips } from '../data/chips';
 import { components } from '../data/components';
@@ -6,9 +6,11 @@ import { LOCAL_PROXY_BASE } from '../services/aiService';
 import KnowledgeSourcePanel from '../features/resources/KnowledgeSourcePanel';
 import FunctionalSelectionCenter from '../features/resources/FunctionalSelectionCenter';
 import FunctionSolutionRecords from '../features/resources/FunctionSolutionRecords';
-import { buildOfficialDocumentLinks, documentAccessLabel, mergeDiscoveredDocuments, type PartDocumentDiscoveryInput } from '../features/resources/partDocumentDiscovery';
+import { buildOfficialDocumentLinks, documentAccessLabel, mergeDiscoveredDocuments, type PartDocumentDiscoveryInput, type PartDocumentLink } from '../features/resources/partDocumentDiscovery';
 import { discoverPartDocuments, type DiscoveredPartDocument } from '../services/partSources';
 import type { FunctionSolution } from '../types';
+
+const PartDocumentWorkspace = lazy(() => import('../features/resources/PartDocumentWorkspace'));
 
 interface CatalogItem {
   id: string;
@@ -465,6 +467,7 @@ function QueryDetails({ query, localItem }: { query: string; localItem: CatalogI
 function ChipManuals({ input }: { input: PartDocumentDiscoveryInput }) {
   const discoveryKey = `${input.model}\n${input.manufacturer || ''}\n${input.productUrl || ''}`;
   const [discovery, setDiscovery] = useState<{ key: string; state: 'done' | 'failed'; documents: DiscoveredPartDocument[]; message: string }>({ key: '', state: 'failed', documents: [], message: '' });
+  const [openedDocument, setOpenedDocument] = useState<PartDocumentLink>();
   const activeDiscovery = discovery.key === discoveryKey ? discovery : { key: discoveryKey, state: 'loading' as const, documents: [], message: '' };
   const documents = activeDiscovery.documents, discoveryState = input.manufacturer || input.productUrl ? activeDiscovery.state : 'idle', discoveryMessage = activeDiscovery.message;
   const baseManuals = useMemo(() => buildOfficialDocumentLinks({ model: input.model, manufacturer: input.manufacturer, category: input.category, isMcu: input.isMcu, datasheetUrl: input.datasheetUrl, referenceUrl: input.referenceUrl, productUrl: input.productUrl }), [input.category, input.datasheetUrl, input.isMcu, input.manufacturer, input.model, input.productUrl, input.referenceUrl]);
@@ -497,20 +500,24 @@ function ChipManuals({ input }: { input: PartDocumentDiscoveryInput }) {
         <span className="rounded-full border border-[#30363d] px-2.5 py-1 text-[10px] text-gray-500">{manuals.length} 类资料</span>
       </div>
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-        {manuals.map((manual) => (
-          <a key={manual.id} href={manual.url} target="_blank" rel="noopener noreferrer" className="group rounded-lg border border-[#30363d] bg-[#0d1117] p-3 hover:border-blue-500/40">
+        {manuals.map((manual) => {
+          const content = <>
             <div className="flex items-center justify-between">
               <b className="text-xs text-gray-200 group-hover:text-blue-300">{manual.title}</b>
-              <ExternalLink size={12} className="text-gray-600 group-hover:text-blue-400" />
+              {manual.access === 'official-pdf' ? <BookOpen size={12} className="text-gray-600 group-hover:text-blue-400" /> : <ExternalLink size={12} className="text-gray-600 group-hover:text-blue-400" />}
             </div>
             <p className="mt-1.5 min-h-8 text-[11px] leading-4 text-gray-600">{manual.description}</p>
             <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[9px]">
               <span className={`rounded px-1.5 py-0.5 ${manual.authoritative ? 'bg-green-500/10 text-green-400' : 'bg-yellow-500/10 text-yellow-400'}`}>{documentAccessLabel(manual)}</span>
               <span className="truncate text-gray-600">{manual.sourceName}</span>
             </div>
-          </a>
-        ))}
+          </>;
+          return manual.access === 'official-pdf'
+            ? <button key={manual.id} type="button" onClick={() => setOpenedDocument(manual)} className="group rounded-lg border border-[#30363d] bg-[#0d1117] p-3 text-left hover:border-blue-500/40">{content}</button>
+            : <a key={manual.id} href={manual.url} target="_blank" rel="noopener noreferrer" className="group rounded-lg border border-[#30363d] bg-[#0d1117] p-3 hover:border-blue-500/40">{content}</a>;
+        })}
       </div>
+      {openedDocument && <Suspense fallback={<div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/75"><Loader2 className="animate-spin text-blue-400" /></div>}><PartDocumentWorkspace model={input.model} document={openedDocument} onClose={() => setOpenedDocument(undefined)} /></Suspense>}
     </div>
   );
 }

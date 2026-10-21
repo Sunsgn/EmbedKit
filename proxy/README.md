@@ -30,6 +30,8 @@ Build output diagnostics are normalized for GCC/Clang `file:line:column`, Keil/A
 
 The optional `productUrl` is accepted only when its host belongs to the resolved manufacturer adapter. Unknown manufacturers, blocked pages, dynamic sites, timeouts, and pages without identifiable PDF anchors return an explicit empty or partial result; the Agent does not substitute aggregator links or label search results as verified PDFs. It returns links rather than downloading or permanently storing copyrighted documents.
 
+`GET /api/parts/document-content?url=...` reads one discovered official PDF for the in-app document workspace. The URL must use HTTPS and match a registered manufacturer domain. The Agent follows at most two redirects that remain within that manufacturer's registered domains, applies a 20-second request timeout and a 50 MiB response limit, and verifies the `%PDF-` file signature before returning bytes. It exposes the final source URL in `X-EmbedKit-Source-Url`; blocked hosts, cross-manufacturer redirects, oversized responses, timeouts, and non-PDF content return structured errors. Content is streamed to the requesting browser session and is not persisted by the Agent.
+
 The test suite also builds a minimal public C source with an installed GNU toolchain, generates real MAP/ELF/BIN/Intel HEX artifacts in a temporary directory, analyzes them, and removes them. It never downloads a compiler or commits generated firmware. See `docs/TOOLCHAIN_ARTIFACT_FIXTURES.md` for platform and proprietary-toolchain boundaries.
 
 ## Controlled local path selection

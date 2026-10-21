@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { copyFile, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { authorizeBuildArtifact, configureFilePickerAdapter, configureInstallManifestRegistry, configurePartDocumentFetcher, configureSerialAdapter, configureSoftwareInstallerAdapter, createBuildCommand, decodeNetworkPayload, extractOfficialDocuments, extractSoftwareVersion, hashBuildArtifact, isAllowedOrigin, parseBuildDiagnostic, receiveSerialData, startServer, validateArchiveEntries, validateHostAndPort, validateInstallManifest, validateProxyTarget, validateSerialOptions } from './proxy.js';
+import { authorizeBuildArtifact, configureFilePickerAdapter, configureInstallManifestRegistry, configurePartDocumentBinaryFetcher, configurePartDocumentFetcher, configureSerialAdapter, configureSoftwareInstallerAdapter, createBuildCommand, decodeNetworkPayload, extractOfficialDocuments, extractSoftwareVersion, hashBuildArtifact, isAllowedOrigin, parseBuildDiagnostic, receiveSerialData, startServer, validateArchiveEntries, validateHostAndPort, validateInstallManifest, validateOfficialPartDocumentUrl, validateProxyTarget, validateSerialOptions } from './proxy.js';
 
 class VirtualSerialPort extends EventEmitter {
   constructor(options) { super(); this.options = options; this.isOpen = false; this.signals = { dtr: false, rts: false }; }
@@ -186,6 +186,7 @@ test('reports local agent version and capabilities', async () => {
   assert.ok(result.capabilities.includes('software-installation'));
   assert.ok(result.capabilities.includes('part-source-status'));
   assert.ok(result.capabilities.includes('part-details-online'));
+  assert.ok(result.capabilities.includes('part-document-read'));
   assert.equal(response.headers.get('x-embedkit-protocol'), '1');
 });
 
@@ -218,6 +219,20 @@ test('discovers bounded official PDFs through the Local Agent endpoint', async (
     assert.deepEqual(result.documents.map(item => item.kind), ['datasheet', 'user-guide']);
     assert.equal(result.limits.maxDocuments, 24);
   } finally { configurePartDocumentFetcher(null); }
+});
+
+test('reads a validated official PDF as bounded binary content', async () => {
+  const pdf = Buffer.from('%PDF-1.4\ncontrolled test document\n%%EOF');
+  configurePartDocumentBinaryFetcher(async url => ({ bytes: pdf, finalUrl: url }));
+  try {
+    assert.throws(() => validateOfficialPartDocumentUrl('https://example.com/manual.pdf'), /registered manufacturer/);
+    const source = 'https://www.ti.com/lit/ds/symlink/tcan1042.pdf';
+    const response = await fetch(`${agentBaseUrl}/api/parts/document-content?url=${encodeURIComponent(source)}`);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-type'), 'application/pdf');
+    assert.equal(response.headers.get('x-embedkit-source-url'), source);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), pdf);
+  } finally { configurePartDocumentBinaryFetcher(null); }
 });
 
 test('detects installed development software with bounded structured results', async () => {

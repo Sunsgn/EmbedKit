@@ -23,7 +23,7 @@ export interface DocumentExtractionResult {
 }
 
 export class DocumentExtractionError extends Error {
-  readonly code: 'UNSUPPORTED_DOCUMENT' | 'FILE_TOO_LARGE' | 'DAMAGED_DOCUMENT' | 'DOCUMENT_LIMIT_EXCEEDED' | 'OCR_REQUIRED' | 'PASSWORD_REQUIRED';
+  readonly code: 'UNSUPPORTED_DOCUMENT' | 'FILE_TOO_LARGE' | 'DAMAGED_DOCUMENT' | 'DOCUMENT_LIMIT_EXCEEDED' | 'OCR_REQUIRED' | 'PASSWORD_REQUIRED' | 'CANCELLED';
   constructor(code: DocumentExtractionError['code'], message: string) { super(message); this.name = 'DocumentExtractionError'; this.code = code; }
 }
 
@@ -145,7 +145,7 @@ function extractXlsx(bytes: Uint8Array, fileName: string): DocumentExtractionRes
   return { schema: 'embedkit.document-extraction', version: 1, fileName, kind: 'xlsx', fileBytes: bytes.byteLength, extractedAt: new Date().toISOString(), text, units, unitLabel: '工作表行', warnings };
 }
 
-async function extractPdf(bytes: Uint8Array, fileName: string, progress?: Progress): Promise<DocumentExtractionResult> {
+async function extractPdf(bytes: Uint8Array, fileName: string, progress?: Progress, signal?: AbortSignal): Promise<DocumentExtractionResult> {
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
   const task = pdfjs.getDocument({ data: bytes, stopAtErrors: true, useSystemFonts: true, disableFontFace: true });
@@ -157,6 +157,7 @@ async function extractPdf(bytes: Uint8Array, fileName: string, progress?: Progre
     const lines: string[] = [], warnings: string[] = ['PDF 多栏、浮动文本框或复杂表格的阅读顺序可能需要人工校对'];
     let textPages = 0;
     for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
+      if (signal?.aborted) { await task.destroy(); throw new DocumentExtractionError('CANCELLED', '文档解析已取消'); }
       progress?.(`正在提取 PDF 第 ${pageNumber}/${document.numPages} 页`);
       const page = await document.getPage(pageNumber), content = await page.getTextContent();
       const pageLines: string[] = []; let current = '';
@@ -183,13 +184,15 @@ async function extractPdf(bytes: Uint8Array, fileName: string, progress?: Progre
   }
 }
 
-export async function extractProtocolDocumentFile(file: File, progress?: Progress): Promise<DocumentExtractionResult> {
+export async function extractProtocolDocumentFile(file: File, progress?: Progress, signal?: AbortSignal): Promise<DocumentExtractionResult> {
+  if (signal?.aborted) throw new DocumentExtractionError('CANCELLED', '文档解析已取消');
   if (file.size > DOCUMENT_FILE_MAX_BYTES) throw new DocumentExtractionError('FILE_TOO_LARGE', '文档超过 50 MiB 文件上限');
   const extension = file.name.toLowerCase().split('.').pop();
   if (!['pdf', 'docx', 'xlsx'].includes(extension ?? '')) throw new DocumentExtractionError('UNSUPPORTED_DOCUMENT', '仅支持 PDF、DOCX 和 XLSX；旧版 DOC/XLS 请先另存为新版格式');
   progress?.(`正在读取 ${file.name}`);
   const bytes = new Uint8Array(await file.arrayBuffer());
-  if (extension === 'pdf') return extractPdf(bytes, file.name, progress);
+  if (signal?.aborted) throw new DocumentExtractionError('CANCELLED', '文档解析已取消');
+  if (extension === 'pdf') return extractPdf(bytes, file.name, progress, signal);
   progress?.(`正在解析 ${extension?.toUpperCase()} 结构`);
   return extension === 'docx' ? extractDocx(bytes, file.name) : extractXlsx(bytes, file.name);
 }

@@ -1,5 +1,5 @@
 import type { PartDocumentKind, PartParameter, PartRecord } from '../types';
-import { agentRequest, AgentClientError } from './agentClient';
+import { agentBinaryRequest, agentRequest, AgentClientError } from './agentClient';
 
 export interface PartSourceCapability { id: string; name: string; kind: 'manufacturer' | 'distributor' | 'aggregator' | 'user-import'; state: 'configured' | 'unavailable'; capabilities: string[]; dataScope: string; authoritative: boolean }
 export interface PartSourceStatus { schemaVersion: 1; sources: PartSourceCapability[]; limits: { queryLength: number; automaticPdfDownload: boolean; parametricSearch: boolean; documentResults?: number } }
@@ -43,6 +43,14 @@ export async function discoverPartDocuments(input: { model: string; manufacturer
   }
   const failures = raw.failures.slice(0, 3).flatMap(value => value && typeof value === 'object' ? [{ code: text((value as Record<string, unknown>).code, 80) || 'discovery-failed', message: text((value as Record<string, unknown>).message, 300) || '未找到官方 PDF', url: safeUrl((value as Record<string, unknown>).url) }] : []);
   return { schemaVersion: 1, model: text(raw.model, 120) || model, manufacturer: text(raw.manufacturer, 200), documents, failures, discoveredAt: text(raw.discoveredAt, 80) || new Date().toISOString() };
+}
+
+export async function readOfficialPartDocument(url: string, signal?: AbortSignal) {
+  const safe = safeUrl(url);
+  if (!safe?.startsWith('https:')) throw new AgentClientError('invalid-response', '官方文档地址必须使用 HTTPS');
+  const result = await agentBinaryRequest(`/api/parts/document-content?url=${encodeURIComponent(safe)}`, { signal }, 45000);
+  if (result.bytes.byteLength < 5 || result.bytes.byteLength > 50 * 1024 * 1024 || new TextDecoder('ascii').decode(result.bytes.subarray(0, 5)) !== '%PDF-') throw new AgentClientError('invalid-response', '本地助手返回的内容不是有效 PDF 或超过 50 MiB 上限');
+  return { ...result, sourceUrl: safeUrl(result.sourceUrl) || safe };
 }
 
 export function onlineDetailsToPart(details: OnlinePartDetails): PartRecord {

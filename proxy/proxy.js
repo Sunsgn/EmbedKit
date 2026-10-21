@@ -44,6 +44,7 @@ const AGENT_LOG_FILE = process.env.EMBEDKIT_AGENT_LOG_FILE || join(process.cwd()
 const AGENT_LOG_MAX_BYTES = Number(process.env.EMBEDKIT_AGENT_LOG_MAX_BYTES || 1024 * 1024);
 const SOFTWARE_INSTALLATION_STATE_FILE = process.env.EMBEDKIT_SOFTWARE_STATE_FILE || join(process.cwd(), '.embedkit-state', 'software-installations.json');
 const PART_DOCUMENT_MAX_HTML_BYTES = 2 * 1024 * 1024;
+const PART_DOCUMENT_MAX_PDF_BYTES = 50 * 1024 * 1024;
 const PART_DOCUMENT_MAX_RESULTS = 24;
 const PART_DOCUMENT_CACHE_TTL_MS = 10 * 60 * 1000;
 let agentLoggingInstalled = false, logWriteQueue = Promise.resolve();
@@ -501,7 +502,7 @@ function setCORS(req, res) {
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-EmbedKit-Protocol');
-  res.setHeader('Access-Control-Expose-Headers', 'X-EmbedKit-Protocol');
+  res.setHeader('Access-Control-Expose-Headers', 'X-EmbedKit-Protocol, Content-Disposition, Content-Length, X-EmbedKit-Source-Url');
   res.setHeader('X-EmbedKit-Protocol', String(AGENT_PROTOCOL_VERSION));
 }
 
@@ -1127,8 +1128,54 @@ function fetchBoundedOfficialHtml(urlStr, adapter, redirects = 2, timeoutMs = 90
   });
 }
 
+function fetchBoundedOfficialPdf(urlStr, adapter, redirects = 2, timeoutMs = 20_000) {
+  return new Promise((resolve, reject) => {
+    if (!isAdapterUrl(urlStr, adapter)) { reject(new Error('PDF URL is outside the selected manufacturer domains')); return; }
+    const request = https.get(urlStr, { headers: { 'User-Agent': `EmbedKit-Agent/${AGENT_VERSION}`, Accept: 'application/pdf' } }, response => {
+      if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location && redirects > 0) {
+        response.resume();
+        let redirected; try { redirected = new URL(response.headers.location, urlStr).toString(); } catch { reject(new Error('Manufacturer returned an invalid PDF redirect')); return; }
+        fetchBoundedOfficialPdf(redirected, adapter, redirects - 1, timeoutMs).then(resolve, reject); return;
+      }
+      if (response.statusCode < 200 || response.statusCode >= 300) { response.resume(); reject(new Error(`Manufacturer PDF returned HTTP ${response.statusCode}`)); return; }
+      const declared = Number(response.headers['content-length'] || 0);
+      if (declared > PART_DOCUMENT_MAX_PDF_BYTES) { response.resume(); reject(new Error('Official PDF exceeds the 50 MiB limit')); return; }
+      const chunks = []; let size = 0, stopped = false;
+      response.on('data', chunk => {
+        if (stopped) return;
+        size += chunk.length;
+        if (size > PART_DOCUMENT_MAX_PDF_BYTES) { stopped = true; request.destroy(new Error('Official PDF exceeds the 50 MiB limit')); return; }
+        chunks.push(chunk);
+      });
+      response.on('end', () => {
+        if (stopped) return;
+        const bytes = Buffer.concat(chunks);
+        if (bytes.length < 5 || bytes.subarray(0, 5).toString('ascii') !== '%PDF-') { reject(new Error('Official document response is not a PDF file')); return; }
+        resolve({ bytes, finalUrl: urlStr });
+      });
+    });
+    request.on('error', reject);
+    request.setTimeout(timeoutMs, () => request.destroy(new Error('Official PDF download timed out')));
+  });
+}
+
 let partDocumentFetcher = fetchBoundedOfficialHtml;
 export function configurePartDocumentFetcher(fetcher) { partDocumentFetcher = fetcher || fetchBoundedOfficialHtml; partDocumentCache.clear(); }
+let partDocumentBinaryFetcher = fetchBoundedOfficialPdf;
+export function configurePartDocumentBinaryFetcher(fetcher) { partDocumentBinaryFetcher = fetcher || fetchBoundedOfficialPdf; }
+
+export function validateOfficialPartDocumentUrl(value) {
+  const adapter = partDocumentAdapter('', value);
+  if (!adapter || !isAdapterUrl(value, adapter)) throw new Error('PDF URL is not on a registered manufacturer domain');
+  return { url: new URL(value).toString(), adapter };
+}
+
+export async function readOfficialPartDocument(value) {
+  const validated = validateOfficialPartDocumentUrl(value), result = await partDocumentBinaryFetcher(validated.url, validated.adapter);
+  if (!result || !Buffer.isBuffer(result.bytes) || result.bytes.length > PART_DOCUMENT_MAX_PDF_BYTES || result.bytes.subarray(0, 5).toString('ascii') !== '%PDF-') throw new Error('Official PDF response failed validation');
+  if (!isAdapterUrl(result.finalUrl || validated.url, validated.adapter)) throw new Error('Official PDF redirect left the manufacturer domain');
+  return { bytes: result.bytes, finalUrl: result.finalUrl || validated.url, manufacturer: validated.adapter.name };
+}
 
 export async function discoverOfficialPartDocuments({ model, manufacturer, productUrl }) {
   const cleanModel = String(model || '').trim();
@@ -1585,7 +1632,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === '/api/agent/status' && req.method === 'GET') {
-    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: ['serial', 'tcp-client', 'tcp-server', 'udp-client', 'udp-server', 'session-restore', 'network-session-restore', 'structured-errors', 'project-build', 'project-scan', 'local-picker', 'local-file-read', 'elf-analysis', 'software-environment', 'software-installation', 'part-source-status', 'part-details-online', 'part-document-discovery'] });
+    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: ['serial', 'tcp-client', 'tcp-server', 'udp-client', 'udp-server', 'session-restore', 'network-session-restore', 'structured-errors', 'project-build', 'project-scan', 'local-picker', 'local-file-read', 'elf-analysis', 'software-environment', 'software-installation', 'part-source-status', 'part-details-online', 'part-document-discovery', 'part-document-read'] });
     return;
   }
 
@@ -1833,6 +1880,17 @@ const server = http.createServer(async (req, res) => {
     try {
       jsonRes(res, 200, await discoverOfficialPartDocuments({ model: requestUrl.searchParams.get('part'), manufacturer: requestUrl.searchParams.get('manufacturer'), productUrl: requestUrl.searchParams.get('productUrl') }));
     } catch (error) { jsonRes(res, 400, { error: error.message, code: 'invalid-document-query' }); }
+    return;
+  }
+
+  if (pathname === '/api/parts/document-content' && req.method === 'GET') {
+    try {
+      const result = await readOfficialPartDocument(requestUrl.searchParams.get('url'));
+      const candidate = new URL(result.finalUrl).pathname.split('/').filter(Boolean).pop() || 'official-document.pdf';
+      const fileName = /\.pdf$/i.test(candidate) ? candidate : `${candidate}.pdf`;
+      res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': result.bytes.length, 'Content-Disposition': `inline; filename="${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}"`, 'X-EmbedKit-Source-Url': result.finalUrl });
+      res.end(result.bytes);
+    } catch (error) { jsonRes(res, /registered manufacturer domain/.test(error.message) ? 403 : 502, { error: error.message, code: 'official-pdf-unavailable' }); }
     return;
   }
 

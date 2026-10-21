@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AgentClientError, agentRequest, getAgentStatus, hasAgentCapability } from './agentClient';
+import { AgentClientError, agentBinaryRequest, agentRequest, getAgentStatus, hasAgentCapability } from './agentClient';
 
 afterEach(() => vi.unstubAllGlobals());
 function response(body: unknown, status = 200, protocol = '1') { return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', 'X-EmbedKit-Protocol': protocol } }); }
@@ -8,4 +8,5 @@ describe('central Local Agent client', () => {
   it('classifies offline and incompatible agents', async () => { vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('fetch failed'))); await expect(getAgentStatus()).rejects.toMatchObject({ kind: 'offline' }); vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({}, 200, '2'))); await expect(getAgentStatus()).rejects.toMatchObject({ kind: 'incompatible' }); });
   it('preserves structured HTTP errors', async () => { vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ error: { message: 'Port busy' }, code: 'SERIAL_BUSY' }, 409))); await expect(agentRequest('/api/test')).rejects.toMatchObject({ kind: 'http', status: 409, code: 'SERIAL_BUSY', message: 'Port busy (SERIAL_BUSY)' }); });
   it('rejects invalid status payloads', async () => { vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({ available: true }))); await expect(getAgentStatus()).rejects.toBeInstanceOf(AgentClientError); });
+  it('reads binary agent responses with protocol and source evidence', async () => { vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(new Uint8Array([1, 2, 3]), { headers: { 'Content-Type': 'application/pdf', 'X-EmbedKit-Protocol': '1', 'X-EmbedKit-Source-Url': 'https://official.example/part.pdf' } }))); await expect(agentBinaryRequest('/api/test.pdf')).resolves.toMatchObject({ bytes: new Uint8Array([1, 2, 3]), contentType: 'application/pdf', sourceUrl: 'https://official.example/part.pdf' }); });
 });

@@ -37,11 +37,9 @@ describe('ChipLibPage layout', () => {
     render(<ChipLibPage />);
     fireEvent.change(screen.getByPlaceholderText(/搜索型号、参数或用途/), { target: { value: 'BME280' } });
     expect(screen.getByRole('heading', { name: '完整技术资料包' })).toBeInTheDocument();
-    const datasheet = screen.getAllByRole('link').find((link) => link.textContent?.startsWith('数据手册'));
-    expect(datasheet).toHaveAttribute('href', expect.stringContaining('bosch-sensortec.com'));
+    expect(screen.getByRole('button', { name: /数据手册/ })).toHaveTextContent('打开官方 PDF');
     expect(await screen.findByText(/已从 Bosch Sensortec 官方页面发现 1 份 PDF/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /用户／使用手册/ })).toHaveTextContent('打开官方 PDF');
-    expect(screen.getByRole('link', { name: /用户／使用手册/ })).toHaveAttribute('href', 'https://www.bosch-sensortec.com/BME280-UG.pdf');
+    expect(screen.getByRole('button', { name: /用户／使用手册/ })).toHaveTextContent('打开官方 PDF');
     expect(screen.getByRole('link', { name: /应用笔记/ })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /硬件设计指南/ })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /入门指南/ })).toBeInTheDocument();
