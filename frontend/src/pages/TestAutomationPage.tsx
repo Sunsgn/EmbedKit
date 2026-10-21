@@ -65,6 +65,14 @@ import {
   sharedFlowChannel,
   stepUsesChannel,
 } from "../utils/testFlow";
+import {
+  MAX_RETRY_COUNT,
+  MAX_RETRY_DELAY_MS,
+  MAX_RETRY_TIME_LIMIT_MS,
+  canRetryStep,
+  normalizeRetryPolicy,
+  retryTimeRemaining,
+} from "../utils/testRetryPolicy";
 
 type Channel = "serial-a" | "serial-b" | "websocket" | "tcp" | "udp";
 interface FirmwareChoice {
@@ -102,6 +110,8 @@ interface TestStep {
   durationMs: number;
   timeoutMs: number;
   retryCount: number;
+  retryDelayMs?: number;
+  retryTimeLimitMs?: number;
   matchMode: "contains" | "equals" | "regex";
   expected?: string;
   failurePattern?: string;
@@ -266,6 +276,8 @@ const createStep = (type: StepType = "command"): TestStep => ({
   durationMs: 500,
   timeoutMs: 3000,
   retryCount: type === "command" ? 1 : 0,
+  retryDelayMs: 1000,
+  retryTimeLimitMs: 5 * 60 * 1000,
   matchMode: "contains",
 });
 const createAtNetworkCase = (): TestCase => {
@@ -1030,8 +1042,14 @@ export default function TestAutomationPage() {
       );
       try {
         let lastError: unknown;
-        const retries = Math.max(0, Math.min(10, step.retryCount || 0));
-        for (let attempt = 0; attempt <= retries; attempt += 1) {
+        const retryPolicy = normalizeRetryPolicy(step);
+        for (let attempt = 0; attempt <= retryPolicy.retryCount; attempt += 1) {
+          if (
+            attempt > 0 &&
+            retryPolicy.retryTimeLimitMs > 0 &&
+            Date.now() - stepStarted >= retryPolicy.retryTimeLimitMs
+          )
+            break;
           attempts = attempt;
           try {
             if (stopRequested.current && stage !== "teardown")
@@ -1095,11 +1113,32 @@ export default function TestAutomationPage() {
           } catch (reason) {
             lastError = reason;
             if (stopRequested.current && stage !== "teardown") break;
-            if (attempt < retries)
-              addRunLog(
-                "info",
-                `${step.name} · 第 ${attempt + 1} 次失败，重新执行完整指令事务`,
-              );
+            const elapsedMs = Date.now() - stepStarted;
+            if (!canRetryStep(retryPolicy, attempt, elapsedMs)) {
+              if (
+                attempt < retryPolicy.retryCount &&
+                retryPolicy.retryTimeLimitMs > 0
+              )
+                addRunLog(
+                  "info",
+                  `${step.name} · 已达到总持续时间 ${Math.round(retryPolicy.retryTimeLimitMs / 1000)} 秒，停止重试`,
+                );
+              break;
+            }
+            addRunLog(
+              "info",
+              `${step.name} · 第 ${attempt + 1} 次失败，${retryPolicy.retryDelayMs ? `${retryPolicy.retryDelayMs} ms 后` : "立即"}重新执行完整步骤`,
+            );
+            const retryDelay = Math.min(
+              retryPolicy.retryDelayMs,
+              retryTimeRemaining(retryPolicy, elapsedMs),
+            );
+            for (let waited = 0; waited < retryDelay; ) {
+              if (stopRequested.current && stage !== "teardown") break;
+              const slice = Math.min(100, retryDelay - waited);
+              await sleep(slice);
+              waited += slice;
+            }
           }
         }
         if (lastError) throw lastError;
@@ -2502,34 +2541,63 @@ export default function TestAutomationPage() {
             {selectedStep && (
               <details className="shrink-0 rounded-xl border border-[#30363d] bg-[#0d1117] px-3 py-2">
                 <summary className="cursor-pointer text-[10px] text-gray-400">
-                  重试策略 · {selectedStep.retryCount || 0} 次
+                  重试策略 · 最多 {selectedStep.retryCount || 0} 次重试
                 </summary>
-                <label className="mt-2 flex items-center justify-between gap-3 border-t border-[#30363d] pt-2 text-[11px] text-gray-500">
+                <div className="mt-2 grid gap-2 border-t border-[#30363d] pt-2 sm:grid-cols-3">
+                <label className="text-[11px] text-gray-500">
                   <span>
                     {selectedStep.type === "command"
                       ? "完整指令事务重试"
                       : "步骤失败重试"}
                   </span>
-                  <span className="flex items-center gap-1">
                     <input
+                      aria-label="失败后最多重试次数"
                       type="number"
                       min="0"
-                      max="10"
+                      max={MAX_RETRY_COUNT}
                       value={selectedStep.retryCount || 0}
                       disabled={running}
                       onChange={(event) =>
                         updateStep({
                           retryCount: Math.max(
                             0,
-                            Math.min(10, Number(event.target.value) || 0),
+                            Math.min(MAX_RETRY_COUNT, Number(event.target.value) || 0),
                           ),
                         })
                       }
-                      className="w-16 rounded border border-[#30363d] bg-[#161b22] px-2 py-1 text-center text-xs text-gray-200 outline-none"
+                      className="field"
                     />
-                    次
-                  </span>
                 </label>
+                <label className="text-[11px] text-gray-500">
+                  重试间隔 ms
+                  <input
+                    aria-label="重试间隔毫秒"
+                    type="number"
+                    min="0"
+                    max={MAX_RETRY_DELAY_MS}
+                    value={selectedStep.retryDelayMs ?? 0}
+                    disabled={running}
+                    onChange={(event) => updateStep({ retryDelayMs: Math.max(0, Math.min(MAX_RETRY_DELAY_MS, Number(event.target.value) || 0)) })}
+                    className="field"
+                  />
+                </label>
+                <label className="text-[11px] text-gray-500">
+                  总持续时间 秒
+                  <input
+                    aria-label="重试总持续时间秒"
+                    type="number"
+                    min="0"
+                    max={MAX_RETRY_TIME_LIMIT_MS / 1000}
+                    value={Math.round((selectedStep.retryTimeLimitMs ?? 0) / 1000)}
+                    disabled={running}
+                    onChange={(event) => updateStep({ retryTimeLimitMs: Math.max(0, Math.min(MAX_RETRY_TIME_LIMIT_MS, (Number(event.target.value) || 0) * 1000)) })}
+                    className="field"
+                  />
+                </label>
+                </div>
+                <p className="mt-2 text-[9px] text-gray-600">
+                  重试次数不含首次执行；次数上限 {MAX_RETRY_COUNT}。总持续时间为 0 时仅按次数停止，运行中始终可以取消。
+                </p>
               </details>
             )}
             <details className="shrink-0 rounded-xl border border-[#30363d] bg-[#0d1117] px-3 py-2">

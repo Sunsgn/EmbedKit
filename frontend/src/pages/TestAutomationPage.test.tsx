@@ -108,6 +108,60 @@ describe('TestAutomationPage centralized Agent workflow', () => {
     expect(screen.getByLabelText('默认发送行尾')).toBeVisible();
   });
 
+  it('configures long polling retries above ten with interval and duration boundaries', async () => {
+    render(<TestAutomationPage />);
+    fireEvent.click(screen.getByText(/重试策略 ·/));
+
+    const retryCount = screen.getByLabelText('失败后最多重试次数');
+    fireEvent.change(retryCount, { target: { value: '200' } });
+    fireEvent.change(screen.getByLabelText('重试间隔毫秒'), { target: { value: '1500' } });
+    fireEvent.change(screen.getByLabelText('重试总持续时间秒'), { target: { value: '3600' } });
+
+    expect(retryCount).toHaveValue(200);
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem('embedkit.automation.suites') ?? '[]');
+      expect(saved[0].cases[0].steps[0]).toMatchObject({
+        retryCount: 200,
+        retryDelayMs: 1500,
+        retryTimeLimitMs: 3_600_000,
+      });
+    });
+  });
+
+  it('executes more than ten retries and records the actual retry count', async () => {
+    const suite = [{
+      ...tcpSuite[0],
+      cases: [{
+        ...tcpSuite[0].cases[0],
+        steps: [{
+          ...tcpSuite[0].cases[0].steps[0],
+          retryCount: 20,
+          retryDelayMs: 0,
+          retryTimeLimitMs: 0,
+        }],
+      }],
+    }];
+    localStorage.setItem('embedkit.automation.suites', JSON.stringify(suite));
+    let sends = 0;
+    vi.mocked(sendNetworkData).mockImplementation(async () => {
+      sends += 1;
+      if (sends <= 11) throw new Error('temporary signal search failure');
+      return { sent: 4 };
+    });
+
+    render(<TestAutomationPage />);
+    fireEvent.click(screen.getByRole('button', { name: '运行流程' }));
+
+    await waitFor(() => expect(sendNetworkData).toHaveBeenCalledTimes(12));
+    await waitFor(() => expect(saveTestRunWithCommunicationSessions).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'passed',
+        steps: [expect.objectContaining({ status: 'passed', retries: 11 })],
+      }),
+      expect.any(Array),
+    ));
+  });
+
   it('hides command failure matching and capture fields behind advanced settings', () => {
     localStorage.removeItem('embedkit.automation.suites');
     render(<TestAutomationPage />);
