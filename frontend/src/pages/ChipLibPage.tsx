@@ -472,6 +472,8 @@ function ChipManuals({ input }: { input: PartDocumentDiscoveryInput }) {
   const documents = activeDiscovery.documents, discoveryState = input.manufacturer || input.productUrl ? activeDiscovery.state : 'idle', discoveryMessage = activeDiscovery.message;
   const baseManuals = useMemo(() => buildOfficialDocumentLinks({ model: input.model, manufacturer: input.manufacturer, category: input.category, isMcu: input.isMcu, datasheetUrl: input.datasheetUrl, referenceUrl: input.referenceUrl, productUrl: input.productUrl }), [input.category, input.datasheetUrl, input.isMcu, input.manufacturer, input.model, input.productUrl, input.referenceUrl]);
   const manuals = useMemo(() => mergeDiscoveredDocuments(baseManuals, documents), [baseManuals, documents]);
+  const availableManuals = useMemo(() => manuals.filter(manual => manual.access === 'official-pdf' || (manual.access === 'official-direct' && manual.authoritative)), [manuals]);
+  const unresolvedManuals = useMemo(() => manuals.filter(manual => !availableManuals.includes(manual)).filter((manual, index, list) => list.findIndex(item => item.kind === manual.kind) === index), [availableManuals, manuals]);
   useEffect(() => {
     if (!input.manufacturer && !input.productUrl) return;
     const controller = new AbortController();
@@ -491,16 +493,16 @@ function ChipManuals({ input }: { input: PartDocumentDiscoveryInput }) {
         <div>
           <h3 className="flex items-center gap-2 text-sm font-semibold text-blue-300">
             <BookOpen size={15} />
-            完整技术资料包
+            官方技术资料
           </h3>
-          <p className="mt-1 text-[11px] text-gray-500">优先直接打开厂商 PDF；未发现 PDF 的资料类型保留检索入口，并需核对适用型号、版本与发布日期。</p>
+          <p className="mt-1 text-[11px] text-gray-500">这里只展示已确认的厂商 PDF 和官方产品页，不再把搜索引擎结果显示为技术资料。</p>
           {discoveryState === 'loading' && <p className="mt-1 flex items-center gap-1.5 text-[10px] text-blue-400"><Loader2 size={11} className="animate-spin" />正在从厂商官方页面查找 PDF…</p>}
           {(discoveryState === 'done' || discoveryState === 'failed') && <p className={`mt-1 text-[10px] ${documents.length ? 'text-green-400' : 'text-yellow-400'}`}>{discoveryMessage}</p>}
         </div>
-        <span className="rounded-full border border-[#30363d] px-2.5 py-1 text-[10px] text-gray-500">{manuals.length} 类资料</span>
+        <span className="rounded-full border border-[#30363d] px-2.5 py-1 text-[10px] text-gray-500">{availableManuals.length} 份可直接使用</span>
       </div>
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-        {manuals.map((manual) => {
+        {availableManuals.map((manual) => {
           const content = <>
             <div className="flex items-center justify-between">
               <b className="text-xs text-gray-200 group-hover:text-blue-300">{manual.title}</b>
@@ -517,6 +519,8 @@ function ChipManuals({ input }: { input: PartDocumentDiscoveryInput }) {
             : <a key={manual.id} href={manual.url} target="_blank" rel="noopener noreferrer" className="group rounded-lg border border-[#30363d] bg-[#0d1117] p-3 hover:border-blue-500/40">{content}</a>;
         })}
       </div>
+      {!availableManuals.length && discoveryState !== 'loading' && <div className="rounded-lg border border-dashed border-yellow-500/20 bg-yellow-500/5 p-3 text-xs text-yellow-300">暂未发现可直接读取的官方资料。请核对完整型号和厂商；平台不会用百度、Bing 等搜索结果代替官方文档。</div>}
+      {unresolvedManuals.length > 0 && <div className="mt-3 rounded-lg border border-[#30363d] bg-[#0d1117] p-3"><b className="text-[11px] text-gray-400">尚未发现官方文件</b><div className="mt-2 flex flex-wrap gap-1.5">{unresolvedManuals.map(manual => <span key={manual.kind} className="rounded bg-white/[0.03] px-2 py-1 text-[9px] text-gray-600">{manual.title}</span>)}</div><p className="mt-2 text-[9px] text-gray-700">这些项目仅表示资料缺口，不提供搜索引擎跳转。</p></div>}
       {openedDocument && <Suspense fallback={<div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/75"><Loader2 className="animate-spin text-blue-400" /></div>}><PartDocumentWorkspace model={input.model} document={openedDocument} onClose={() => setOpenedDocument(undefined)} /></Suspense>}
     </div>
   );

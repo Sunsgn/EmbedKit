@@ -32,16 +32,18 @@ describe('ChipLibPage layout', () => {
     expect(screen.getByRole('combobox', { name: '当前角色类别' })).toHaveValue('mcu');
   });
 
-  it('shows a complete document package and replaces search entries with discovered PDFs', async () => {
+  it('shows only verified official documents and keeps unresolved kinds non-clickable', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ schemaVersion: 1, model: 'BME280', manufacturer: 'Bosch Sensortec', documents: [{ kind: 'user-guide', title: 'BME280 User Guide', url: 'https://www.bosch-sensortec.com/BME280-UG.pdf', sourceName: 'Bosch Sensortec', authoritative: true, scope: 'exact-model', discoveredFrom: 'https://www.bosch-sensortec.com/products/BME280' }], failures: [], discoveredAt: '2026-10-20T00:00:00.000Z' }), { status: 200, headers: { 'Content-Type': 'application/json', 'X-EmbedKit-Protocol': '1' } })));
     render(<ChipLibPage />);
     fireEvent.change(screen.getByPlaceholderText(/搜索型号、参数或用途/), { target: { value: 'BME280' } });
-    expect(screen.getByRole('heading', { name: '完整技术资料包' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '官方技术资料' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /数据手册/ })).toHaveTextContent('打开官方 PDF');
     expect(await screen.findByText(/已从 Bosch Sensortec 官方页面发现 1 份 PDF/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /用户／使用手册/ })).toHaveTextContent('打开官方 PDF');
-    expect(screen.getByRole('link', { name: /应用笔记/ })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /硬件设计指南/ })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /入门指南/ })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /应用笔记/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /硬件设计指南/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /入门指南/ })).not.toBeInTheDocument();
+    expect(screen.getByText('尚未发现官方文件')).toBeInTheDocument();
+    expect(screen.getByText(/不提供搜索引擎跳转/)).toBeInTheDocument();
   });
 });
