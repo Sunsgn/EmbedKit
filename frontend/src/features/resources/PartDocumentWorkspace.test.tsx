@@ -3,8 +3,9 @@ import { strToU8 } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PartDocumentWorkspace from './PartDocumentWorkspace';
 
-const mocks = vi.hoisted(() => ({ read: vi.fn() }));
+const mocks = vi.hoisted(() => ({ read: vi.fn(), readLocal: vi.fn() }));
 vi.mock('../../services/partSources', async importOriginal => ({ ...(await importOriginal<typeof import('../../services/partSources')>()), readOfficialPartDocument: mocks.read }));
+vi.mock('../../services/partDocumentLibrary', async importOriginal => ({ ...(await importOriginal<typeof import('../../services/partDocumentLibrary')>()), readLocalPartDocument: mocks.readLocal }));
 
 function minimalPdf(text = '1 Features Low current') {
   const stream = `BT /F1 12 Tf 72 720 Td (${text}) Tj ET`, objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>', '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>', `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`];
@@ -17,7 +18,7 @@ function minimalPdf(text = '1 Features Low current') {
 const document = { id: 'part:datasheet', kind: 'datasheet' as const, title: '数据手册', description: '官方数据手册', url: 'https://www.ti.com/lit/gpn/PART100', sourceName: 'Texas Instruments', access: 'official-pdf' as const, authoritative: true, scope: 'exact-model' as const };
 
 describe('PartDocumentWorkspace', () => {
-  beforeEach(() => mocks.read.mockReset());
+  beforeEach(() => { mocks.read.mockReset(); mocks.readLocal.mockReset(); });
   afterEach(() => cleanup());
 
   it('loads, extracts and navigates an official PDF with evidence', async () => {
@@ -39,4 +40,15 @@ describe('PartDocumentWorkspace', () => {
     expect(screen.getByRole('link', { name: /官方原址/ })).toHaveAttribute('href', document.url);
     expect(screen.getByRole('button', { name: /重新读取/ })).toBeInTheDocument();
   });
+
+  it('loads an indexed local PDF without requesting the Local Agent', async () => {
+    await import('pdfjs-dist/legacy/build/pdf.worker.mjs');
+    const bytes = minimalPdf('1 Features Local evidence');
+    mocks.readLocal.mockResolvedValue({ record: { fileName: 'PART100-local.pdf' }, bytes });
+    render(<PartDocumentWorkspace model="PART100" document={{ ...document, id: 'local:part100:hash', url: '', sourceName: '用户本地文件', access: 'local-pdf', authoritative: false, localDocumentId: 'local:part100:hash' }} onClose={() => undefined} />);
+    expect(await screen.findByText('确定性解析结果', undefined, { timeout: 20_000 })).toBeInTheDocument();
+    expect(mocks.readLocal).toHaveBeenCalledWith('local:part100:hash');
+    expect(mocks.read).not.toHaveBeenCalled();
+    expect(screen.queryByRole('link', { name: /官方原址/ })).not.toBeInTheDocument();
+  }, 30_000);
 });

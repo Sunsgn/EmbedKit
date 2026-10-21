@@ -1,7 +1,7 @@
 import type { PartDocumentKind } from '../../types';
 import type { DiscoveredPartDocument } from '../../services/partSources';
 
-export type DocumentAccess = 'official-pdf' | 'official-direct' | 'official-search' | 'site-search' | 'web-search';
+export type DocumentAccess = 'official-pdf' | 'local-pdf' | 'official-direct' | 'official-search' | 'site-search' | 'web-search';
 
 export interface PartDocumentLink {
   id: string;
@@ -13,6 +13,7 @@ export interface PartDocumentLink {
   access: DocumentAccess;
   authoritative: boolean;
   scope: 'exact-model' | 'family' | 'manufacturer-search' | 'web-search';
+  localDocumentId?: string;
 }
 
 export interface PartDocumentDiscoveryInput {
@@ -156,6 +157,7 @@ export function buildOfficialDocumentLinks(input: PartDocumentDiscoveryInput): P
 
 export function documentAccessLabel(link: PartDocumentLink) {
   if (link.access === 'official-pdf') return '打开官方 PDF';
+  if (link.access === 'local-pdf') return '打开本地 PDF';
   if (link.access === 'official-direct' && link.authoritative) return '官方直链';
   if (link.access === 'official-direct') return '外部直链 · 待核验';
   if (link.access === 'official-search') return '厂商官网检索';

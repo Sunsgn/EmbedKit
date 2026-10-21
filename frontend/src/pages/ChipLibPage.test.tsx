@@ -1,8 +1,10 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import 'fake-indexeddb/auto';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { deleteLocalPartDocumentDatabaseForTests } from '../services/partDocumentLibrary';
 import ChipLibPage from './ChipLibPage';
 
-beforeEach(() => { localStorage.clear(); vi.unstubAllGlobals(); });
+beforeEach(async () => { localStorage.clear(); vi.unstubAllGlobals(); await deleteLocalPartDocumentDatabaseForTests(); });
 
 describe('ChipLibPage layout', () => {
   it('keeps model lookup primary and opens batch verification as a secondary workspace', () => {
@@ -45,5 +47,16 @@ describe('ChipLibPage layout', () => {
     expect(screen.queryByRole('link', { name: /入门指南/ })).not.toBeInTheDocument();
     expect(screen.getByText('尚未发现官方文件')).toBeInTheDocument();
     expect(screen.getByText(/不提供搜索引擎跳转/)).toBeInTheDocument();
+  });
+
+  it('imports, restores and deletes a local PDF for the current model', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ schemaVersion: 1, model: 'BME280', manufacturer: 'Bosch Sensortec', documents: [], failures: [], discoveredAt: '2026-10-20T00:00:00.000Z' }), { status: 200, headers: { 'Content-Type': 'application/json', 'X-EmbedKit-Protocol': '1' } })));
+    render(<ChipLibPage />);
+    fireEvent.change(screen.getByPlaceholderText(/搜索型号、参数或用途/), { target: { value: 'BME280' } });
+    fireEvent.change(screen.getByLabelText('选择本地规格书 PDF'), { target: { files: [new File([new TextEncoder().encode('%PDF-1.4\nfixture')], 'BME280-user-guide.pdf', { type: 'application/pdf' })] } });
+    expect(await screen.findByRole('button', { name: '删除本地资料 BME280-user-guide' })).toBeInTheDocument();
+    expect(screen.getByText('2 份可直接使用')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '删除本地资料 BME280-user-guide' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '删除本地资料 BME280-user-guide' })).not.toBeInTheDocument());
   });
 });

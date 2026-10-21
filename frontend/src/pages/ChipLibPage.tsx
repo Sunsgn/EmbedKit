@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { BookOpen, Boxes, CheckCircle, Cpu, ExternalLink, FileText, Filter, History, Info, Layers, Lightbulb, Loader2, PackageSearch, ReplaceAll, Search, ShoppingCart, Tag } from 'lucide-react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { BookOpen, Boxes, CheckCircle, Cpu, ExternalLink, FileText, FileUp, Filter, History, Info, Layers, Lightbulb, Loader2, PackageSearch, ReplaceAll, Search, ShoppingCart, Tag, Trash2 } from 'lucide-react';
 import { chips } from '../data/chips';
 import { components } from '../data/components';
 import { LOCAL_PROXY_BASE } from '../services/aiService';
@@ -8,6 +8,7 @@ import FunctionalSelectionCenter from '../features/resources/FunctionalSelection
 import FunctionSolutionRecords from '../features/resources/FunctionSolutionRecords';
 import { buildOfficialDocumentLinks, documentAccessLabel, mergeDiscoveredDocuments, type PartDocumentDiscoveryInput, type PartDocumentLink } from '../features/resources/partDocumentDiscovery';
 import { discoverPartDocuments, type DiscoveredPartDocument } from '../services/partSources';
+import { deleteLocalPartDocument, importLocalPartDocument, listLocalPartDocuments, type LocalPartDocumentRecord } from '../services/partDocumentLibrary';
 import type { FunctionSolution } from '../types';
 
 const PartDocumentWorkspace = lazy(() => import('../features/resources/PartDocumentWorkspace'));
@@ -468,11 +469,14 @@ function ChipManuals({ input }: { input: PartDocumentDiscoveryInput }) {
   const discoveryKey = `${input.model}\n${input.manufacturer || ''}\n${input.productUrl || ''}`;
   const [discovery, setDiscovery] = useState<{ key: string; state: 'done' | 'failed'; documents: DiscoveredPartDocument[]; message: string }>({ key: '', state: 'failed', documents: [], message: '' });
   const [openedDocument, setOpenedDocument] = useState<PartDocumentLink>();
+  const [localDocuments, setLocalDocuments] = useState<LocalPartDocumentRecord[]>([]), [libraryError, setLibraryError] = useState(''), [importing, setImporting] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
   const activeDiscovery = discovery.key === discoveryKey ? discovery : { key: discoveryKey, state: 'loading' as const, documents: [], message: '' };
   const documents = activeDiscovery.documents, discoveryState = input.manufacturer || input.productUrl ? activeDiscovery.state : 'idle', discoveryMessage = activeDiscovery.message;
   const baseManuals = useMemo(() => buildOfficialDocumentLinks({ model: input.model, manufacturer: input.manufacturer, category: input.category, isMcu: input.isMcu, datasheetUrl: input.datasheetUrl, referenceUrl: input.referenceUrl, productUrl: input.productUrl }), [input.category, input.datasheetUrl, input.isMcu, input.manufacturer, input.model, input.productUrl, input.referenceUrl]);
   const manuals = useMemo(() => mergeDiscoveredDocuments(baseManuals, documents), [baseManuals, documents]);
-  const availableManuals = useMemo(() => manuals.filter(manual => manual.access === 'official-pdf' || (manual.access === 'official-direct' && manual.authoritative)), [manuals]);
+  const localManuals = useMemo<PartDocumentLink[]>(() => localDocuments.map(record => ({ id: record.id, kind: record.kind, title: record.title, description: `${record.fileName} · ${(record.byteLength / 1024 / 1024).toFixed(2)} MiB · SHA-256 ${record.sha256.slice(0, 12)}…`, url: '', sourceName: record.sourceName, access: 'local-pdf', authoritative: false, scope: 'exact-model', localDocumentId: record.id })), [localDocuments]);
+  const availableManuals = useMemo(() => [...localManuals, ...manuals.filter(manual => manual.access === 'official-pdf' || (manual.access === 'official-direct' && manual.authoritative))], [localManuals, manuals]);
   const unresolvedManuals = useMemo(() => manuals.filter(manual => !availableManuals.includes(manual)).filter((manual, index, list) => list.findIndex(item => item.kind === manual.kind) === index), [availableManuals, manuals]);
   useEffect(() => {
     if (!input.manufacturer && !input.productUrl) return;
@@ -487,6 +491,22 @@ function ChipManuals({ input }: { input: PartDocumentDiscoveryInput }) {
       });
     return () => controller.abort();
   }, [discoveryKey, input.manufacturer, input.model, input.productUrl]);
+  useEffect(() => {
+    let active = true;
+    listLocalPartDocuments(input.model).then(value => { if (active) { setLocalDocuments(value); setLibraryError(''); } }).catch(error => { if (active) setLibraryError(error instanceof Error ? error.message : '本地资料库读取失败'); });
+    return () => { active = false; };
+  }, [input.model]);
+  const importPdf = async (file?: File) => {
+    if (!file) return;
+    setImporting(true); setLibraryError('');
+    try { await importLocalPartDocument(input.model, file); setLocalDocuments(await listLocalPartDocuments(input.model)); }
+    catch (error) { setLibraryError(error instanceof Error ? error.message : '本地 PDF 导入失败'); }
+    finally { setImporting(false); if (fileInput.current) fileInput.current.value = ''; }
+  };
+  const removeLocalPdf = async (id: string) => {
+    try { await deleteLocalPartDocument(id); setLocalDocuments(value => value.filter(item => item.id !== id)); if (openedDocument?.localDocumentId === id) setOpenedDocument(undefined); }
+    catch (error) { setLibraryError(error instanceof Error ? error.message : '本地 PDF 删除失败'); }
+  };
   return (
     <div className="border-b border-[#30363d] bg-blue-500/[0.03] p-5">
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
@@ -499,8 +519,9 @@ function ChipManuals({ input }: { input: PartDocumentDiscoveryInput }) {
           {discoveryState === 'loading' && <p className="mt-1 flex items-center gap-1.5 text-[10px] text-blue-400"><Loader2 size={11} className="animate-spin" />正在从厂商官方页面查找 PDF…</p>}
           {(discoveryState === 'done' || discoveryState === 'failed') && <p className={`mt-1 text-[10px] ${documents.length ? 'text-green-400' : 'text-yellow-400'}`}>{discoveryMessage}</p>}
         </div>
-        <span className="rounded-full border border-[#30363d] px-2.5 py-1 text-[10px] text-gray-500">{availableManuals.length} 份可直接使用</span>
+        <div className="flex items-center gap-2"><input ref={fileInput} type="file" accept="application/pdf,.pdf" className="hidden" aria-label="选择本地规格书 PDF" onChange={event => void importPdf(event.target.files?.[0])} /><button type="button" disabled={importing} onClick={() => fileInput.current?.click()} className="flex items-center gap-1 rounded border border-blue-500/30 px-2.5 py-1 text-[10px] text-blue-300 disabled:opacity-40">{importing ? <Loader2 size={11} className="animate-spin" /> : <FileUp size={11} />}导入本地 PDF</button><span className="rounded-full border border-[#30363d] px-2.5 py-1 text-[10px] text-gray-500">{availableManuals.length} 份可直接使用</span></div>
       </div>
+      {libraryError && <p role="alert" className="mb-3 rounded border border-red-500/20 bg-red-500/5 px-3 py-2 text-[10px] text-red-300">{libraryError}</p>}
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
         {availableManuals.map((manual) => {
           const content = <>
@@ -514,6 +535,7 @@ function ChipManuals({ input }: { input: PartDocumentDiscoveryInput }) {
               <span className="truncate text-gray-600">{manual.sourceName}</span>
             </div>
           </>;
+          if (manual.access === 'local-pdf') return <div key={manual.id} className="relative rounded-lg border border-purple-500/20 bg-[#0d1117]"><button type="button" onClick={() => setOpenedDocument(manual)} className="group w-full p-3 pr-20 text-left hover:bg-purple-500/5">{content}</button><button type="button" aria-label={`删除本地资料 ${manual.title}`} onClick={() => void removeLocalPdf(manual.localDocumentId!)} className="absolute bottom-3 right-3 flex items-center gap-1 rounded border border-red-500/20 px-2 py-1 text-[9px] text-red-300"><Trash2 size={10} />删除</button></div>;
           return manual.access === 'official-pdf'
             ? <button key={manual.id} type="button" onClick={() => setOpenedDocument(manual)} className="group rounded-lg border border-[#30363d] bg-[#0d1117] p-3 text-left hover:border-blue-500/40">{content}</button>
             : <a key={manual.id} href={manual.url} target="_blank" rel="noopener noreferrer" className="group rounded-lg border border-[#30363d] bg-[#0d1117] p-3 hover:border-blue-500/40">{content}</a>;

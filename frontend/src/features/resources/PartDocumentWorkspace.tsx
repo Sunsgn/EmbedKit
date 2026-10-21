@@ -3,6 +3,7 @@ import { AlertTriangle, BookOpen, CheckCircle, Copy, Download, ExternalLink, Fil
 import type { DocumentExtractionResult } from '../../tools/frame/documentExtraction';
 import { extractProtocolDocumentFile } from '../../tools/frame/documentExtraction';
 import { readOfficialPartDocument } from '../../services/partSources';
+import { readLocalPartDocument } from '../../services/partDocumentLibrary';
 import type { PartDocumentLink } from './partDocumentDiscovery';
 import { analyzeDatasheetExtraction, searchDatasheetPages, type DatasheetAnalysis } from './datasheetAnalysis';
 
@@ -35,7 +36,9 @@ export default function PartDocumentWorkspace({ model, document, onClose }: Prop
     const controller = new AbortController(); let objectUrl = '';
     const load = async () => {
       try {
-        const result = await readOfficialPartDocument(document.url, controller.signal);
+        const result = document.access === 'local-pdf'
+          ? await readLocalPartDocument(document.localDocumentId || '').then(value => ({ bytes: value.bytes, contentType: 'application/pdf', disposition: '', sourceUrl: `本地资料库 · ${value.record.fileName}` }))
+          : await readOfficialPartDocument(document.url, controller.signal);
         if (controller.signal.aborted) return;
         const blob = new Blob([result.bytes as BlobPart], { type: 'application/pdf' }); objectUrl = URL.createObjectURL(blob); setBytes(result.bytes); setBlobUrl(objectUrl); setSourceUrl(result.sourceUrl); setState('parsing');
         const hashPromise = sha256(result.bytes);
@@ -49,7 +52,7 @@ export default function PartDocumentWorkspace({ model, document, onClose }: Prop
     };
     void load();
     return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [attempt, document.url, fileBase]);
+  }, [attempt, document.access, document.localDocumentId, document.url, fileBase]);
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
@@ -71,13 +74,13 @@ export default function PartDocumentWorkspace({ model, document, onClose }: Prop
           <div className="min-w-0"><div className="flex items-center gap-2"><BookOpen size={18} className="text-blue-400" /><h2 className="truncate text-sm font-semibold text-gray-100">{model} · {document.title}</h2></div><p className="mt-1 truncate text-[10px] text-gray-500">{document.sourceName} · {document.scope === 'exact-model' ? '精确型号资料' : '系列资料，使用前核对适用范围'}</p></div>
           <div className="flex flex-wrap items-center gap-2 text-xs">
             {state === 'ready' && <><button onClick={exportEvidence} className="flex items-center gap-1 rounded border border-[#30363d] px-2.5 py-1.5 text-gray-300"><Download size={12} />导出证据</button>{bytes && <button onClick={() => saveBlob(new Blob([bytes as BlobPart], { type: 'application/pdf' }), `${fileBase}.pdf`)} className="flex items-center gap-1 rounded border border-blue-500/30 px-2.5 py-1.5 text-blue-300"><Download size={12} />下载 PDF</button>}</>}
-            <a href={document.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 rounded border border-[#30363d] px-2.5 py-1.5 text-gray-400"><ExternalLink size={12} />官方原址</a>
+            {document.access !== 'local-pdf' && <a href={document.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 rounded border border-[#30363d] px-2.5 py-1.5 text-gray-400"><ExternalLink size={12} />官方原址</a>}
             <button onClick={onClose} aria-label="关闭详细资料阅读器" className="rounded p-1.5 text-gray-400 hover:bg-white/5 hover:text-white"><X size={18} /></button>
           </div>
         </header>
 
         {(state === 'downloading' || state === 'parsing') && <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center"><Loader2 size={30} className="animate-spin text-blue-400" /><div><p className="text-sm text-gray-200">{progress}</p><p className="mt-1 text-xs text-gray-600">关闭工作区可取消；PDF 最大 50 MiB、最多解析 1,000 页。</p></div></div>}
-        {state === 'error' && <div className="flex flex-1 items-center justify-center p-6"><div className="max-w-xl rounded-xl border border-red-500/20 bg-red-500/5 p-6 text-center"><AlertTriangle className="mx-auto text-red-400" /><h3 className="mt-3 font-semibold text-gray-200">无法在平台内读取该 PDF</h3><p role="alert" className="mt-2 text-sm text-gray-400">{error}</p><p className="mt-2 text-xs text-gray-600">请确认 Local Agent 已更新并启动；也可以从“官方原址”继续查看。</p><button onClick={retry} className="mx-auto mt-4 flex items-center gap-1 rounded bg-blue-600 px-3 py-2 text-xs"><RefreshCw size={12} />重新读取</button></div></div>}
+        {state === 'error' && <div className="flex flex-1 items-center justify-center p-6"><div className="max-w-xl rounded-xl border border-red-500/20 bg-red-500/5 p-6 text-center"><AlertTriangle className="mx-auto text-red-400" /><h3 className="mt-3 font-semibold text-gray-200">无法在平台内读取该 PDF</h3><p role="alert" className="mt-2 text-sm text-gray-400">{error}</p><p className="mt-2 text-xs text-gray-600">{document.access === 'local-pdf' ? '本地资料可能已被删除或浏览器站点数据已清理，请重新导入。' : '请确认 Local Agent 已更新并启动；也可以从“官方原址”继续查看。'}</p><button onClick={retry} className="mx-auto mt-4 flex items-center gap-1 rounded bg-blue-600 px-3 py-2 text-xs"><RefreshCw size={12} />重新读取</button></div></div>}
 
         {state === 'ready' && analysis && extraction && <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto xl:grid-cols-[280px_minmax(480px,1fr)_340px] xl:overflow-hidden">
           <aside className="border-b border-[#30363d] bg-[#11161d] p-3 xl:overflow-y-auto xl:border-b-0 xl:border-r">
@@ -90,7 +93,7 @@ export default function PartDocumentWorkspace({ model, document, onClose }: Prop
           </aside>
 
           <main className="flex min-h-[680px] flex-col border-b border-[#30363d] bg-[#20252b] xl:min-h-0 xl:border-b-0 xl:border-r">
-            <div className="flex items-center justify-between border-b border-[#30363d] bg-[#161b22] px-3 py-2 text-xs"><span className="text-gray-400">官方原文 · 第 {selectedPage}/{extraction.units} 页</span><div className="flex gap-1"><button disabled={selectedPage <= 1} onClick={() => setSelectedPage(page => Math.max(1, page - 1))} className="rounded border border-[#30363d] px-2 py-1 disabled:opacity-30">上一页</button><button disabled={selectedPage >= extraction.units} onClick={() => setSelectedPage(page => Math.min(extraction.units, page + 1))} className="rounded border border-[#30363d] px-2 py-1 disabled:opacity-30">下一页</button></div></div>
+            <div className="flex items-center justify-between border-b border-[#30363d] bg-[#161b22] px-3 py-2 text-xs"><span className="text-gray-400">PDF 原文 · 第 {selectedPage}/{extraction.units} 页</span><div className="flex gap-1"><button disabled={selectedPage <= 1} onClick={() => setSelectedPage(page => Math.max(1, page - 1))} className="rounded border border-[#30363d] px-2 py-1 disabled:opacity-30">上一页</button><button disabled={selectedPage >= extraction.units} onClick={() => setSelectedPage(page => Math.min(extraction.units, page + 1))} className="rounded border border-[#30363d] px-2 py-1 disabled:opacity-30">下一页</button></div></div>
             <iframe key={selectedPage} title={`${model} 官方 PDF 第 ${selectedPage} 页`} src={`${blobUrl}#page=${selectedPage}&zoom=page-width`} className="min-h-[620px] flex-1 bg-white" />
           </main>
 
