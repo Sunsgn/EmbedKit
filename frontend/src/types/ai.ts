@@ -16,10 +16,10 @@ export const AI_PROVIDERS = {
   openrouter: {
     name: 'OpenRouter',
     icon: '🌐',
-    defaultModel: 'openrouter/auto',
+    defaultModel: 'openrouter/free',
     models: [
-      { id: 'openrouter/auto', label: '自动选择可用模型' },
       { id: 'openrouter/free', label: '自动选择免费模型' },
+      { id: 'openrouter/auto', label: '自动选择可用模型' },
     ],
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     apiKey: '',

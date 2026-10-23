@@ -229,6 +229,12 @@ export default function AiPage() {
     clearStoredAiConfig();
   };
 
+  const activateFreeCloud = () => {
+    setConfig(defaultAiConfig());
+    setError(null);
+    setShowSettings(true);
+  };
+
   const currentModels = config.provider === 'local'
     ? detectedServers.flatMap(s => s.models.map(m => ({ id: m.id, label: `${s.name}: ${m.name}${m.size ? ` (${m.size})` : ''}` })))
     : providerInfo.models;
@@ -288,9 +294,10 @@ export default function AiPage() {
         {error && (
           <div className="bg-red-500/10 border-b border-red-500/30 px-4 py-2 flex items-center justify-between">
             <span className="text-sm text-red-400">{error}</span>
-            <button onClick={() => setError(null)} className="text-red-400 hover:text-red-300">
-              <X size={14} />
-            </button>
+            <div className="flex shrink-0 items-center gap-3">
+              {localServiceWithoutModels && <button type="button" onClick={activateFreeCloud} className="text-xs text-blue-300 hover:text-blue-200">切换免费云端</button>}
+              <button onClick={() => setError(null)} className="text-red-400 hover:text-red-300" aria-label="关闭错误提示"><X size={14} /></button>
+            </div>
           </div>
         )}
 
@@ -449,7 +456,7 @@ export default function AiPage() {
       {/* Settings Modal */}
       {showSettings && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setShowSettings(false)}>
-          <div className="bg-[#161b22] border border-[#30363d] rounded-xl w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border border-[#30363d] bg-[#161b22] p-6 scrollbar-thin" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-white flex items-center gap-2">
                 <Settings size={18} className="text-blue-400" />
@@ -516,13 +523,8 @@ export default function AiPage() {
                     className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-gray-600 outline-none focus:border-blue-500"
                   />
                 </div>
-                <p className="text-xs text-gray-500 mt-1.5">
-                  {config.provider === 'gemini'
-                    ? '在 https://aistudio.google.com/apikey 获取 Gemini API Key'
-                    : config.provider === 'openrouter'
-                      ? '在 https://openrouter.ai/keys 获取 OpenRouter API Key（有免费额度）'
-                      : ''}
-                </p>
+                {config.provider === 'gemini' && <a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" className="mt-1.5 inline-block text-xs text-blue-300 hover:underline">打开 Gemini API Key 页面</a>}
+                {config.provider === 'openrouter' && <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer" className="mt-1.5 inline-block text-xs text-blue-300 hover:underline">免费登录并获取 OpenRouter API Key</a>}
                 <p className="mt-2 text-[10px] text-yellow-300">云端请求会发送当前对话和所选芯片信息；不会自动读取或上传本地工程。</p>
               </div>
             )}

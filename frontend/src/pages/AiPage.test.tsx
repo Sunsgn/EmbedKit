@@ -34,6 +34,8 @@ describe('AiPage local Ollama availability', () => {
 
     fireEvent.click(screen.getByTitle('AI 设置'));
     expect(screen.getByText('云端优先')).toBeVisible();
+    expect(screen.getByLabelText('模型')).toHaveValue('openrouter/free');
+    expect(screen.getByRole('link', { name: '免费登录并获取 OpenRouter API Key' })).toHaveAttribute('href', 'https://openrouter.ai/keys');
     fireEvent.change(screen.getByPlaceholderText('输入 OpenRouter API Key'), { target: { value: 'sk-or-test-1234567890' } });
     fireEvent.click(screen.getByRole('button', { name: '完成' }));
     expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled();
@@ -61,5 +63,7 @@ describe('AiPage local Ollama availability', () => {
     expect(await screen.findByText(/服务已启动，但尚未安装模型/)).toBeVisible();
     expect(screen.getByText('ollama pull qwen2.5:7b')).toBeVisible();
     await waitFor(() => expect(screen.getByLabelText('模型')).toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: '切换免费云端' }));
+    expect(screen.getByLabelText('模型')).toHaveValue('openrouter/free');
   });
 });
