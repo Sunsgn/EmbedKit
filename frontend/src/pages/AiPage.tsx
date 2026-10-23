@@ -38,10 +38,12 @@ const quickPrompts = [
   { icon: GitPullRequest, label: '重构 I2C 代码', prompt: '帮我重构 I2C 驱动，使其更加模块化。' },
 ];
 
-// 默认使用本地 Ollama，避免把第三方 API Key 写入前端；未安装时可在设置中切换云端模型。
-const DEFAULT_PROVIDER: ProviderKey = 'local';
-const DEFAULT_MODEL = 'qwen2.5:7b';
-const DEFAULT_ENDPOINT = localProxyUrl('http://localhost:11434/v1/chat/completions');
+// 新用户默认使用网页可访问的云端 API；本地 Ollama/LM Studio 继续作为隐私优先的可选方式。
+const DEFAULT_PROVIDER: ProviderKey = 'openrouter';
+const DEFAULT_MODEL = AI_PROVIDERS.openrouter.defaultModel;
+const DEFAULT_LOCAL_ENDPOINT = localProxyUrl('http://localhost:11434/v1/chat/completions');
+const PROVIDER_ORDER: ProviderKey[] = ['openrouter', 'gemini', 'custom', 'local', 'huggingface'];
+const defaultAiConfig = (): AiConfig => ({ schemaVersion: 2, provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL, apiKey: '' });
 const NO_LOCAL_MODELS_MESSAGE = 'Ollama 服务已启动，但本机没有可用模型。请先运行 ollama pull qwen2.5:7b，完成后在 AI 设置中点击“刷新”。';
 
 function extractCode(content: string): string | undefined {
@@ -64,7 +66,7 @@ export default function AiPage() {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
-      content: '你好！我是嵌入式开发 AI 助手。我可以结合目标芯片帮你理解代码、分析日志和排查通信问题。\n\n默认使用本地模型，请在设置中连接 Ollama、LM Studio 或选择云端服务。',
+      content: '你好！我是嵌入式开发 AI 助手。我可以结合目标芯片帮你理解代码、分析日志和排查通信问题。\n\n默认使用云端网页 API，也可以在设置中切换到本地 Ollama 或 LM Studio。',
       timestamp: new Date(),
     },
   ]);
@@ -84,12 +86,15 @@ export default function AiPage() {
     try {
       const parsed = loadStoredAiConfig();
       if (parsed) {
-        // 兼容旧版本默认的 Hugging Face 配置；无密钥时自动迁移到本地模型。
-        if (parsed.provider === 'huggingface' && !parsed.apiKey) return { provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL, apiKey: '', customEndpoint: DEFAULT_ENDPOINT };
-        return parsed;
+        const legacyDefault = parsed.schemaVersion !== 2 && (
+          (parsed.provider === 'huggingface' && !parsed.apiKey)
+          || (parsed.provider === 'local' && parsed.model === 'qwen2.5:7b' && parsed.customEndpoint === DEFAULT_LOCAL_ENDPOINT)
+        );
+        if (legacyDefault) return defaultAiConfig();
+        return { ...parsed, schemaVersion: 2 };
       }
     } catch { /* ignore */ }
-    return { provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL, apiKey: '', customEndpoint: DEFAULT_ENDPOINT };
+    return defaultAiConfig();
   });
 
   const applyDetectedServers = useCallback((servers: LocalServer[]) => {
@@ -128,11 +133,23 @@ export default function AiPage() {
   const providerInfo = AI_PROVIDERS[config.provider];
   const detectedLocalModels = detectedServers.flatMap(server => server.models);
   const localServiceWithoutModels = config.provider === 'local' && !serverLoading && detectedServers.length > 0 && detectedLocalModels.length === 0;
-  const isBuiltInNoKey = !providerInfo.requiresKey;
-  const isConfigured = !localServiceWithoutModels && (isBuiltInNoKey || config.apiKey.length > 10 || (config.provider === 'custom' && (config.customEndpoint?.length || 0) > 5) || (config.provider === 'local' && (config.customEndpoint?.length || providerInfo.endpoint.length) > 5));
+  const detectedLocalModelSelected = detectedLocalModels.some(model => model.id === config.model);
+  const hasManualLocalConfig = Boolean(config.customEndpoint && config.customEndpoint !== DEFAULT_LOCAL_ENDPOINT && config.model.trim());
+  const isConfigured = config.provider === 'local'
+    ? !serverLoading && !localServiceWithoutModels && (detectedLocalModelSelected || hasManualLocalConfig)
+    : config.provider === 'custom'
+      ? (config.customEndpoint?.length || 0) > 5
+      : providerInfo.requiresKey
+        ? config.apiKey.length > 10
+        : true;
 
   const handleSend = async () => {
     if (!input.trim() || isTyping) return;
+    if (!isConfigured) {
+      setError(config.provider === 'local' ? '请先选择已安装的本地模型，或填写可用的本地兼容端点。' : '请先在 AI 设置中填写云端服务 API Key。');
+      setShowSettings(true);
+      return;
+    }
     if (localServiceWithoutModels) {
       setError(NO_LOCAL_MODELS_MESSAGE);
       setShowSettings(true);
@@ -145,12 +162,6 @@ export default function AiPage() {
     setInput('');
     setIsTyping(true);
     setError(null);
-
-    // If not configured, use simulated response
-    if (!isConfigured) {
-      await simulateResponse(userInput);
-      return;
-    }
 
     // Build conversation history
     const history = messages
@@ -200,153 +211,6 @@ export default function AiPage() {
     }
   };
 
-  const simulateResponse = (userInput: string) => {
-    const lower = userInput.toLowerCase();
-
-    let response: { content: string; code?: string };
-
-    if (lower.includes('uart') || lower.includes('serial')) {
-      response = {
-        content: `这是 ${selectedChip.name} 的 UART 配置。常见问题包括时钟配置、GPIO 模式设置和 NVIC 中断配置。`,
-        code: `#include "stm32f1xx_hal.h"
-
-UART_HandleTypeDef huart1;
-
-void MX_USART1_UART_Init(void) {
-    huart1.Instance = USART1;
-    huart1.Init.BaudRate = 115200;
-    huart1.Init.WordLength = UART_WORDLENGTH_8B;
-    huart1.Init.StopBits = UART_STOPBITS_1;
-    huart1.Init.Parity = UART_PARITY_NONE;
-    huart1.Init.Mode = UART_MODE_TX_RX;
-    huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-    HAL_UART_Init(&huart1);
-}
-
-void HAL_UART_MspInit(UART_HandleTypeDef *huart) {
-    GPIO_InitTypeDef GPIO_InitStruct = {0};
-    __HAL_RCC_USART1_CLK_ENABLE();
-    __HAL_RCC_GPIOA_CLK_ENABLE();
-
-    GPIO_InitStruct.Pin = GPIO_PIN_9 | GPIO_PIN_10;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
-    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-    __HAL_AFIO_REMAP_USART1_DISABLE();
-}`,
-      };
-    } else if (lower.includes('spi')) {
-      response = {
-        content: `这是 ${selectedChip.name} 的 SPI 驱动模板，使用 HAL 库。`,
-        code: `#include "stm32f1xx_hal.h"
-
-SPI_HandleTypeDef hspi1;
-
-void MX_SPI1_Init(void) {
-    hspi1.Instance = SPI1;
-    hspi1.Init.Mode = SPI_MODE_MASTER;
-    hspi1.Init.Direction = SPI_DIRECTION_2LINES;
-    hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
-    hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
-    hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
-    hspi1.Init.NSS = SPI_NSS_SOFT;
-    hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
-    hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
-    HAL_SPI_Init(&hspi1);
-}
-
-void SPI_Transfer(uint8_t* txData, uint8_t* rxData, uint16_t len) {
-    HAL_SPI_TransmitReceive(&hspi1, txData, rxData, len, 1000);
-}`,
-      };
-    } else if (lower.includes('freertos') || lower.includes('task') || lower.includes('rtos')) {
-      response = {
-        content: '这是 FreeRTOS 任务模板，包含队列和信号量。',
-        code: `#include "FreeRTOS.h"
-#include "task.h"
-#include "queue.h"
-#include "semphr.h"
-
-#define QUEUE_SIZE    10
-#define MSG_SIZE      sizeof(uint32_t)
-
-static QueueHandle_t xMessageQueue;
-static SemaphoreHandle_t xMutex;
-
-void vSensorTask(void *pvParameters) {
-    uint32_t ulSensorValue;
-
-    xMessageQueue = xQueueCreate(QUEUE_SIZE, MSG_SIZE);
-    xMutex = xSemaphoreCreateMutex();
-
-    for (;;) {
-        ulSensorValue = read_sensor();
-
-        if (xSemaphoreTake(xMutex, portMAX_DELAY) == pdTRUE) {
-            xQueueSend(xMessageQueue, &ulSensorValue, portMAX_DELAY);
-            xSemaphoreGive(xMutex);
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-}
-
-void vDataTask(void *pvParameters) {
-    uint32_t ulReceivedValue;
-
-    for (;;) {
-        if (xQueueReceive(xMessageQueue, &ulReceivedValue, portMAX_DELAY) == pdTRUE) {
-            process_data(ulReceivedValue);
-        }
-    }
-}`,
-      };
-    } else if (lower.includes('i2c')) {
-      response = {
-        content: `这是 ${selectedChip.name} 的 I2C 驱动结构。`,
-        code: `#include "stm32f1xx_hal.h"
-
-I2C_HandleTypeDef hi2c1;
-
-void MX_I2C1_Init(void) {
-    hi2c1.Instance = I2C1;
-    hi2c1.Init.ClockSpeed = 100000;
-    hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
-    hi2c1.Init.OwnAddress1 = 0;
-    hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-    hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-    hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-    hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-    HAL_I2C_Init(&hi2c1);
-}
-
-HAL_StatusTypeDef I2C_Write(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t len) {
-    return HAL_I2C_Mem_Write(&hi2c1, devAddr, reg, I2C_MEMADD_SIZE_8BIT, data, len, 1000);
-}
-
-HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t len) {
-    return HAL_I2C_Mem_Read(&hi2c1, devAddr, reg, I2C_MEMADD_SIZE_8BIT, data, len, 1000);
-}`,
-      };
-    } else {
-      response = {
-        content: '我很乐意帮忙！针对你的目标芯片进行嵌入式开发时，建议考虑时钟树配置、外设初始化顺序和内存限制。需要我为你生成具体的代码吗？',
-      };
-    }
-
-    setTimeout(() => {
-      const assistantMsg: Message = {
-        role: 'assistant',
-        content: response.content,
-        code: response.code,
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
-      setIsTyping(false);
-    }, 800 + Math.random() * 1200);
-  };
-
   const handleQuickPrompt = (prompt: string) => {
     setInput(prompt);
   };
@@ -361,7 +225,7 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
   };
 
   const handleClearConfig = () => {
-    setConfig({ provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL, apiKey: '', customEndpoint: DEFAULT_ENDPOINT });
+    setConfig(defaultAiConfig());
     clearStoredAiConfig();
   };
 
@@ -526,12 +390,18 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
             />
             <button
               onClick={handleSend}
-              disabled={!input.trim() || isTyping || localServiceWithoutModels}
+              disabled={!input.trim() || isTyping || !isConfigured || localServiceWithoutModels}
               aria-label="发送消息"
               className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors disabled:opacity-50"
             >
               <Send size={16} />
             </button>
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-2 text-[10px] text-gray-500">
+            <p>{config.provider === 'local'
+              ? '本地模式：对话发送到你配置的本机模型服务。'
+              : `云端模式：发送时仅将当前对话和所选芯片信息传输至 ${providerInfo.name}，不会自动上传工程文件。`}</p>
+            {!isConfigured && <button type="button" onClick={() => setShowSettings(true)} className="shrink-0 text-blue-300 hover:text-blue-200">配置 AI 服务</button>}
           </div>
         </div>
       </div>
@@ -594,7 +464,7 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
             <div className="mb-4">
               <label className="block text-sm text-gray-400 mb-2">服务提供方</label>
               <div className="grid grid-cols-2 gap-2">
-                {(Object.keys(AI_PROVIDERS) as ProviderKey[]).map((key) => {
+                {PROVIDER_ORDER.map((key) => {
                   const p = AI_PROVIDERS[key];
                   const isActive = config.provider === key;
                   return (
@@ -603,13 +473,15 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
                       type="button"
                       onClick={() => {
                         if (key === 'local') setServerLoading(true);
-                        setConfig(prev => ({ ...prev, provider: key, model: p.defaultModel }));
+                        setConfig(prev => ({ ...prev, schemaVersion: 2, provider: key, model: p.defaultModel, apiKey: key === prev.provider ? prev.apiKey : '' }));
                       }}
                       className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all ${isActive ? 'bg-blue-500/20 border-blue-500 text-blue-300' : 'bg-[#0d1117] border-[#30363d] text-gray-400 hover:border-gray-600'}`}
                     >
                       <span className="text-base">{p.icon}</span>
                       <span className="truncate">{p.name}</span>
-                      {!p.requiresKey && (
+                      {key === 'openrouter' ? (
+                        <span className="ml-auto text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">云端优先</span>
+                      ) : !p.requiresKey && (
                     <>
                       {key === 'huggingface' ? (
                         <span className="ml-auto text-[10px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded" title="在线部署时可能受浏览器 CORS 限制">受限</span>
@@ -625,7 +497,7 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
                 })}
               </div>
               <div className="mt-2 bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-2">
-                <p className="text-xs text-gray-400">💡 <span className="text-gray-300 font-medium">推荐</span>：在线部署使用 <span className="text-blue-400">OpenRouter</span>，支持 CORS 且有免费模型（Gemini 2.0 Flash、DeepSeek V3 等）</p>
+                <p className="text-xs text-gray-400">💡 <span className="text-gray-300 font-medium">默认</span>：网页端优先使用 <span className="text-blue-400">OpenRouter</span>；需要源码留在本机时切换到 Ollama 或 LM Studio。</p>
                 <p className="text-xs text-gray-500 mt-1">Hugging Face 在本地开发环境（localhost）正常工作，GitHub Pages 部署可能受限</p>
               </div>
             </div>
@@ -651,6 +523,7 @@ HAL_StatusTypeDef I2C_Read(uint8_t devAddr, uint8_t reg, uint8_t* data, uint16_t
                       ? '在 https://openrouter.ai/keys 获取 OpenRouter API Key（有免费额度）'
                       : ''}
                 </p>
+                <p className="mt-2 text-[10px] text-yellow-300">云端请求会发送当前对话和所选芯片信息；不会自动读取或上传本地工程。</p>
               </div>
             )}
 

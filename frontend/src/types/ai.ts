@@ -16,13 +16,10 @@ export const AI_PROVIDERS = {
   openrouter: {
     name: 'OpenRouter',
     icon: '🌐',
-    defaultModel: 'google/gemini-2.0-flash-exp:free',
+    defaultModel: 'openrouter/auto',
     models: [
-      { id: 'google/gemini-2.0-flash-exp:free', label: 'Gemini 2.0 Flash (免费)' },
-      { id: 'qwen/qwen-2.5-vl-72b-instruct:free', label: 'Qwen 2.5 VL 72B (免费)' },
-      { id: 'deepseek/deepseek-chat:free', label: 'DeepSeek V3 (免费)' },
-      { id: 'deepseek/deepseek-r1-distill-qwen-32b:free', label: 'DeepSeek R1 Distill (免费)' },
-      { id: 'meta-llama/llama-3.3-70b-instruct:free', label: 'Llama 3.3 70B (免费)' },
+      { id: 'openrouter/auto', label: '自动选择可用模型' },
+      { id: 'openrouter/free', label: '自动选择免费模型' },
     ],
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     apiKey: '',
@@ -80,6 +77,7 @@ export interface ChatMessage {
 }
 
 export interface AiConfig {
+  schemaVersion?: 2;
   provider: ProviderKey;
   model: string;
   apiKey: string;
