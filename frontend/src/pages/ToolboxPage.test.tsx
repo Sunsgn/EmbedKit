@@ -11,7 +11,9 @@ function renderToolbox(initial = '/toolbox') {
 describe('ToolboxPage independent tool workspace', () => {
   it('shows the catalog without mounting every tool', () => {
     renderToolbox();
-    expect(screen.getAllByRole('button', { name: /^打开/ })).toHaveLength(18);
+    expect(screen.getAllByRole('button', { name: /^打开/ })).toHaveLength(19);
+    expect(screen.getByText('常用转换、校验与密码工具')).toBeVisible();
+    expect(screen.getByRole('button', { name: '打开加解密与签名' })).toBeVisible();
     expect(screen.queryByText('Modbus 线序')).not.toBeInTheDocument();
     expect(screen.queryByText('每帧位数')).not.toBeInTheDocument();
   });
@@ -22,7 +24,8 @@ describe('ToolboxPage independent tool workspace', () => {
     expect(await screen.findByText('Modbus 线序', {}, { timeout: 5000 })).toBeVisible();
     expect(screen.queryByText('每帧位数')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '返回工具箱' }));
-    expect(screen.getByRole('navigation', { name: '嵌入式工具目录' })).toBeVisible();
+    expect(screen.getByRole('navigation', { name: '常用工具目录' })).toBeVisible();
+    expect(screen.getByRole('navigation', { name: '更多工具目录' })).toBeVisible();
     expect(screen.getByText('最近使用')).toBeVisible();
   });
 
@@ -36,10 +39,10 @@ describe('ToolboxPage independent tool workspace', () => {
 
   it('filters tools and persists favorites locally', () => {
     renderToolbox();
-    fireEvent.change(screen.getByPlaceholderText('搜索 CRC、CAN、HEX、MAP…'), { target: { value: 'MAP' } });
+    fireEvent.change(screen.getByPlaceholderText('搜索 CRC、AES、CAN、HEX、MAP…'), { target: { value: 'MAP' } });
     expect(screen.getAllByRole('button', { name: /^打开/ })).toHaveLength(1);
     expect(screen.getByRole('button', { name: '打开MAP 快速分析' })).toBeVisible();
-    fireEvent.change(screen.getByPlaceholderText('搜索 CRC、CAN、HEX、MAP…'), { target: { value: '' } });
+    fireEvent.change(screen.getByPlaceholderText('搜索 CRC、AES、CAN、HEX、MAP…'), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: '收藏CRC 与字节序' }));
     expect(screen.getByRole('button', { name: '取消收藏CRC 与字节序' })).toBeVisible();
   });
