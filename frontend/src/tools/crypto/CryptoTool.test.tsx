@@ -12,6 +12,11 @@ describe("CryptoTool", () => {
     expect(screen.getByText("3DES ECB 通过")).toBeVisible();
     expect(screen.getByText("SM3 通过")).toBeVisible();
     expect(screen.getByText("SM4 ECB 通过")).toBeVisible();
+    expect(screen.getByLabelText("密码密钥")).toHaveAttribute("type", "text");
+    fireEvent.click(screen.getByRole("button", { name: "隐藏敏感字段" }));
+    expect(screen.getByLabelText("密码密钥")).toHaveAttribute("type", "password");
+    fireEvent.click(screen.getByRole("button", { name: "显示敏感字段" }));
+    expect(screen.getByLabelText("密码密钥")).toHaveAttribute("type", "text");
 
     fireEvent.change(screen.getByLabelText("密码输入"), { target: { value: "00112233445566778899AABBCCDDEEFF" } });
     fireEvent.change(screen.getByLabelText("输入格式"), { target: { value: "hex" } });
