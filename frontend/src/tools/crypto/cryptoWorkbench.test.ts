@@ -4,7 +4,7 @@ import { calculateDigest, calculateHmac, compareEncodedValues, generateSm2KeyPai
 describe("crypto workbench domain", () => {
   it("passes published known-answer vectors", async () => {
     const results = await runCryptoSelfTests();
-    expect(results).toHaveLength(5);
+    expect(results).toHaveLength(6);
     expect(results.every((result) => result.passed)).toBe(true);
   });
 
@@ -22,6 +22,14 @@ describe("crypto workbench domain", () => {
     expect((await runSymmetricCipher({ ...common, operation: "decrypt", input: encrypted.output })).output).toBe("01020304");
     const changed = `${encrypted.output.slice(0, -2)}${encrypted.output.endsWith("00") ? "01" : "00"}`;
     await expect(runSymmetricCipher({ ...common, operation: "decrypt", input: changed })).rejects.toThrow("认证失败");
+  });
+
+  it("matches the published RC4 vector and decrypts without block parameters", async () => {
+    const common = { algorithm: "rc4" as const, mode: "stream" as const, padding: "none" as const, inputEncoding: "hex" as const, outputEncoding: "hex" as const, keyHex: "4B6579" };
+    const encrypted = await runSymmetricCipher({ ...common, operation: "encrypt", input: "506C61696E74657874" });
+    expect(encrypted.output).toBe("BBF316E8D940AF0AD3");
+    expect((await runSymmetricCipher({ ...common, operation: "decrypt", input: encrypted.output })).output).toBe("506C61696E74657874");
+    await expect(runSymmetricCipher({ ...common, operation: "encrypt", input: "00", mode: "cbc" })).rejects.toThrow("RC4是流密码");
   });
 
   it("compares encoded results by their decoded bytes", () => {

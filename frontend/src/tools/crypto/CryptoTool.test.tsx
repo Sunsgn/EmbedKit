@@ -10,6 +10,7 @@ describe("CryptoTool", () => {
     await waitFor(() => expect(screen.getByText("AES-128 ECB 通过")).toBeVisible());
     expect(screen.getByText("DES ECB 通过")).toBeVisible();
     expect(screen.getByText("3DES ECB 通过")).toBeVisible();
+    expect(screen.getByText("RC4 通过")).toBeVisible();
     expect(screen.getByText("SM3 通过")).toBeVisible();
     expect(screen.getByText("SM4 ECB 通过")).toBeVisible();
     expect(screen.getByLabelText("密码密钥")).toHaveAttribute("type", "text");
@@ -37,6 +38,21 @@ describe("CryptoTool", () => {
     expect(screen.getByLabelText("密码密钥")).toHaveValue("");
     expect(screen.getByLabelText("预期计算结果")).toHaveValue("");
     expect(screen.queryByLabelText("密码输出")).not.toBeInTheDocument();
+  });
+
+  it("uses RC4 as a legacy stream cipher without IV or padding", async () => {
+    render(<CryptoTool />);
+    await waitFor(() => expect(screen.getByText("RC4 通过")).toBeVisible());
+    fireEvent.change(screen.getByLabelText("对称算法"), { target: { value: "rc4" } });
+    expect(screen.getByDisplayValue("流加密（无模式）")).toBeDisabled();
+    expect(screen.getByDisplayValue("无填充")).toBeDisabled();
+    expect(screen.queryByLabelText("密码向量")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("密码输入"), { target: { value: "506C61696E74657874" } });
+    fireEvent.change(screen.getByLabelText("输入格式"), { target: { value: "hex" } });
+    fireEvent.change(screen.getByLabelText("预期计算结果"), { target: { value: "BBF316E8D940AF0AD3" } });
+    fireEvent.click(screen.getByRole("button", { name: "执行加密" }));
+    await waitFor(() => expect(screen.getByLabelText("密码输出")).toHaveValue("BBF316E8D940AF0AD3"));
+    expect(screen.getByRole("status")).toHaveTextContent("核对一致 · 9 字节");
   });
 
   it("calculates SM3 and HMAC through the digest workspace", async () => {

@@ -15,6 +15,7 @@ import {
   NoPadding,
   OFB,
   Pkcs7,
+  RC4,
   SHA1,
   SHA256,
   SHA512,
@@ -25,8 +26,8 @@ import {
 import { sm2, sm3, sm4 } from "sm-crypto";
 
 export type BinaryEncoding = "text" | "hex" | "base64";
-export type SymmetricAlgorithm = "aes" | "des" | "3des" | "sm4";
-export type CipherMode = "ecb" | "cbc" | "ctr" | "cfb" | "ofb" | "gcm";
+export type SymmetricAlgorithm = "aes" | "des" | "3des" | "sm4" | "rc4";
+export type CipherMode = "ecb" | "cbc" | "ctr" | "cfb" | "ofb" | "gcm" | "stream";
 export type CipherPadding = "pkcs7" | "zero" | "none";
 
 export interface SymmetricRequest {
@@ -132,6 +133,10 @@ const wordArray = (bytes: Uint8Array) => Hex.parse(bytesToHex(bytes));
 const wordArrayBytes = (value: WordArray) => hexToBytes(value.toString(Hex));
 
 const validateKey = (algorithm: SymmetricAlgorithm, key: Uint8Array) => {
+  if (algorithm === "rc4") {
+    if (key.length < 1 || key.length > 256) throw new Error("RC4密钥必须是1到256字节");
+    return;
+  }
   const expected =
     algorithm === "aes"
       ? [16, 24, 32]
@@ -171,6 +176,15 @@ export async function runSymmetricCipher(request: SymmetricRequest) {
   if (input.length > 16 * 1024 * 1024) throw new Error("单次输入不得超过16 MiB");
   const key = hexToBytes(request.keyHex, "密钥");
   validateKey(request.algorithm, key);
+  if (request.algorithm === "rc4") {
+    if (request.mode !== "stream" || request.padding !== "none") throw new Error("RC4是流密码，不使用分组模式、IV或填充");
+    const result = request.operation === "encrypt"
+      ? RC4.encrypt(wordArray(input), wordArray(key)).ciphertext
+      : RC4.decrypt(CipherParams.create({ ciphertext: wordArray(input) }), wordArray(key));
+    if (!result) throw new Error("RC4计算失败，请检查密钥和输入格式");
+    const bytes = wordArrayBytes(result);
+    return { bytes, output: encodeBinary(bytes, request.outputEncoding) };
+  }
   if (request.algorithm !== "aes" && request.mode === "gcm") throw new Error("只有AES支持GCM模式");
   if (request.algorithm === "sm4" && !["ecb", "cbc"].includes(request.mode)) throw new Error("SM4当前仅支持ECB和CBC模式");
   if (request.algorithm === "des" || request.algorithm === "3des") {
@@ -268,6 +282,7 @@ export async function runCryptoSelfTests() {
   add("AES-128 ECB", (await runSymmetricCipher({ algorithm: "aes", operation: "encrypt", mode: "ecb", padding: "none", input: "00112233445566778899AABBCCDDEEFF", inputEncoding: "hex", outputEncoding: "hex", keyHex: "000102030405060708090A0B0C0D0E0F" })).output, "69C4E0D86A7B0430D8CDB78070B4C55A");
   add("DES ECB", (await runSymmetricCipher({ algorithm: "des", operation: "encrypt", mode: "ecb", padding: "none", input: "0123456789ABCDEF", inputEncoding: "hex", outputEncoding: "hex", keyHex: "133457799BBCDFF1" })).output, "85E813540F0AB405");
   add("3DES ECB", (await runSymmetricCipher({ algorithm: "3des", operation: "encrypt", mode: "ecb", padding: "none", input: "5468652071756663", inputEncoding: "hex", outputEncoding: "hex", keyHex: "0123456789ABCDEF23456789ABCDEF01456789ABCDEF0123" })).output, "A826FD8CE53B855F");
+  add("RC4", (await runSymmetricCipher({ algorithm: "rc4", operation: "encrypt", mode: "stream", padding: "none", input: "506C61696E74657874", inputEncoding: "hex", outputEncoding: "hex", keyHex: "4B6579" })).output, "BBF316E8D940AF0AD3");
   add("SM3", calculateDigest("sm3", "abc", "text"), "66C7F0F462EEEDD9D1F2D46BDC10E4E24167C4875CF2F7A2297DA02B8F4BA8E0");
   add("SM4 ECB", (await runSymmetricCipher({ algorithm: "sm4", operation: "encrypt", mode: "ecb", padding: "none", input: "0123456789ABCDEFFEDCBA9876543210", inputEncoding: "hex", outputEncoding: "hex", keyHex: "0123456789ABCDEFFEDCBA9876543210" })).output, "681EDF34D206965E86B3E94F536E4246");
   return cases;
