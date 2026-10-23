@@ -3,6 +3,7 @@ import { Copy, Eye, EyeOff, KeyRound, ShieldCheck, Trash2 } from "lucide-react";
 import {
   calculateDigest,
   calculateHmac,
+  compareEncodedValues,
   generateSm2KeyPair,
   runCryptoSelfTests,
   runSm2,
@@ -27,6 +28,8 @@ export default function CryptoTool() {
   const [input, setInput] = useState("EmbedKit"), [inputEncoding, setInputEncoding] = useState<BinaryEncoding>("text"), [outputEncoding, setOutputEncoding] = useState<BinaryEncoding>("hex");
   const [keyHex, setKeyHex] = useState("00112233445566778899AABBCCDDEEFF"), [ivHex, setIvHex] = useState("000102030405060708090A0B0C0D0E0F"), [aadHex, setAadHex] = useState("");
   const [output, setOutput] = useState(""), [error, setError] = useState(""), [busy, setBusy] = useState(false);
+  const [expectedOutput, setExpectedOutput] = useState("");
+  const [comparison, setComparison] = useState<ReturnType<typeof compareEncodedValues> | null>(null);
   const [showSecrets, setShowSecrets] = useState(true);
   const [digestAlgorithm, setDigestAlgorithm] = useState<DigestAlgorithm>("sha256"), [digestInput, setDigestInput] = useState("abc"), [digestEncoding, setDigestEncoding] = useState<BinaryEncoding>("text"), [digestResult, setDigestResult] = useState(""), [hmac, setHmac] = useState(false), [hmacKey, setHmacKey] = useState("");
   const [privateKey, setPrivateKey] = useState(""), [publicKey, setPublicKey] = useState(""), [sm2Operation, setSm2Operation] = useState<"encrypt" | "decrypt" | "sign" | "verify">("encrypt"), [sm2Input, setSm2Input] = useState("EmbedKit"), [sm2Encoding, setSm2Encoding] = useState<BinaryEncoding>("text"), [signature, setSignature] = useState(""), [cipherMode, setCipherMode] = useState<0 | 1>(1), [der, setDer] = useState(false), [userId, setUserId] = useState("1234567812345678"), [sm2Output, setSm2Output] = useState(""), [sm2Error, setSm2Error] = useState("");
@@ -41,15 +44,19 @@ export default function CryptoTool() {
     if (selected !== "aes" && mode === "gcm") setMode("cbc");
   };
   const executeSymmetric = async () => {
-    setBusy(true); setError(""); setOutput("");
-    try { const result = await runSymmetricCipher({ algorithm, operation, mode, padding, input, inputEncoding, outputEncoding, keyHex, ivHex, aadHex }); setOutput(result.output); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    setBusy(true); setError(""); setOutput(""); setComparison(null);
+    try {
+      const result = await runSymmetricCipher({ algorithm, operation, mode, padding, input, inputEncoding, outputEncoding, keyHex, ivHex, aadHex });
+      setOutput(result.output);
+      setComparison(expectedOutput.trim() ? compareEncodedValues(result.output, expectedOutput, outputEncoding) : null);
+    }
+    catch (reason) { setComparison(null); setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setBusy(false); }
   };
   const executeDigest = () => { try { setError(""); setDigestResult(hmac ? calculateHmac(digestAlgorithm, digestInput, digestEncoding, hmacKey) : calculateDigest(digestAlgorithm, digestInput, digestEncoding)); } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); } };
   const createKeys = () => { const pair = generateSm2KeyPair(); setPrivateKey(pair.privateKey.toUpperCase()); setPublicKey(pair.publicKey.toUpperCase()); setSm2Error(""); };
   const executeSm2 = () => { try { setSm2Error(""); setSm2Output(runSm2({ operation: sm2Operation, input: sm2Input, inputEncoding: sm2Encoding, privateKey, publicKey, signature, cipherMode, der, userId })); } catch (reason) { setSm2Error(reason instanceof Error ? reason.message : String(reason)); } };
-  const clearSensitive = () => { setKeyHex(""); setIvHex(""); setAadHex(""); setInput(""); setOutput(""); setDigestInput(""); setDigestResult(""); setHmacKey(""); setPrivateKey(""); setPublicKey(""); setSignature(""); setSm2Input(""); setSm2Output(""); setError(""); setSm2Error(""); };
+  const clearSensitive = () => { setKeyHex(""); setIvHex(""); setAadHex(""); setInput(""); setOutput(""); setExpectedOutput(""); setComparison(null); setDigestInput(""); setDigestResult(""); setHmacKey(""); setPrivateKey(""); setPublicKey(""); setSignature(""); setSm2Input(""); setSm2Output(""); setError(""); setSm2Error(""); };
 
   return <div className="space-y-4">
     <section className="flex flex-wrap items-center gap-2 rounded-xl border border-[#30363d] bg-[#111820] p-3">
@@ -67,7 +74,11 @@ export default function CryptoTool() {
       <label className="block text-[11px] text-gray-500">输入<textarea aria-label="密码输入" value={input} onChange={event => setInput(event.target.value)} rows={5} className="field mt-1 resize-y font-mono" /></label>
       <div className="grid gap-2 sm:grid-cols-2"><label className="text-[11px] text-gray-500">密钥 HEX<input aria-label="密码密钥" type={showSecrets ? 'text' : 'password'} autoComplete="off" value={keyHex} onChange={event => setKeyHex(event.target.value)} className="field mt-1 font-mono" /></label>{mode !== 'ecb' && <label className="text-[11px] text-gray-500">{mode === 'gcm' ? 'Nonce HEX' : 'IV HEX'}<input aria-label="密码向量" type={showSecrets ? 'text' : 'password'} autoComplete="off" value={ivHex} onChange={event => setIvHex(event.target.value)} className="field mt-1 font-mono" /></label>}{mode === 'gcm' && <label className="text-[11px] text-gray-500">AAD HEX（可选）<input value={aadHex} onChange={event => setAadHex(event.target.value)} className="field mt-1 font-mono" /></label>}</div>
       <div className="flex items-end gap-2"><EncodingSelect label="输出格式" value={outputEncoding} onChange={setOutputEncoding} /><button onClick={() => void executeSymmetric()} disabled={busy || selfTests.some(item => !item.passed)} className="rounded bg-blue-600 px-4 py-2 text-xs text-white disabled:opacity-40">{busy ? '执行中…' : operation === 'encrypt' ? '执行加密' : '执行解密'}</button></div>
+      <label className="block text-[11px] text-gray-500">预期{operation === 'encrypt' ? '密文' : '明文'}（可选，使用当前输出格式）<textarea aria-label="预期计算结果" value={expectedOutput} onChange={event => { setExpectedOutput(event.target.value); setComparison(null); }} rows={3} className="field mt-1 resize-y font-mono" /></label>
       {error && <p role="alert" className="text-xs text-red-400">{error}</p>}{output && <div><div className="mb-1 flex items-center justify-between text-[11px] text-gray-500"><span>输出结果</span><button onClick={() => void navigator.clipboard.writeText(output)} className="flex items-center gap-1 text-blue-300"><Copy size={11} />复制</button></div><textarea aria-label="密码输出" readOnly value={output} rows={5} className="field resize-y font-mono" /></div>}
+      {comparison && <p role="status" className={`text-xs ${comparison.matches ? 'text-green-400' : 'text-red-400'}`}>{comparison.matches
+        ? `核对一致 · ${comparison.actualLength} 字节`
+        : `核对不一致 · 首个差异位于字节偏移 ${comparison.mismatchOffset}；计算 ${comparison.actualLength} 字节，预期 ${comparison.expectedLength} 字节${comparison.actualByte === null && comparison.expectedByte === null ? '' : `；计算值 ${comparison.actualByte === null ? '无' : `0x${comparison.actualByte.toString(16).padStart(2, '0').toUpperCase()}`}，预期值 ${comparison.expectedByte === null ? '无' : `0x${comparison.expectedByte.toString(16).padStart(2, '0').toUpperCase()}`}`}`}</p>}
       {(algorithm === 'des' || algorithm === '3des') && <p className="text-[10px] text-yellow-400">DES与3DES仅用于兼容遗留设备，不建议用于新设计。</p>}
     </section>}
 

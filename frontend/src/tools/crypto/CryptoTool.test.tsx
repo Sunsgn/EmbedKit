@@ -23,12 +23,19 @@ describe("CryptoTool", () => {
     fireEvent.change(screen.getByLabelText("密码密钥"), { target: { value: "000102030405060708090A0B0C0D0E0F" } });
     fireEvent.change(screen.getByDisplayValue("CBC"), { target: { value: "ecb" } });
     fireEvent.change(screen.getByDisplayValue("PKCS#7"), { target: { value: "none" } });
+    fireEvent.change(screen.getByLabelText("预期计算结果"), { target: { value: "69 c4 e0 d8 6a 7b 04 30 d8 cd b7 80 70 b4 c5 5a" } });
     fireEvent.click(screen.getByRole("button", { name: "执行加密" }));
 
     await waitFor(() => expect(screen.getByLabelText("密码输出")).toHaveValue("69C4E0D86A7B0430D8CDB78070B4C55A"));
+    expect(screen.getByRole("status")).toHaveTextContent("核对一致 · 16 字节");
+    fireEvent.change(screen.getByLabelText("预期计算结果"), { target: { value: "00C4E0D86A7B0430D8CDB78070B4C55A" } });
+    fireEvent.click(screen.getByRole("button", { name: "执行加密" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("首个差异位于字节偏移 0"));
+    expect(screen.getByRole("status")).toHaveTextContent("计算值 0x69，预期值 0x00");
     expect(localStorage.length).toBe(before);
     fireEvent.click(screen.getByRole("button", { name: "清除敏感输入" }));
     expect(screen.getByLabelText("密码密钥")).toHaveValue("");
+    expect(screen.getByLabelText("预期计算结果")).toHaveValue("");
     expect(screen.queryByLabelText("密码输出")).not.toBeInTheDocument();
   });
 

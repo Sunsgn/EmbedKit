@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { calculateDigest, calculateHmac, generateSm2KeyPair, runCryptoSelfTests, runSm2, runSymmetricCipher } from "./cryptoWorkbench";
+import { calculateDigest, calculateHmac, compareEncodedValues, generateSm2KeyPair, runCryptoSelfTests, runSm2, runSymmetricCipher } from "./cryptoWorkbench";
 
 describe("crypto workbench domain", () => {
   it("passes published known-answer vectors", async () => {
@@ -22,6 +22,28 @@ describe("crypto workbench domain", () => {
     expect((await runSymmetricCipher({ ...common, operation: "decrypt", input: encrypted.output })).output).toBe("01020304");
     const changed = `${encrypted.output.slice(0, -2)}${encrypted.output.endsWith("00") ? "01" : "00"}`;
     await expect(runSymmetricCipher({ ...common, operation: "decrypt", input: changed })).rejects.toThrow("认证失败");
+  });
+
+  it("compares encoded results by their decoded bytes", () => {
+    expect(compareEncodedValues("AA BB:01", "aabb01", "hex")).toEqual({
+      matches: true,
+      mismatchOffset: null,
+      actualLength: 3,
+      expectedLength: 3,
+      actualByte: null,
+      expectedByte: null,
+    });
+    expect(compareEncodedValues("qrs=", "qro=", "base64")).toMatchObject({
+      matches: false,
+      mismatchOffset: 1,
+      actualByte: 0xbb,
+      expectedByte: 0xba,
+    });
+    expect(compareEncodedValues("设备A", "设备B", "text")).toMatchObject({
+      matches: false,
+      actualLength: 7,
+      expectedLength: 7,
+    });
   });
 
   it("calculates hashes from text and supports SM2 encrypt/decrypt", () => {

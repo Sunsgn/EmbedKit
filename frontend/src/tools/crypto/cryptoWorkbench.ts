@@ -89,6 +89,45 @@ export const encodeBinary = (bytes: Uint8Array, encoding: BinaryEncoding) =>
       ? bytesToHex(bytes)
       : bytesToBase64(bytes);
 
+export interface BinaryComparison {
+  matches: boolean;
+  mismatchOffset: number | null;
+  actualLength: number;
+  expectedLength: number;
+  actualByte: number | null;
+  expectedByte: number | null;
+}
+
+export const compareEncodedValues = (
+  actual: string,
+  expected: string,
+  encoding: BinaryEncoding,
+): BinaryComparison => {
+  const actualBytes = decodeBinary(actual, encoding);
+  const expectedBytes = decodeBinary(expected, encoding);
+  const commonLength = Math.min(actualBytes.length, expectedBytes.length);
+  let mismatchOffset: number | null = null;
+
+  for (let index = 0; index < commonLength; index += 1) {
+    if (actualBytes[index] !== expectedBytes[index]) {
+      mismatchOffset = index;
+      break;
+    }
+  }
+  if (mismatchOffset === null && actualBytes.length !== expectedBytes.length)
+    mismatchOffset = commonLength;
+
+  return {
+    matches: mismatchOffset === null,
+    mismatchOffset,
+    actualLength: actualBytes.length,
+    expectedLength: expectedBytes.length,
+    actualByte: mismatchOffset === null || mismatchOffset >= actualBytes.length ? null : actualBytes[mismatchOffset],
+    expectedByte:
+      mismatchOffset === null || mismatchOffset >= expectedBytes.length ? null : expectedBytes[mismatchOffset],
+  };
+};
+
 const wordArray = (bytes: Uint8Array) => Hex.parse(bytesToHex(bytes));
 const wordArrayBytes = (value: WordArray) => hexToBytes(value.toString(Hex));
 
