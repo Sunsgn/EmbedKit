@@ -5,6 +5,7 @@ const npmCommand = process.env.npm_execpath ? process.execPath : process.platfor
 const npmPrefix = process.env.npm_execpath ? [process.env.npm_execpath] : []
 const allowedProductionAdvisories = new Set([])
 const approvedLicenses = new Set([
+  '0BSD',
   '(MPL-2.0 OR Apache-2.0)',
   'Apache-2.0',
   'BSD-2-Clause',

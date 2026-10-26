@@ -37,7 +37,7 @@ import {
   updateModuleProgress,
   type ModuleLearningProgress,
 } from '../utils/learningProgress';
-import Editor from '@monaco-editor/react';
+import CodeEditor from '../components/CodeEditor';
 
 /* ── icon mapper ── */
 const iconMap: Record<string, React.ElementType> = {
@@ -372,18 +372,13 @@ function ModuleDetail({ module, progress, onProgressChange, onClose }: { module:
                     {copied ? '已复制' : '复制代码'}
                   </button>
                 </div>
-                <Editor
+                <CodeEditor
                   height={Math.min(400, module.codeExample.split('\n').length * 19 + 40)}
                   language={module.codeLang || 'c'}
                   value={module.codeExample}
-                  theme="vs-dark"
-                  options={{
-                    readOnly: true,
-                    fontSize: 13,
-                    minimap: { enabled: false },
-                    automaticLayout: true,
-                    scrollBeyondLastLine: false,
-                  }}
+                  readOnly
+                  fontSize={13}
+                  ariaLabel="课程代码示例"
                 />
               </div>
             </div>

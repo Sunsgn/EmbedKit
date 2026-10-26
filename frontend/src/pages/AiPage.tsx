@@ -19,7 +19,7 @@ import {
   Key,
   Loader2,
 } from 'lucide-react';
-import Editor from '@monaco-editor/react';
+import CodeEditor from '../components/CodeEditor';
 import { chips } from '../data/chips';
 import { AI_PROVIDERS, type ProviderKey, type AiConfig } from '../types/ai';
 import { clearStoredAiConfig, detectLocalServers, loadStoredAiConfig, localProxyUrl, persistAiConfig, streamAiResponse, type LocalServer } from '../services/aiService';
@@ -344,19 +344,13 @@ export default function AiPage() {
                     </div>
                     {showCode === i && (
                       <div className="mt-2 rounded-lg overflow-hidden border border-[#30363d]">
-                        <Editor
+                        <CodeEditor
                           height={200}
                           language="c"
                           value={msg.code}
-                          theme="vs-dark"
-                          options={{
-                            readOnly: true,
-                            fontSize: 12,
-                            minimap: { enabled: false },
-                            automaticLayout: true,
-                            scrollBeyondLastLine: false,
-                            lineNumbers: 'on',
-                          }}
+                          readOnly
+                          fontSize={12}
+                          ariaLabel="AI 生成代码"
                         />
                       </div>
                     )}

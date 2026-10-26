@@ -9,7 +9,7 @@ EmbedKit 将浏览器生产依赖、前端开发/发布工具和 Local Agent 分
 - 前端生产依赖、完整开发/发布依赖：`npm audit` 均为 0 项已知漏洞。
 - Local Agent：生产依赖为 0 项已知漏洞。
 - 前端锁文件中的 248 个包均包含许可证声明，共 10 类；生产树 23 个包。
-- 生产编辑器显式依赖 `monaco-editor` 0.57.x，并将其固定依赖的 DOMPurify 覆盖到已修复的 3.4.16。
+- 生产代码编辑器使用 CodeMirror 6；原 Monaco/DOMPurify 依赖链因上游出现无修复版本的 critical 公告而移除。
 - Vite/PostCSS 等共同依赖的 `source-map-js` 覆盖到已修复的 1.2.2。
 - `gh-pages` 固定为 6.1.1，避开 6.2.0 以后引入且尚无修复版本的 `braces` 深层嵌套拒绝服务链。GitHub Pages 正式发布仍由 Actions 官方 Pages 工作流完成。
 
@@ -24,7 +24,7 @@ npm ci
 npm run security:check
 ```
 
-门禁会分别运行生产依赖审计和完整依赖审计：生产依赖不允许 critical/high，moderate 只有在脚本中按 GHSA 明确登记后才允许；开发/发布工具链不允许 critical/high。门禁同时检查锁文件中的许可证声明，并拒绝 AGPL、GPL、SSPL、BUSL 和 Commons Clause。未知许可证不会被静默接受，缺少声明会直接失败。
+门禁会分别运行生产依赖审计和完整依赖审计：生产依赖不允许 critical/high，moderate 只有在脚本中按 GHSA 明确登记后才允许；开发/发布工具链不允许 critical/high。门禁同时检查锁文件中的许可证声明，并拒绝 AGPL、GPL、SSPL、BUSL 和 Commons Clause。MIT、BSD、0BSD 等已审查宽松许可证可以通过；未知许可证不会被静默接受，缺少声明会直接失败。
 
 在 `proxy` 执行：
 

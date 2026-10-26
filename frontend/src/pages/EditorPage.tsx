@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import Editor, { type OnMount } from "@monaco-editor/react";
+import CodeEditor, { type CodeEditorHandle } from "../components/CodeEditor";
 import {
   FolderOpen,
   Play,
@@ -990,7 +990,7 @@ export default function EditorPage() {
   const [aiReport, setAiReport] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
   const [workspaceReady, setWorkspaceReady] = useState(false);
-  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const editorRef = useRef<CodeEditorHandle | null>(null);
   const projectSummary = useMemo(
     () => (projectLoaded ? summarizeProject(files) : null),
     [files, projectLoaded],
@@ -1056,16 +1056,11 @@ export default function EditorPage() {
   }, [activeFile, files, projectName, projectSummary, workspaceReady]);
 
   const activeContent = files.find((f) => f.path === activeFile)?.content || "";
-  const handleEditorMount: OnMount = (editor) => { editorRef.current = editor; };
   const handleFindingSelect = useCallback((finding: ProjectFinding) => {
     if (!finding.line || finding.file === "/") return;
     setActiveFile(finding.file);
     window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
-      const editor = editorRef.current, lineNumber = Math.min(finding.line, editor?.getModel()?.getLineCount() ?? finding.line);
-      if (!editor) return;
-      editor.revealLineInCenter(lineNumber);
-      editor.setPosition({ lineNumber, column: 1 });
-      editor.focus();
+      editorRef.current?.goToLine(finding.line);
     }));
   }, []);
   const handleBuildDiagnostic = useCallback(
@@ -1428,23 +1423,14 @@ export default function EditorPage() {
             className={`flex-1 min-w-0 ${showOutput && projectSummary ? "border-r border-[#30363d]" : ""}`}
           >
             {projectSummary ? (
-              <Editor
+              <CodeEditor
+                ref={editorRef}
                 height="100%"
                 language={chipLang || "c"}
                 value={activeContent}
                 onChange={handleEditorChange}
-                onMount={handleEditorMount}
-                theme="vs-dark"
-                options={{
-                  fontSize: 14,
-                  lineHeight: 20,
-                  minimap: { enabled: true },
-                  scrollBeyondLastLine: false,
-                  automaticLayout: true,
-                  tabSize: 4,
-                  bracketPairColorization: { enabled: true },
-                  suggestOnTriggerCharacters: true,
-                }}
+                fontSize={14}
+                ariaLabel="工程源码编辑器"
               />
             ) : (
               <ProjectLanding

@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AiPage from './AiPage';
 import { detectLocalServers, loadStoredAiConfig, streamAiResponse } from '../services/aiService';
 
-vi.mock('@monaco-editor/react', () => ({ default: () => <div data-testid="code-editor" /> }));
 vi.mock('../services/aiService', () => ({
   clearStoredAiConfig: vi.fn(),
   detectLocalServers: vi.fn(),
