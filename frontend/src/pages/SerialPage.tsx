@@ -10,7 +10,7 @@ type FrameMode = 'auto' | 'line' | 'idle' | 'fixed' | 'raw';
 interface PortInfo { usbVendorId?: number; usbProductId?: number; bluetoothServiceClassId?: string }
 interface Port extends EventTarget { name?: string; path?: string; readable: ReadableStream<Uint8Array> | null; writable: WritableStream<Uint8Array> | null; open(o: { baudRate: number; dataBits: number; stopBits: number; parity: Parity; flowControl: FlowControl; bufferSize?: number }): Promise<void>; close(): Promise<void>; getInfo(): PortInfo; setSignals?(s: { dataTerminalReady?: boolean; requestToSend?: boolean }): Promise<void> }
 interface SerialManager extends EventTarget { requestPort(): Promise<Port> }
-interface Entry { id: number; timestamp: string; direction: Direction; text: string; bytes?: number[] }
+interface Entry { id: number; timestamp: string; lastReceivedAt: number; direction: Direction; text: string; bytes?: number[] }
 interface Shortcut { id: number; name: string; value: string; hex: boolean; intervalMs?: number }
 interface Session { id: number; name: string; state: State; baud: number; config: string; entries: Entry[]; rx: number; tx: number; rate: number; paused: number; captureBytes: number }
 interface Runtime { port: Port; reader: ReadableStreamDefaultReader<Uint8Array> | null; reading: boolean; writing: boolean; buffer: number[]; timer: number | null; lastBytes: number; lastTime: number }
@@ -18,6 +18,7 @@ interface RawCapture { events: CaptureEventInput[]; byteLength: number; truncate
 
 const MAX_ENTRIES = 5000;
 const MAX_MERGED_RX_BYTES = 64 * 1024;
+const RX_BURST_MERGE_MS = 200;
 const settingsKey = 'embedkit.serial.settings';
 const shortcutsKey = 'embedkit.serial.shortcuts';
 const shortcutLimitKey = 'embedkit.serial.shortcut-limit';
@@ -30,6 +31,7 @@ function visibleEntries(session: Session | null, filter: string, rxHex: boolean,
 function parseHex(value: string) { const s = value.replace(/0x/gi, '').replace(/[\s,;:_-]+/g, ''); if (!s || !/^[\da-f]+$/i.test(s) || s.length % 2) throw new Error('HEX 必须是完整字节，例如 DE AD BE EF'); return new Uint8Array(s.match(/../g)!.map((v) => parseInt(v, 16))); }
 function unescapeText(value: string) { return value.replace(/\\u([\da-f]{4})|\\x([\da-f]{2})|\\([rnt0\\])/gi, (_, unicode: string, byte: string, simple: string) => unicode ? String.fromCharCode(parseInt(unicode, 16)) : byte ? String.fromCharCode(parseInt(byte, 16)) : ({ r: '\r', n: '\n', t: '\t', '0': '\0', '\\': '\\' }[simple] ?? simple)); }
 function portName(port: Port, index: number) { const i = port.getInfo(); const detected = [port.name, port.path].map((value) => value?.match(/COM\d+/i)?.[0].toUpperCase()).find(Boolean); const vid = i.usbVendorId?.toString(16).padStart(4, '0').toUpperCase(); const pid = i.usbProductId?.toString(16).padStart(4, '0').toUpperCase(); const label = detected ?? `串口 ${index}`; return vid || pid ? `${label} · VID:${vid ?? '----'} PID:${pid ?? '----'}` : label; }
+function drainRuntimeBuffer(runtime: Runtime) { if (runtime.timer !== null) clearTimeout(runtime.timer); const buffered = runtime.buffer; runtime.timer = null; runtime.buffer = []; return buffered; }
 
 export default function SerialPage() {
   const [initial] = useState(loadSettings);
@@ -67,12 +69,12 @@ export default function SerialPage() {
   useEffect(() => { localStorage.setItem(shortcutLimitKey, String(shortcutLimit)); }, [shortcutLimit]);
 
   const append = useCallback((id: number, text: string, direction: Direction, bytes?: Uint8Array, mergeRx = false) => update(id, (s) => {
-    const incoming = bytes ? [...bytes] : undefined, last = s.entries[s.entries.length - 1];
-    if (mergeRx && direction === 'rx' && incoming && last?.direction === 'rx' && last.bytes && last.bytes.length + incoming.length <= MAX_MERGED_RX_BYTES) {
-      const merged = [...last.bytes, ...incoming], entries = [...s.entries.slice(0, -1), { ...last, text: new TextDecoder().decode(new Uint8Array(merged)), bytes: merged }];
+    const incoming = bytes ? [...bytes] : undefined, last = s.entries[s.entries.length - 1], receivedAt = Date.now();
+    if (mergeRx && direction === 'rx' && incoming && last?.direction === 'rx' && last.bytes && receivedAt - last.lastReceivedAt <= RX_BURST_MERGE_MS && last.bytes.length + incoming.length <= MAX_MERGED_RX_BYTES) {
+      const merged = [...last.bytes, ...incoming], entries = [...s.entries.slice(0, -1), { ...last, lastReceivedAt: receivedAt, text: new TextDecoder().decode(new Uint8Array(merged)), bytes: merged }];
       return { ...s, entries };
     }
-    return { ...s, entries: [...s.entries, { id: ++entrySeq.current, timestamp: now(), direction, text, bytes: incoming }].slice(-MAX_ENTRIES) };
+    return { ...s, entries: [...s.entries, { id: ++entrySeq.current, timestamp: now(), lastReceivedAt: receivedAt, direction, text, bytes: incoming }].slice(-MAX_ENTRIES) };
   }), [update]);
   const emit = useCallback((id: number, bytes: number[], mergeRx = false) => {
     if (!bytes.length) return; const data = new Uint8Array(bytes), text = new TextDecoder().decode(data);
@@ -92,13 +94,13 @@ export default function SerialPage() {
       r.timer = window.setTimeout(() => { r.timer = null; flush(id); }, gapRef.current);
     }
   }, [emit, flush]);
-  const changeFrameMode = useCallback((next: FrameMode) => {
+  const changeFrameMode = (next: FrameMode) => {
     for (const [id, runtime] of runtimes.current) {
-      if (runtime.timer !== null) { clearTimeout(runtime.timer); runtime.timer = null; }
-      if (runtime.buffer.length) { const buffered = runtime.buffer; runtime.buffer = []; emit(id, buffered); }
+      const buffered = drainRuntimeBuffer(runtime);
+      if (buffered.length) emit(id, buffered);
     }
     setFrameMode(next);
-  }, [emit]);
+  };
   const read = useCallback(async (id: number) => {
     const r = runtimes.current.get(id); if (!r?.port.readable || r.reading) return; r.reading = true; r.buffer = []; const reader = r.port.readable.getReader(); r.reader = reader;
     try { while (r.reading) { const { value, done } = await reader.read(); if (done) break; if (value?.length) { const capture = rawCaptures.current.get(id) ?? { events: [], byteLength: 0, truncated: false }, remaining = COMMUNICATION_CAPTURE_MAX_BYTES - capture.byteLength, captured = value.slice(0, Math.max(0, remaining)); if (captured.length) { capture.events.push({ timestamp: new Date().toISOString(), direction: 'rx', hex: hex([...captured]) }); capture.byteLength += captured.length; } if (captured.length < value.length) capture.truncated = true; rawCaptures.current.set(id, capture); update(id, (s) => ({ ...s, rx: s.rx + value.length, captureBytes: capture.byteLength })); process(id, value); } } }

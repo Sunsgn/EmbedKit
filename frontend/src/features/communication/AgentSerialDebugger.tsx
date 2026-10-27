@@ -4,7 +4,8 @@ import { closeSerialSession, listSerialPorts, listSerialSessions, openSerialSess
 import { createCommunicationCapture, writePendingCommunicationCapture } from '../../services/communicationCapture';
 import { writeSerialTestSessionHandoff } from '../../services/testSessionHandoff';
 
-interface ViewSession extends Omit<SerialAgentSession, 'events'> { logs: SerialAgentEvent[] }
+interface ViewEvent extends SerialAgentEvent { receivedThrough?: string }
+interface ViewSession extends Omit<SerialAgentSession, 'events'> { logs: ViewEvent[] }
 interface Shortcut { id: number; name: string; value: string; hex: boolean; intervalMs: number }
 type LineEnding = 'none' | 'cr' | 'lf' | 'crlf';
 const shortcutsKey = 'embedkit.serial.shortcuts';
@@ -12,17 +13,18 @@ const shortcutLimitKey = 'embedkit.serial.shortcut-limit';
 const serialSettingsKey = 'embedkit.serial.settings';
 const maxAgentLogs = 5000;
 const maxMergedRxBytes = 64 * 1024;
+const rxBurstMergeMs = 200;
 const appendEnding = (value: string, ending: LineEnding) => ending === 'none' ? value : `${value.replace(/(?:\r\n|\r|\n)$/, '')}${ending === 'crlf' ? '\r\n' : ending === 'cr' ? '\r' : '\n'}`;
 const loadShortcuts = (): Shortcut[] => { try { return (JSON.parse(localStorage.getItem(shortcutsKey) || '[]') as Array<Partial<Shortcut>>).filter(item => item.name && item.value).map(item => ({ id: Number(item.id) || Date.now() + Math.random(), name: String(item.name), value: String(item.value), hex: item.hex === true, intervalMs: Math.max(100, Math.min(60000, Number(item.intervalMs) || 1000)) })); } catch { return []; } };
 const loadShortcutLimit = () => Math.max(1, Math.min(100, Number(localStorage.getItem(shortcutLimitKey)) || 20));
 const loadDisplaySettings = () => { try { return JSON.parse(localStorage.getItem(serialSettingsKey) || '{}') as Record<string, unknown>; } catch { return {}; } };
 const formatTimestamp = (value: string) => { const date = new Date(value), pad = (part: number, length = 2) => String(part).padStart(length, '0'); return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`; };
 const decodeHex = (value: string) => new TextDecoder().decode(new Uint8Array((value.match(/[\dA-F]{2}/gi) ?? []).map(byte => Number.parseInt(byte, 16))));
-const appendAgentLogs = (existing: SerialAgentEvent[], incoming: SerialAgentEvent[], mergeRawRx: boolean) => incoming.reduce<SerialAgentEvent[]>((logs, event) => {
-  const last = logs[logs.length - 1];
-  if (mergeRawRx && event.direction === 'rx' && last?.direction === 'rx' && last.byteLength + event.byteLength <= maxMergedRxBytes) {
+const appendAgentLogs = (existing: ViewEvent[], incoming: SerialAgentEvent[], mergeRawRx: boolean) => incoming.reduce<ViewEvent[]>((logs, event) => {
+  const last = logs[logs.length - 1], elapsed = Date.parse(event.timestamp) - Date.parse(last?.receivedThrough ?? last?.timestamp ?? '');
+  if (mergeRawRx && event.direction === 'rx' && last?.direction === 'rx' && elapsed >= 0 && elapsed <= rxBurstMergeMs && last.byteLength + event.byteLength <= maxMergedRxBytes) {
     const hex = `${last.hex} ${event.hex}`.trim();
-    return [...logs.slice(0, -1), { ...event, timestamp: last.timestamp, text: decodeHex(hex), hex, byteLength: last.byteLength + event.byteLength }];
+    return [...logs.slice(0, -1), { ...event, timestamp: last.timestamp, receivedThrough: event.timestamp, text: decodeHex(hex), hex, byteLength: last.byteLength + event.byteLength }];
   }
   return [...logs, event].slice(-maxAgentLogs);
 }, existing);

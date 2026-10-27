@@ -74,6 +74,24 @@ describe('SerialPage browser-direct mode', () => {
     view.unmount();
   });
 
+  it('starts a new timestamped RX record when the next report is not part of the same burst', async () => {
+    let source!: ReadableStreamDefaultController<Uint8Array>;
+    const readable = new ReadableStream<Uint8Array>({ start(controller) { source = controller; } });
+    const port = { readable, writable: new WritableStream<Uint8Array>(), open: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined), getInfo: () => ({}), setSignals: vi.fn().mockResolvedValue(undefined) };
+    Object.defineProperty(navigator, 'serial', { configurable: true, value: { requestPort: vi.fn().mockResolvedValue(port), addEventListener: vi.fn(), removeEventListener: vi.fn() } });
+
+    const view = render(<SerialPage />);
+    fireEvent.click(screen.getByRole('button', { name: /添加/ }));
+    const terminal = await screen.findByTestId('browser-serial-terminal-left');
+    source.enqueue(new TextEncoder().encode('report one\r\n'));
+    await waitFor(() => expect(terminal.textContent).toContain('report one'));
+    await new Promise(resolve => setTimeout(resolve, 250));
+    source.enqueue(new TextEncoder().encode('report two\r\n'));
+    await waitFor(() => expect(terminal.textContent).toContain('report two'));
+    expect(within(terminal).getAllByText('RX')).toHaveLength(2);
+    view.unmount();
+  });
+
   it('keeps HEX display independent for the left and right split panes', async () => {
     const createPort = (text: string) => ({
       readable: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode(`${text}\n`)); } }),
