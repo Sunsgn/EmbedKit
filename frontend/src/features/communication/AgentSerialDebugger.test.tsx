@@ -114,6 +114,27 @@ describe('AgentSerialDebugger independent degradation', () => {
     expect(JSON.parse(localStorage.getItem('embedkit.serial.settings') || '{}')).toMatchObject({ version: 3, leftRxHex: true, rightRxHex: false });
   });
 
+  it('keeps shortcut cycle switches isolated between Local Agent split sessions', async () => {
+    localStorage.setItem('embedkit.serial.shortcuts', JSON.stringify([{ id: 101, name: '轮询', value: 'AT', hex: false, intervalMs: 1000 }]));
+    const createSession = (id: string, path: string) => ({
+      id, path, baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false,
+      state: 'connected' as const, rxBytes: 0, txBytes: 0, openedAt: '2026-10-27T00:00:00Z', events: [],
+    });
+    vi.mocked(serialAgent.listSerialPorts).mockResolvedValue([]);
+    vi.mocked(serialAgent.listSerialSessions).mockResolvedValue([createSession('session-left', 'COM1'), createSession('session-right', 'COM2')]);
+    vi.mocked(serialAgent.readSerialSession).mockImplementation(() => new Promise(() => undefined));
+
+    render(<AgentSerialDebugger />);
+    const splitButton = await screen.findByRole('button', { name: '双窗口' });
+    await waitFor(() => expect(splitButton).toBeEnabled());
+    fireEvent.click(splitButton);
+    fireEvent.click(screen.getAllByTitle('每 1000ms 周期发送')[0]);
+    expect(screen.getAllByTitle('停止周期发送').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByTestId('agent-serial-terminal-right'));
+    expect(screen.queryByTitle('停止周期发送')).not.toBeInTheDocument();
+    expect(screen.getAllByTitle('每 1000ms 周期发送').length).toBeGreaterThan(0);
+  });
+
   it('keeps multiline Local Agent output in one receive burst without waiting', async () => {
     const session = {
       id: 'session-stream', path: 'COM8', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false,

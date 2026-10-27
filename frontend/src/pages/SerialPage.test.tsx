@@ -164,4 +164,31 @@ describe('SerialPage browser-direct mode', () => {
     expect(JSON.parse(localStorage.getItem('embedkit.serial.settings') || '{}')).toMatchObject({ version: 3, leftRxHex: true, rightRxHex: false });
     view.unmount();
   });
+
+  it('keeps shortcut cycle switches isolated between split serial sessions', async () => {
+    localStorage.setItem('embedkit.serial.shortcuts', JSON.stringify([{ id: 101, name: '轮询', value: 'AT', hex: false, intervalMs: 1000 }]));
+    const createPort = () => ({
+      readable: new ReadableStream<Uint8Array>(), writable: new WritableStream<Uint8Array>(),
+      open: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined), getInfo: () => ({}), setSignals: vi.fn().mockResolvedValue(undefined),
+    });
+    const requestPort = vi.fn().mockResolvedValueOnce(createPort()).mockResolvedValueOnce(createPort());
+    Object.defineProperty(navigator, 'serial', { configurable: true, value: { requestPort, addEventListener: vi.fn(), removeEventListener: vi.fn() } });
+
+    const view = render(<SerialPage />);
+    fireEvent.click(screen.getByRole('button', { name: /添加/ }));
+    await waitFor(() => expect(requestPort).toHaveBeenCalledTimes(1));
+    await screen.findByText(/已连接 串口 1/);
+    fireEvent.click(screen.getByRole('button', { name: /添加/ }));
+    await waitFor(() => expect(requestPort).toHaveBeenCalledTimes(2));
+    const splitButton = screen.getByRole('button', { name: '双窗口' });
+    await waitFor(() => expect(splitButton).toBeEnabled());
+    fireEvent.click(splitButton);
+
+    fireEvent.click(screen.getAllByTitle('每 1000ms 周期发送')[0]);
+    expect(screen.getAllByTitle('停止周期发送').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByTestId('browser-serial-terminal-right'));
+    expect(screen.queryByTitle('停止周期发送')).not.toBeInTheDocument();
+    expect(screen.getAllByTitle('每 1000ms 周期发送').length).toBeGreaterThan(0);
+    view.unmount();
+  });
 });

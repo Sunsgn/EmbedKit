@@ -51,14 +51,16 @@ export default function SerialPage() {
   const [shortcuts, setShortcuts] = useState<Shortcut[]>(loadShortcuts), [shortcutName, setShortcutName] = useState('');
   const [shortcutLimit, setShortcutLimit] = useState(loadShortcutLimit);
   const [editingShortcut, setEditingShortcut] = useState<Shortcut | null>(null);
-  const [cyclingShortcutIds, setCyclingShortcutIds] = useState<number[]>([]);
+  const [cyclingShortcutsBySession, setCyclingShortcutsBySession] = useState<Record<number, number[]>>({});
   const [fileProgress, setFileProgress] = useState('');
   const supported = typeof navigator !== 'undefined' && 'serial' in navigator;
   const runtimes = useRef(new Map<number, Runtime>()), rawCaptures = useRef(new Map<number, RawCapture>()), sessionsRef = useRef<Session[]>([]), sessionSeq = useRef(0), entrySeq = useRef(0), output = useRef<HTMLDivElement>(null), secondaryOutput = useRef<HTMLDivElement>(null);
   const pausedRef = useRef(paused), modeRef = useRef(frameMode), gapRef = useRef(30), lengthRef = useRef(8);
   const active = sessions.find((s) => s.id === activeId) ?? null, connected = active?.state === 'connected', onlineCount = sessions.filter((s) => s.state === 'connected').length, canSend = broadcast ? onlineCount > 0 : connected;
+  const cyclingShortcutIds = activeId ? cyclingShortcutsBySession[activeId] ?? [] : [];
   const leftPane = splitView ? sessions.find((s) => s.id === leftPaneId) ?? null : active, rightPane = splitView ? sessions.find((s) => s.id === rightPaneId) ?? null : null;
   const update = useCallback((id: number, fn: (s: Session) => Session) => setSessions((all) => all.map((s) => s.id === id ? fn(s) : s)), []);
+  const setCyclingShortcutIds = useCallback((updater: (ids: number[]) => number[]) => { if (activeId) setCyclingShortcutsBySession((all) => ({ ...all, [activeId]: updater(all[activeId] ?? []) })); }, [activeId]);
   useEffect(() => { pausedRef.current = paused; }, [paused]);
   useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
   useEffect(() => { modeRef.current = frameMode; }, [frameMode]);
@@ -142,7 +144,7 @@ export default function SerialPage() {
     } catch (e) { const m = e instanceof Error ? e.message : String(e); if (!m.toLowerCase().includes('cancel')) alert(`连接失败：${m}`); }
     finally { setAdding(false); }
   }, [adding, append, baud, bufferSize, dataBits, dtr, flow, parity, read, rts, stopBits]);
-  const disconnect = useCallback(async (id: number) => { update(id, (s) => ({ ...s, state: 'disconnecting' })); if (id === activeId) setCycle(false); await stop(id); update(id, (s) => ({ ...s, state: 'disconnected' })); append(id, '连接已断开', 'system'); }, [activeId, append, stop, update]);
+  const disconnect = useCallback(async (id: number) => { update(id, (s) => ({ ...s, state: 'disconnecting' })); setCyclingShortcutsBySession((all) => { const next = { ...all }; delete next[id]; return next; }); if (id === activeId) setCycle(false); await stop(id); update(id, (s) => ({ ...s, state: 'disconnected' })); append(id, '连接已断开', 'system'); }, [activeId, append, stop, update]);
   const reconnect = useCallback(async (id: number) => { const r = runtimes.current.get(id); if (!r) return; update(id, (s) => ({ ...s, state: 'connecting' })); try { await r.port.open({ baudRate: +baud, dataBits: +dataBits, stopBits: +stopBits, parity, flowControl: flow, bufferSize: +bufferSize }); update(id, (s) => ({ ...s, state: 'connected', baud: +baud, config: `${baud} ${dataBits}${parity === 'none' ? 'N' : parity[0].toUpperCase()}${stopBits}` })); append(id, `串口已用 ${baud} baud 重新连接`, 'system'); void read(id); } catch (e) { update(id, (s) => ({ ...s, state: 'disconnected' })); append(id, `重新连接失败：${e instanceof Error ? e.message : String(e)}`, 'system'); } }, [append, baud, bufferSize, dataBits, flow, parity, read, stopBits, update]);
   const changeBaud = useCallback(async (value: string) => {
     setBaud(value);
@@ -161,7 +163,7 @@ export default function SerialPage() {
     }
   }, [active, activeId, append, bufferSize, dataBits, flow, parity, read, stop, stopBits, update]);
   const remove = useCallback(async (id: number) => {
-    await stop(id); runtimes.current.delete(id); rawCaptures.current.delete(id);
+    await stop(id); runtimes.current.delete(id); rawCaptures.current.delete(id); setCyclingShortcutsBySession((all) => { const next = { ...all }; delete next[id]; return next; });
     const next = sessionsRef.current.filter((s) => s.id !== id); setSessions(next);
     setActiveId((current) => current === id ? next[0]?.id ?? null : current);
     if (next.length < 2) { setSplitView(false); setLeftPaneId(null); setRightPaneId(null); return; }
@@ -189,10 +191,9 @@ export default function SerialPage() {
 
   useEffect(() => { if (!cycle || !canSend || !input.trim()) return; const ids = targetIds(), timer = setInterval(() => { for (const id of ids) void send(id, input, txHex); }, Math.max(100, Math.min(60000, +cycleMs || 1000))); return () => clearInterval(timer); }, [canSend, cycle, cycleMs, input, send, targetIds, txHex]);
   useEffect(() => {
-    if (!canSend || !cyclingShortcutIds.length) return;
-    const timers = shortcuts.filter((item) => cyclingShortcutIds.includes(item.id)).map((item) => window.setInterval(() => void sendShortcut(item), Math.max(100, Math.min(60000, item.intervalMs || 1000))));
+    const timers = Object.entries(cyclingShortcutsBySession).flatMap(([sessionId, ids]) => shortcuts.filter((item) => ids.includes(item.id)).map((item) => window.setInterval(() => void send(Number(sessionId), item.value, item.hex), Math.max(100, Math.min(60000, item.intervalMs || 1000)))));
     return () => timers.forEach((timer) => window.clearInterval(timer));
-  }, [canSend, cyclingShortcutIds, sendShortcut, shortcuts]);
+  }, [cyclingShortcutsBySession, send, shortcuts]);
   useEffect(() => { const timer = setInterval(() => { const t = Date.now(); setSessions((all) => all.map((s) => { const r = runtimes.current.get(s.id); if (!r || s.state !== 'connected') return s.rate ? { ...s, rate: 0 } : s; const rate = Math.round((s.rx - r.lastBytes) * 1000 / Math.max(1, t - r.lastTime)); r.lastBytes = s.rx; r.lastTime = t; return { ...s, rate }; })); }, 1000); return () => clearInterval(timer); }, []);
   useEffect(() => { if (autoScroll && !paused && output.current) output.current.scrollTop = output.current.scrollHeight; }, [leftPane?.entries, autoScroll, paused]);
   useEffect(() => { if (autoScroll && !paused && secondaryOutput.current) secondaryOutput.current.scrollTop = secondaryOutput.current.scrollHeight; }, [rightPane?.entries, autoScroll, paused]);
