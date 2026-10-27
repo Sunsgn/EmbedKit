@@ -60,6 +60,9 @@ function AppShell() {
   const [online, setOnline] = useState(() => navigator.onLine), [updateAvailable, setUpdateAvailable] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const communicationActive = location.pathname === '/communication';
+  const [communicationMounted, setCommunicationMounted] = useState(communicationActive);
+  if (communicationActive && !communicationMounted) setCommunicationMounted(true);
   useEffect(() => { const connected = () => setOnline(true), disconnected = () => setOnline(false); window.addEventListener('online', connected); window.addEventListener('offline', disconnected); const unsubscribe = subscribePwaUpdate(setUpdateAvailable); return () => { window.removeEventListener('online', connected); window.removeEventListener('offline', disconnected); unsubscribe(); }; }, []);
   useEffect(() => {
     const media = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
@@ -80,14 +83,16 @@ function AppShell() {
       <header className="flex h-13 shrink-0 items-center border-b border-[#30363d]/80 bg-[#161b22]/95 px-4 shadow-sm shadow-black/20 backdrop-blur lg:hidden"><button onClick={() => setSidebarOpen(true)} className="rounded-lg p-1.5 text-gray-400 hover:bg-white/5 hover:text-white" aria-label="打开菜单"><Menu size={20} /></button><span className="ml-3 text-sm font-semibold">EmbedKit</span><span className="ml-2 rounded bg-blue-500/10 px-1.5 py-0.5 text-[9px] text-blue-400">WORKBENCH</span></header>
       {!online && <div className="flex shrink-0 items-center justify-center gap-2 border-b border-yellow-500/20 bg-yellow-500/10 px-3 py-1.5 text-[10px] text-yellow-300"><WifiOff size={12} />离线模式：浏览器工具和已缓存资料可用；Local Agent 与联网来源按当前连接状态工作。</div>}
       {updateAvailable && <div className="flex shrink-0 items-center justify-center gap-2 border-b border-blue-500/20 bg-blue-500/10 px-3 py-1.5 text-[10px] text-blue-300">发现新版本<button onClick={activatePwaUpdate} className="flex items-center gap-1 rounded border border-blue-500/30 px-2 py-0.5"><RefreshCw size={10} />更新并重载</button></div>}
-      <div className="min-h-0 flex-1 overflow-hidden"><AppErrorBoundary resetKey={location.pathname} onHome={() => navigate('/')}><Suspense fallback={<LoadingPage />}><Routes>
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {communicationMounted && <div hidden={!communicationActive} className="h-full"><AppErrorBoundary resetKey="communication" onHome={() => navigate('/')}><Suspense fallback={<LoadingPage />}><CommunicationPage /></Suspense></AppErrorBoundary></div>}
+        <div hidden={communicationActive} className="h-full"><AppErrorBoundary resetKey={location.pathname} onHome={() => navigate('/')}><Suspense fallback={<LoadingPage />}><Routes>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/engineering" element={<EngineeringProjectsPage />} />
         <Route path="/devices" element={<Navigate to="/engineering" replace />} />
         <Route path="/environment" element={<DevelopmentEnvironmentPage />} />
         <Route path="/projects" element={<EditorPage />} />
         <Route path="/editor" element={<Navigate to="/projects" replace />} />
-        <Route path="/communication" element={<CommunicationPage />} />
+        <Route path="/communication" element={null} />
         <Route path="/tests" element={<TestAutomationPage />} />
         <Route path="/serial" element={<Navigate to="/communication" replace />} />
         <Route path="/toolbox" element={<ToolboxPage />} />
@@ -102,6 +107,7 @@ function AppShell() {
         <Route path="/data" element={<DataManagementPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes></Suspense></AppErrorBoundary></div>
+      </div>
     </main>
     <AppearanceSettings open={appearanceOpen} value={appearance} saveFailed={appearanceSaveFailed} onChange={changeAppearance} onClose={() => setAppearanceOpen(false)} />
   </div>;

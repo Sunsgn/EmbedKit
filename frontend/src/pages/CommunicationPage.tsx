@@ -13,8 +13,12 @@ export default function CommunicationPage() {
     return saved === 'websocket' || saved === 'agent' ? saved : 'serial';
   });
   const [serialBackend, setSerialBackend] = useState<SerialBackend>(() => sessionStorage.getItem('embedkit.communication.serial-backend') === 'agent' ? 'agent' : 'browser');
-  const selectTab = (next: Tab) => { setTab(next); sessionStorage.setItem('embedkit.communication.tab', next); };
-  const selectSerialBackend = (next: SerialBackend) => { setSerialBackend(next); sessionStorage.setItem('embedkit.communication.serial-backend', next); };
+  type Workspace = 'serial-browser' | 'serial-agent' | 'websocket' | 'network';
+  const currentWorkspace = (nextTab: Tab, nextBackend = serialBackend): Workspace => nextTab === 'serial' ? `serial-${nextBackend}` : nextTab === 'websocket' ? 'websocket' : 'network';
+  const [mountedWorkspaces, setMountedWorkspaces] = useState<Partial<Record<Workspace, boolean>>>(() => ({ [currentWorkspace(tab)]: true }));
+  const mountWorkspace = (workspace: Workspace) => setMountedWorkspaces(current => current[workspace] ? current : { ...current, [workspace]: true });
+  const selectTab = (next: Tab) => { mountWorkspace(currentWorkspace(next)); setTab(next); sessionStorage.setItem('embedkit.communication.tab', next); };
+  const selectSerialBackend = (next: SerialBackend) => { mountWorkspace(currentWorkspace('serial', next)); setSerialBackend(next); sessionStorage.setItem('embedkit.communication.serial-backend', next); };
   const tabs = [
     { id: 'serial' as const, label: '串口调试', detail: 'Web Serial · 多会话', icon: Radio },
     { id: 'websocket' as const, label: 'WebSocket', detail: '文本与二进制帧', icon: Wifi },
@@ -39,6 +43,11 @@ export default function CommunicationPage() {
         </div> : <div className="hidden shrink-0 items-center gap-2 rounded-lg border border-[#30363d] bg-[#0d1117]/70 px-3 py-2 text-[10px] text-gray-500 xl:flex"><LockKeyhole size={12} className="text-green-500" />连接与日志仅在本机处理</div>}
       </div>
     </div>
-    <div className="min-h-0 flex-1">{tab === 'serial' ? serialBackend === 'browser' ? <SerialPage /> : <AgentSerialDebugger /> : tab === 'websocket' ? <WebSocketDebugger /> : <AgentNetworkDebugger />}</div>
+    <div className="min-h-0 flex-1">
+      {mountedWorkspaces['serial-browser'] && <div hidden={tab !== 'serial' || serialBackend !== 'browser'} className="h-full"><SerialPage /></div>}
+      {mountedWorkspaces['serial-agent'] && <div hidden={tab !== 'serial' || serialBackend !== 'agent'} className="h-full"><AgentSerialDebugger /></div>}
+      {mountedWorkspaces.websocket && <div hidden={tab !== 'websocket'} className="h-full"><WebSocketDebugger /></div>}
+      {mountedWorkspaces.network && <div hidden={tab !== 'agent'} className="h-full"><AgentNetworkDebugger /></div>}
+    </div>
   </div>;
 }

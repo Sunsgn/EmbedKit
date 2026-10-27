@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import CommunicationPage from './CommunicationPage';
 
 vi.mock('../features/communication/AgentSerialDebugger', () => ({ default: () => <div>独立串口工作区</div> }));
-vi.mock('./SerialPage', () => ({ default: () => <div>浏览器直连串口工作区</div> }));
+vi.mock('./SerialPage', () => ({ default: () => <div>浏览器直连串口工作区<input aria-label="浏览器串口临时状态" /></div> }));
 vi.mock('../features/communication/WebSocketDebugger', () => ({ default: () => <div>独立 WebSocket 工作区</div> }));
 vi.mock('../features/communication/AgentNetworkDebugger', () => ({ default: () => <div>独立 TCP UDP 工作区</div> }));
 
@@ -48,5 +48,23 @@ describe('CommunicationPage independent mode', () => {
 
     expect(screen.getByRole('tab', { name: /WebSocket/ })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByText('独立 WebSocket 工作区')).toBeVisible();
+  });
+
+  it('keeps communication workspaces mounted while switching transports and serial backends', () => {
+    render(<CommunicationPage />);
+    const serialState = screen.getByLabelText('浏览器串口临时状态');
+    fireEvent.change(serialState, { target: { value: '正在测试' } });
+
+    fireEvent.click(screen.getByRole('tab', { name: /WebSocket/ }));
+    expect(serialState).not.toBeVisible();
+    fireEvent.click(screen.getByRole('tab', { name: /串口调试/ }));
+    expect(serialState).toBeVisible();
+    expect(serialState).toHaveValue('正在测试');
+
+    fireEvent.click(screen.getByRole('button', { name: '本地助手增强' }));
+    expect(serialState).not.toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '浏览器直连（默认）' }));
+    expect(serialState).toBeVisible();
+    expect(serialState).toHaveValue('正在测试');
   });
 });
