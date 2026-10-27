@@ -54,6 +54,27 @@ describe('SerialPage browser-direct mode', () => {
     view.unmount();
   });
 
+  it('retries one transient first-open failure without reporting a false connection failure', async () => {
+    const port = {
+      readable: new ReadableStream<Uint8Array>(),
+      writable: new WritableStream<Uint8Array>(),
+      open: vi.fn().mockRejectedValueOnce(new DOMException('Failed to open serial port.', 'NetworkError')).mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      getInfo: () => ({}),
+      setSignals: vi.fn().mockResolvedValue(undefined),
+    };
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+    Object.defineProperty(navigator, 'serial', { configurable: true, value: { requestPort: vi.fn().mockResolvedValue(port), addEventListener: vi.fn(), removeEventListener: vi.fn() } });
+
+    const view = render(<SerialPage />);
+    fireEvent.click(screen.getByRole('button', { name: /添加/ }));
+
+    expect(await screen.findByText(/自动重试后已连接/)).toBeVisible();
+    expect(port.open).toHaveBeenCalledTimes(2);
+    expect(alert).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
   it('shows received data immediately and keeps CR/LF lines in one receive burst', async () => {
     const readable = new ReadableStream<Uint8Array>({
       start(controller) {

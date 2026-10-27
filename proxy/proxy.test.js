@@ -169,6 +169,28 @@ test('runs a complete virtual serial session through the Local Agent API', async
   assert.equal(closed.status, 200);
 });
 
+test('keeps a Local Agent serial session connected when optional control signals are unsupported', async () => {
+  const unsupportedSignalsAdapter = {
+    list: async () => [{ path: 'NO_SIGNALS', manufacturer: 'EmbedKit' }],
+    create: options => {
+      const port = new VirtualSerialPort(options);
+      port.set = (_signals, callback) => queueMicrotask(() => callback(new Error('control signals unsupported')));
+      return port;
+    },
+  };
+  configureSerialAdapter(unsupportedSignalsAdapter);
+  try {
+    const response = await fetch(`${agentBaseUrl}/api/serial/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: 'NO_SIGNALS', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: true, rts: false, frameMode: 'raw' }) });
+    assert.equal(response.status, 201);
+    const session = await response.json();
+    assert.equal(session.state, 'connected');
+    assert.ok(session.events.some(event => event.text.includes('控制信号未应用')));
+    await fetch(`${agentBaseUrl}/api/serial/sessions/${session.id}`, { method: 'DELETE' });
+  } finally {
+    configureSerialAdapter(virtualSerialAdapter);
+  }
+});
+
 test('reports local agent version and capabilities', async () => {
   const response = await fetch(`${agentBaseUrl}/api/agent/status`);
   assert.equal(response.status, 200);

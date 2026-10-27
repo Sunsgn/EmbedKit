@@ -9,7 +9,8 @@ type Direction = 'rx' | 'tx' | 'system';
 type State = 'connected' | 'disconnected' | 'connecting' | 'disconnecting';
 type FrameMode = 'auto' | 'line' | 'idle' | 'fixed' | 'raw';
 interface PortInfo { usbVendorId?: number; usbProductId?: number; bluetoothServiceClassId?: string }
-interface Port extends EventTarget { name?: string; path?: string; readable: ReadableStream<Uint8Array> | null; writable: WritableStream<Uint8Array> | null; open(o: { baudRate: number; dataBits: number; stopBits: number; parity: Parity; flowControl: FlowControl; bufferSize?: number }): Promise<void>; close(): Promise<void>; getInfo(): PortInfo; setSignals?(s: { dataTerminalReady?: boolean; requestToSend?: boolean }): Promise<void> }
+interface PortOpenOptions { baudRate: number; dataBits: number; stopBits: number; parity: Parity; flowControl: FlowControl; bufferSize?: number }
+interface Port extends EventTarget { name?: string; path?: string; readable: ReadableStream<Uint8Array> | null; writable: WritableStream<Uint8Array> | null; open(o: PortOpenOptions): Promise<void>; close(): Promise<void>; getInfo(): PortInfo; setSignals?(s: { dataTerminalReady?: boolean; requestToSend?: boolean }): Promise<void> }
 interface SerialManager extends EventTarget { requestPort(): Promise<Port> }
 interface Entry { id: number; timestamp: string; lastReceivedAt: number; direction: Direction; text: string; bytes?: number[] }
 interface Shortcut { id: number; name: string; value: string; hex: boolean; intervalMs?: number }
@@ -32,6 +33,18 @@ function parseHex(value: string) { const s = value.replace(/0x/gi, '').replace(/
 function unescapeText(value: string) { return value.replace(/\\u([\da-f]{4})|\\x([\da-f]{2})|\\([rnt0\\])/gi, (_, unicode: string, byte: string, simple: string) => unicode ? String.fromCharCode(parseInt(unicode, 16)) : byte ? String.fromCharCode(parseInt(byte, 16)) : ({ r: '\r', n: '\n', t: '\t', '0': '\0', '\\': '\\' }[simple] ?? simple)); }
 function portName(port: Port, index: number) { const i = port.getInfo(); const detected = [port.name, port.path].map((value) => value?.match(/COM\d+/i)?.[0].toUpperCase()).find(Boolean); const vid = i.usbVendorId?.toString(16).padStart(4, '0').toUpperCase(); const pid = i.usbProductId?.toString(16).padStart(4, '0').toUpperCase(); const label = detected ?? `串口 ${index}`; return vid || pid ? `${label} · VID:${vid ?? '----'} PID:${pid ?? '----'}` : label; }
 function drainRuntimeBuffer(runtime: Runtime) { if (runtime.timer !== null) clearTimeout(runtime.timer); const buffered = runtime.buffer; runtime.timer = null; runtime.buffer = []; return buffered; }
+function isTransientOpenError(reason: unknown) { const name = reason instanceof DOMException ? reason.name : '', message = reason instanceof Error ? reason.message : String(reason); return name === 'NetworkError' || /failed to open serial port|serial port.*temporarily unavailable/i.test(message); }
+function isPortChooserCancellation(reason: unknown) { const name = reason instanceof DOMException ? reason.name : '', message = reason instanceof Error ? reason.message : String(reason); return name === 'NotFoundError' || name === 'AbortError' || /cancel|no port selected/i.test(message); }
+async function openPort(port: Port, options: PortOpenOptions) {
+  try { await port.open(options); return false; }
+  catch (reason) {
+    if (!isTransientOpenError(reason)) throw reason;
+    try { await port.close(); } catch { /* 首次打开未完成，无需关闭 */ }
+    await new Promise(resolve => window.setTimeout(resolve, 150));
+    await port.open(options);
+    return true;
+  }
+}
 
 export default function SerialPage() {
   const [initial] = useState(loadSettings);
@@ -54,7 +67,7 @@ export default function SerialPage() {
   const [cyclingShortcutsBySession, setCyclingShortcutsBySession] = useState<Record<number, number[]>>({});
   const [fileProgress, setFileProgress] = useState('');
   const supported = typeof navigator !== 'undefined' && 'serial' in navigator;
-  const runtimes = useRef(new Map<number, Runtime>()), rawCaptures = useRef(new Map<number, RawCapture>()), sessionsRef = useRef<Session[]>([]), sessionSeq = useRef(0), entrySeq = useRef(0), output = useRef<HTMLDivElement>(null), secondaryOutput = useRef<HTMLDivElement>(null);
+  const runtimes = useRef(new Map<number, Runtime>()), rawCaptures = useRef(new Map<number, RawCapture>()), sessionsRef = useRef<Session[]>([]), sessionSeq = useRef(0), entrySeq = useRef(0), addingRef = useRef(false), output = useRef<HTMLDivElement>(null), secondaryOutput = useRef<HTMLDivElement>(null);
   const pausedRef = useRef(paused), modeRef = useRef(frameMode), gapRef = useRef(30), lengthRef = useRef(8);
   const active = sessions.find((s) => s.id === activeId) ?? null, connected = active?.state === 'connected', onlineCount = sessions.filter((s) => s.state === 'connected').length, canSend = broadcast ? onlineCount > 0 : connected;
   const cyclingShortcutIds = activeId ? cyclingShortcutsBySession[activeId] ?? [] : [];
@@ -126,24 +139,24 @@ export default function SerialPage() {
   const stop = useCallback(async (id: number, close = true) => { const r = runtimes.current.get(id); if (!r) return; r.reading = false; if (r.timer !== null) clearTimeout(r.timer); flush(id); const reader = r.reader; r.reader = null; if (reader) { try { await reader.cancel(); } catch { /* 已断开 */ } try { reader.releaseLock(); } catch { /* 已释放 */ } } if (close) try { await r.port.close(); } catch { /* 已关闭 */ } }, [flush]);
 
   const addPort = useCallback(async () => {
-    const serial = (navigator as Navigator & { serial?: SerialManager }).serial; if (!serial || adding) return; setAdding(true);
+    const serial = (navigator as Navigator & { serial?: SerialManager }).serial; if (!serial || addingRef.current) return; addingRef.current = true; setAdding(true);
     try {
       const port = await serial.requestPort(), duplicate = [...runtimes.current].find(([, r]) => r.port === port);
       if (duplicate) { setActiveId(duplicate[0]); append(duplicate[0], '该串口已在监听列表中', 'system'); return; }
-      await port.open({ baudRate: +baud, dataBits: +dataBits, stopBits: +stopBits, parity, flowControl: flow, bufferSize: +bufferSize });
+      const retried = await openPort(port, { baudRate: +baud, dataBits: +dataBits, stopBits: +stopBits, parity, flowControl: flow, bufferSize: +bufferSize });
       const id = ++sessionSeq.current, name = portName(port, id), config = `${baud} ${dataBits}${parity === 'none' ? 'N' : parity[0].toUpperCase()}${stopBits}`;
       runtimes.current.set(id, { port, reader: null, reading: false, writing: false, buffer: [], timer: null, lastBytes: 0, lastTime: Date.now() });
       rawCaptures.current.set(id, { events: [], byteLength: 0, truncated: false });
       setSessions((all) => [...all, { id, name, state: 'connected', baud: +baud, config, entries: [], rx: 0, tx: 0, rate: 0, paused: 0, captureBytes: 0 }]); setActiveId(id);
-      append(id, `已连接 ${name} · ${config}`, 'system');
+      append(id, `${retried ? '首次打开未就绪，自动重试后已连接' : '已连接'} ${name} · ${config}`, 'system');
       // 串口读取不能依赖可选控制信号。部分 USB 转串口芯片会拒绝 DTR/RTS，
       // 但收发数据本身仍然可用；先启动读取，再将信号失败降级为可见告警。
       void read(id);
       if (port.setSignals) try { await port.setSignals({ dataTerminalReady: dtr, requestToSend: rts }); }
       catch (e) { append(id, `控制信号未应用，串口接收继续运行：${e instanceof Error ? e.message : String(e)}`, 'system'); }
-    } catch (e) { const m = e instanceof Error ? e.message : String(e); if (!m.toLowerCase().includes('cancel')) alert(`连接失败：${m}`); }
-    finally { setAdding(false); }
-  }, [adding, append, baud, bufferSize, dataBits, dtr, flow, parity, read, rts, stopBits]);
+    } catch (e) { const m = e instanceof Error ? e.message : String(e); if (!isPortChooserCancellation(e)) alert(`连接失败：${m}`); }
+    finally { addingRef.current = false; setAdding(false); }
+  }, [append, baud, bufferSize, dataBits, dtr, flow, parity, read, rts, stopBits]);
   const disconnect = useCallback(async (id: number) => { update(id, (s) => ({ ...s, state: 'disconnecting' })); setCyclingShortcutsBySession((all) => { const next = { ...all }; delete next[id]; return next; }); if (id === activeId) setCycle(false); await stop(id); update(id, (s) => ({ ...s, state: 'disconnected' })); append(id, '连接已断开', 'system'); }, [activeId, append, stop, update]);
   const reconnect = useCallback(async (id: number) => { const r = runtimes.current.get(id); if (!r) return; update(id, (s) => ({ ...s, state: 'connecting' })); try { await r.port.open({ baudRate: +baud, dataBits: +dataBits, stopBits: +stopBits, parity, flowControl: flow, bufferSize: +bufferSize }); update(id, (s) => ({ ...s, state: 'connected', baud: +baud, config: `${baud} ${dataBits}${parity === 'none' ? 'N' : parity[0].toUpperCase()}${stopBits}` })); append(id, `串口已用 ${baud} baud 重新连接`, 'system'); void read(id); } catch (e) { update(id, (s) => ({ ...s, state: 'disconnected' })); append(id, `重新连接失败：${e instanceof Error ? e.message : String(e)}`, 'system'); } }, [append, baud, bufferSize, dataBits, flow, parity, read, stopBits, update]);
   const changeBaud = useCallback(async (value: string) => {

@@ -685,7 +685,8 @@ async function createSerialSession(input) {
   try {
     await new Promise((resolve, reject) => port.open(error => error ? reject(error) : resolve()));
     session.state = 'connected';
-    await new Promise((resolve, reject) => port.set({ dtr: options.dtr, rts: options.rts }, error => error ? reject(error) : resolve()));
+    try { await new Promise((resolve, reject) => port.set({ dtr: options.dtr, rts: options.rts }, error => error ? reject(error) : resolve())); }
+    catch (error) { pushSerialEvent(session, 'system', `控制信号未应用，串口收发继续运行：${error.message}`); }
     pushSerialEvent(session, 'system', `${options.path} 已连接`);
     if (!restoringSerialSessions) await persistSerialSessions();
     return { session, reused: false };
