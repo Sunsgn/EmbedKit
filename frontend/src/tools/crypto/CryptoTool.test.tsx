@@ -55,6 +55,26 @@ describe("CryptoTool", () => {
     expect(screen.getByRole("status")).toHaveTextContent("核对一致 · 9 字节");
   });
 
+  it("explains IV requirements and allows an explicit zero IV for legacy verification", async () => {
+    render(<CryptoTool />);
+    await waitFor(() => expect(screen.getByText("AES-128 ECB 通过")).toBeVisible());
+
+    expect(screen.getByText("IV HEX（必填，16字节）")).toBeVisible();
+    fireEvent.change(screen.getByLabelText("密码向量"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "执行加密" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("IV必须是完整的十六进制字节"));
+
+    fireEvent.click(screen.getByLabelText("使用全零IV"));
+    expect(screen.getByLabelText("密码向量")).toBeDisabled();
+    expect(screen.getByText(/本次计算明确使用全零IV/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "执行加密" }));
+    await waitFor(() => expect(screen.getByLabelText("密码输出")).toBeVisible());
+
+    fireEvent.change(screen.getByDisplayValue("CBC"), { target: { value: "ecb" } });
+    expect(screen.queryByLabelText("密码向量")).not.toBeInTheDocument();
+    expect(screen.getByText("ECB模式不使用IV，IV HEX无需填写。")).toBeVisible();
+  });
+
   it("calculates SM3 and HMAC through the digest workspace", async () => {
     render(<CryptoTool />);
     fireEvent.click(screen.getByRole("button", { name: "摘要与SM3" }));

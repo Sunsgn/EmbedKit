@@ -14,6 +14,7 @@ describe("crypto workbench domain", () => {
     const decrypted = await runSymmetricCipher({ ...common, operation: "decrypt", input: encrypted.output });
     expect(decrypted.output).toBe("00FF1020");
     await expect(runSymmetricCipher({ ...common, operation: "encrypt", input: "00", keyHex: "1234" })).rejects.toThrow("AES 密钥必须");
+    await expect(runSymmetricCipher({ ...common, operation: "encrypt", input: "00", ivHex: "" })).rejects.toThrow("IV必须是完整的十六进制字节");
   });
 
   it("authenticates AES-GCM data and rejects a changed tag", async () => {
