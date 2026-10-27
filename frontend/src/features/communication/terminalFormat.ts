@@ -1,4 +1,5 @@
 export type TerminalDirection = "rx" | "tx" | "system";
+export type TerminalLineEnding = "none" | "cr" | "lf" | "crlf";
 
 export const MAX_TERMINAL_LOGS = 2000;
 
@@ -23,6 +24,8 @@ export interface ExportableTerminalLog {
   direction: TerminalDirection;
   text: string;
 }
+
+export interface RawTerminalEvent { direction: TerminalDirection; hex?: string }
 
 export function formatTerminalLog(logs: ExportableTerminalLog[]): string {
   return logs
@@ -56,6 +59,28 @@ export function downloadTerminalLog(
   URL.revokeObjectURL(link.href);
 }
 
+export function terminalRxBytes(events: RawTerminalEvent[]): Uint8Array {
+  return Uint8Array.from(events.filter(item => item.direction === "rx").flatMap(item => (item.hex?.match(/[\dA-F]{2}/gi) ?? []).map(value => Number.parseInt(value, 16))));
+}
+
+export function downloadTerminalRaw(events: RawTerminalEvent[], name: string): void {
+  const bytes = terminalRxBytes(events);
+  if (!bytes.length) return;
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob([buffer], { type: "application/octet-stream" }));
+  link.download = `${safeTerminalFileName(name)}-${Date.now()}.bin`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
 export function utf8ByteLength(value: string): number {
   return new TextEncoder().encode(value).byteLength;
+}
+
+export function appendTerminalLineEnding(value: string, ending: TerminalLineEnding): string {
+  if (ending === "none") return value;
+  const suffix = ending === "crlf" ? "\r\n" : ending === "cr" ? "\r" : "\n";
+  return `${value.replace(/(?:\r\n|\r|\n)$/, "")}${suffix}`;
 }

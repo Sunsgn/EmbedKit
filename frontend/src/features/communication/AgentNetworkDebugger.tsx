@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Braces, Download, Plus, RefreshCw, Search, Send, Server, Trash2, Unplug, X } from 'lucide-react';
+import { Braces, Clock3, Download, Plus, RefreshCw, Search, Send, Server, Trash2, Unplug, X } from 'lucide-react';
 import { closeNetworkSession, getNetworkStatus, listNetworkSessions, openNetworkSession, readNetworkSession, sendNetworkData, type NetworkAgentEvent as EventItem, type NetworkAgentSession as AgentSession, type NetworkMode as Mode, type NetworkProtocol as Protocol } from '../../services/networkAgent';
 import { createCommunicationCapture, writePendingCommunicationCapture } from '../../services/communicationCapture';
-import { downloadTerminalLog, formatTerminalTime, MAX_TERMINAL_LOGS, terminalDirectionLabel } from './terminalFormat';
+import { appendTerminalLineEnding, downloadTerminalLog, downloadTerminalRaw, formatTerminalTime, MAX_TERMINAL_LOGS, terminalDirectionLabel, type TerminalLineEnding } from './terminalFormat';
+import { COMMUNICATION_SHORTCUTS_KEY, loadCommunicationShortcutLimit, loadCommunicationShortcuts, type CommunicationShortcut } from './communicationShortcuts';
+import { mayMergeReceiveBurst } from '../../services/serialDisplay';
 
 type Role = 'tcp-client' | 'tcp-server' | 'udp-client' | 'udp-server';
+interface ViewEvent extends EventItem { receivedThrough?: string }
 interface Session extends Omit<AgentSession, 'events'> {
-  logs: EventItem[];
+  logs: ViewEvent[];
+  rawEvents: EventItem[];
 }
 interface History {
   data: string;
@@ -14,6 +18,8 @@ interface History {
 }
 
 const HISTORY_KEY = 'embedkit.network.send-history';
+const DISPLAY_SETTINGS_KEY = 'embedkit.network.display-settings';
+const MAX_RAW_EVENTS = 20000;
 const loadHistory = () => {
   try {
     return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]') as History[];
@@ -24,8 +30,21 @@ const loadHistory = () => {
 const parts = (value: Role) => value.split('-') as [Protocol, Mode];
 const roleName = (type: Protocol, mode: Mode = 'client') => `${type.toUpperCase()} ${mode === 'client' ? 'Client' : 'Server'}`;
 const title = (session: Session) => `${roleName(session.type, session.mode)} · ${session.host}:${session.port}`;
+const hexBytes = (value: string) => (value.match(/[\dA-F]{2}/gi) ?? []).map(byte => Number.parseInt(byte, 16));
+const bytesHex = (bytes: number[]) => bytes.map(byte => byte.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+const appendNetworkLogs = (existing: ViewEvent[], incoming: EventItem[], protocol: Protocol) => incoming.reduce<ViewEvent[]>((logs, event) => {
+  if (protocol !== 'tcp' || event.direction !== 'rx') return [...logs, event].slice(-MAX_TERMINAL_LOGS);
+  let lastRxIndex = logs.length - 1;
+  while (lastRxIndex >= 0 && logs[lastRxIndex].direction !== 'rx') lastRxIndex -= 1;
+  const last = logs[lastRxIndex], previousAt = Date.parse(last?.receivedThrough ?? last?.timestamp ?? ''), receivedAt = Date.parse(event.timestamp);
+  if (!last || last.peer !== event.peer || !mayMergeReceiveBurst(previousAt, receivedAt) || last.byteLength + event.byteLength > 64 * 1024) return [...logs, event].slice(-MAX_TERMINAL_LOGS);
+  const bytes = [...hexBytes(last.hex), ...hexBytes(event.hex)], hex = bytesHex(bytes), next = [...logs];
+  next[lastRxIndex] = { ...event, id: last.id, timestamp: last.timestamp, receivedThrough: event.timestamp, text: new TextDecoder().decode(new Uint8Array(bytes)), hex, byteLength: bytes.length };
+  return next;
+}, existing);
 
 export default function AgentNetworkDebugger() {
+  const [initialDisplay] = useState(() => { try { return JSON.parse(localStorage.getItem(DISPLAY_SETTINGS_KEY) || '{}') as Record<string, unknown>; } catch { return {}; } });
   const [role, setRole] = useState<Role>('tcp-client');
   const [host, setHost] = useState('127.0.0.1'),
     [port, setPort] = useState('9000'),
@@ -37,10 +56,17 @@ export default function AgentNetworkDebugger() {
     [rightId, setRightId] = useState<string | null>(null);
   const [input, setInput] = useState(''),
     [hexMode, setHexMode] = useState(false),
-    [rxHex, setRxHex] = useState(false);
+    [rxHex, setRxHex] = useState(initialDisplay.rxHex === true),
+    [leftRxHex, setLeftRxHex] = useState(initialDisplay.leftRxHex === true),
+    [rightRxHex, setRightRxHex] = useState(initialDisplay.rightRxHex === true),
+    [lineEnding, setLineEnding] = useState<TerminalLineEnding>('none');
   const [history, setHistory] = useState<History[]>(loadHistory),
     [cycle, setCycle] = useState(false),
     [cycleMs, setCycleMs] = useState('1000');
+  const [shortcuts, setShortcuts] = useState<CommunicationShortcut[]>(loadCommunicationShortcuts),
+    [shortcutName, setShortcutName] = useState(''),
+    [shortcutLimit] = useState(loadCommunicationShortcutLimit),
+    [cyclingBySession, setCyclingBySession] = useState<Record<string, number[]>>({});
   const [available, setAvailable] = useState<boolean | null>(null),
     [error, setError] = useState(''),
     [filter, setFilter] = useState('');
@@ -58,6 +84,8 @@ export default function AgentNetworkDebugger() {
   const active = sessions.find((item) => item.id === activeId) ?? null;
   const left = split ? (sessions.find((item) => item.id === leftId) ?? null) : active;
   const right = split ? (sessions.find((item) => item.id === rightId) ?? null) : null;
+  const cyclingShortcutIds = activeId ? cyclingBySession[activeId] ?? [] : [];
+  const activeRxHex = split ? activeId === rightId ? rightRxHex : leftRxHex : rxHex;
 
   useEffect(() => {
     sessionRef.current = sessions;
@@ -65,6 +93,8 @@ export default function AgentNetworkDebugger() {
   useEffect(() => {
     localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
   }, [history]);
+  useEffect(() => { localStorage.setItem(COMMUNICATION_SHORTCUTS_KEY, JSON.stringify(shortcuts)); }, [shortcuts]);
+  useEffect(() => { localStorage.setItem(DISPLAY_SETTINGS_KEY, JSON.stringify({ version: 1, rxHex, leftRxHex, rightRxHex })); }, [leftRxHex, rightRxHex, rxHex]);
   const detectAgent = useCallback(async () => {
     setAvailable(null);
     try {
@@ -88,7 +118,7 @@ export default function AgentNetworkDebugger() {
       try {
         const result = await listNetworkSessions();
         if (stopped) return;
-        const restored = result.map((item) => ({ ...item, logs: item.events }));
+        const restored = result.map((item) => ({ ...item, logs: appendNetworkLogs([], item.events, item.type), rawEvents: item.events.slice(-MAX_RAW_EVENTS) }));
         restored.forEach((item) => {
           const latest = item.logs[item.logs.length - 1]?.id ?? 0;
           lastIds.current.set(item.id, latest);
@@ -123,7 +153,8 @@ export default function AgentNetworkDebugger() {
                 old.id === item.id
                   ? {
                       ...current,
-                      logs: [...old.logs, ...current.events].slice(-MAX_TERMINAL_LOGS),
+                      logs: appendNetworkLogs(old.logs, current.events, current.type),
+                      rawEvents: [...old.rawEvents, ...current.events].slice(-MAX_RAW_EVENTS),
                     }
                   : old,
               ),
@@ -164,8 +195,10 @@ export default function AgentNetworkDebugger() {
         rxBytes: data.rxBytes,
         txBytes: data.txBytes,
         clientCount: data.clientCount,
-        logs: data.events,
+        logs: appendNetworkLogs([], data.events, data.type),
+        rawEvents: data.events.slice(-MAX_RAW_EVENTS),
       };
+      setCycle(false);
       setSessions((all) => [...all, created]);
       setActiveId(data.id);
     } catch (reason) {
@@ -176,6 +209,7 @@ export default function AgentNetworkDebugger() {
     await closeNetworkSession(id).catch(() => undefined);
     lastIds.current.delete(id);
     setCycle(false);
+    setCyclingBySession((all) => { const next = { ...all }; delete next[id]; return next; });
     setSessions((all) => {
       const remaining = all.filter((item) => item.id !== id);
       setActiveId((current) => (current === id ? (remaining[0]?.id ?? null) : current));
@@ -185,21 +219,27 @@ export default function AgentNetworkDebugger() {
       return remaining;
     });
   }, []);
-  const send = useCallback(
-    async (data: string, encoding: 'text' | 'hex', clear: boolean) => {
-      const target = sessionRef.current.find((item) => item.id === activeId);
-      if (!target || !data) return;
+  const sendTo = useCallback(
+    async (sessionId: string, data: string, encoding: 'text' | 'hex', clear: boolean) => {
+      const target = sessionRef.current.find((item) => item.id === sessionId);
+      const targetCanSend = target?.state === 'connected' && (target.mode === 'client' || (target.type === 'tcp' && (target.clientCount || 0) > 0) || (target.type === 'udp' && target.rxBytes > 0));
+      if (!target || !targetCanSend || !data) return;
       try {
-        await sendNetworkData(target.id, data, encoding);
+        await sendNetworkData(target.id, encoding === 'text' ? appendTerminalLineEnding(data, lineEnding) : data, encoding);
         setHistory((all) => [{ data, hex: encoding === 'hex' }, ...all.filter((item) => item.data !== data || item.hex !== (encoding === 'hex'))].slice(0, 30));
         if (clear) setInput('');
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : String(reason));
         setCycle(false);
+        setCyclingBySession(all => ({ ...all, [sessionId]: [] }));
       }
     },
-    [activeId],
+    [lineEnding],
   );
+  const send = useCallback(async (data: string, encoding: 'text' | 'hex', clear: boolean) => { if (activeId) await sendTo(activeId, data, encoding, clear); }, [activeId, sendTo]);
+  const toggleShortcutCycle = (shortcutId: number) => { if (!activeId) return; setCyclingBySession(all => { const ids = all[activeId] ?? [], enabled = ids.includes(shortcutId); return { ...all, [activeId]: enabled ? ids.filter(id => id !== shortcutId) : [...ids, shortcutId] }; }); };
+  const addShortcut = () => { if (!input.trim() || shortcuts.length >= shortcutLimit) return; setShortcuts(all => [...all, { id: Date.now(), name: shortcutName.trim() || input.slice(0, 16), value: input, hex: hexMode, intervalMs: 1000 }]); setShortcutName(''); };
+  const deleteShortcut = (shortcutId: number) => { setShortcuts(all => all.filter(item => item.id !== shortcutId)); setCyclingBySession(all => Object.fromEntries(Object.entries(all).map(([id, ids]) => [id, ids.filter(value => value !== shortcutId)]))); };
 
   const online = active?.state === 'connected';
   const canSend = Boolean(online && (active?.mode === 'client' || (active?.type === 'tcp' && (active.clientCount || 0) > 0) || (active?.type === 'udp' && active.rxBytes > 0)));
@@ -223,6 +263,7 @@ export default function AgentNetworkDebugger() {
     const timer = setInterval(() => void send(input, hexMode ? 'hex' : 'text', false), Math.max(100, Number(cycleMs) || 1000));
     return () => clearInterval(timer);
   }, [canSend, cycle, cycleMs, hexMode, input, send]);
+  useEffect(() => { const timers = Object.entries(cyclingBySession).flatMap(([sessionId, ids]) => shortcuts.filter(item => ids.includes(item.id)).map(item => window.setInterval(() => void sendTo(sessionId, item.value, item.hex ? 'hex' : 'text', false), item.intervalMs))); return () => timers.forEach(timer => clearInterval(timer)); }, [cyclingBySession, sendTo, shortcuts]);
 
   const selectRole = (next: Role) => {
     const [, nextMode] = parts(next);
@@ -231,6 +272,7 @@ export default function AgentNetworkDebugger() {
     if (nextMode === 'client' && host === '0.0.0.0') setHost('127.0.0.1');
   };
   const choose = (item: Session) => {
+    setCycle(false);
     setActiveId(item.id);
     if (split) {
       if (activeId === rightId) setRightId(item.id);
@@ -238,6 +280,7 @@ export default function AgentNetworkDebugger() {
     }
   };
   const selectPane = (side: 'left' | 'right', id: string) => {
+    setCycle(false);
     if (side === 'left') setLeftId(id);
     else setRightId(id);
     setActiveId(id);
@@ -264,7 +307,7 @@ export default function AgentNetworkDebugger() {
       active.logs.map((item) => ({
         timestamp: item.timestamp,
         direction: item.direction,
-        text: item.direction === 'rx' && rxHex ? item.hex : item.text,
+        text: item.direction === 'rx' && activeRxHex ? item.hex : item.text,
       })),
       `${active.type}-${active.mode}`,
     );
@@ -272,12 +315,13 @@ export default function AgentNetworkDebugger() {
   const analyzeRx = () => {
     if (!active) return;
     try {
-      writePendingCommunicationCapture(createCommunicationCapture({ transport: active.type, sessionId: active.id, endpoint: title(active), events: active.logs }));
+      writePendingCommunicationCapture(createCommunicationCapture({ transport: active.type, sessionId: active.id, endpoint: title(active), events: active.rawEvents }));
       window.location.hash = '/toolbox/frame';
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
   };
-  const renderPane = (session: Session | null, logs: EventItem[], side: 'left' | 'right') => (
-    <div onClick={() => session && setActiveId(session.id)} className={`flex min-h-0 min-w-0 flex-col overflow-hidden border ${session?.id === activeId ? 'border-purple-500/70' : 'border-transparent'} ${split && side === 'right' ? 'lg:border-l-[#30363d]' : ''}`}>
+  const exportRaw = () => { if (active) downloadTerminalRaw(active.rawEvents, `${active.type}-${active.mode}-rx`); };
+  const renderPane = (session: Session | null, logs: ViewEvent[], side: 'left' | 'right', displayHex: boolean) => (
+    <div onClick={() => { if (session) { setCycle(false); setActiveId(session.id); } }} className={`flex min-h-0 min-w-0 flex-col overflow-hidden border ${session?.id === activeId ? 'border-purple-500/70' : 'border-transparent'} ${split && side === 'right' ? 'lg:border-l-[#30363d]' : ''}`}>
       {split && (
         <div className={`flex shrink-0 items-center gap-2 border-b px-2.5 py-1.5 ${session?.id === activeId ? 'border-purple-500/40 bg-purple-500/10' : 'border-[#30363d] bg-[#0b1016]'}`}>
           <select aria-label={`${side === 'left' ? '左侧' : '右侧'}网络会话`} value={session?.id ?? ''} onChange={(event) => selectPane(side, event.target.value)} className="min-w-0 flex-1 rounded border border-[#30363d] bg-[#161b22] px-2 py-1 text-[11px] text-gray-300">
@@ -291,14 +335,15 @@ export default function AgentNetworkDebugger() {
             RX {session?.rxBytes ?? 0} · TX {session?.txBytes ?? 0}
           </span>
           {session?.id === activeId && <span className="rounded bg-purple-500/15 px-1.5 py-0.5 text-[9px] text-purple-300">发送目标</span>}
+          <label className="ml-auto flex shrink-0 items-center gap-1 text-[10px] text-gray-400"><input type="checkbox" aria-label={`${side === 'left' ? '左侧' : '右侧'}网络窗口 HEX`} checked={displayHex} onChange={(event) => side === 'left' ? setLeftRxHex(event.target.checked) : setRightRxHex(event.target.checked)} />HEX</label>
         </div>
       )}
-      <div ref={side === 'left' ? leftOutput : rightOutput} className="min-h-0 flex-1 overflow-y-auto bg-[#090d12] px-3 py-3 font-mono text-[12px] leading-5 scrollbar-thin lg:px-4 lg:text-[13px]">
+      <div ref={side === 'left' ? leftOutput : rightOutput} data-testid={`network-terminal-${side}`} className="min-h-0 flex-1 overflow-y-auto bg-[#090d12] px-3 py-3 font-mono text-[12px] leading-5 scrollbar-thin lg:px-4 lg:text-[13px]">
         {logs.map((item) => (
           <div key={item.id} className="serial-terminal-row flex gap-2 rounded px-1">
             <span className="shrink-0 text-gray-700">{timestamps && formatTerminalTime(item.timestamp)}</span>
             <span className={`w-7 shrink-0 text-[10px] font-semibold ${item.direction === 'rx' ? 'text-green-500' : item.direction === 'tx' ? 'text-blue-400' : 'text-yellow-500'}`}>{terminalDirectionLabel(item.direction)}</span>
-            <span className="break-all whitespace-pre-wrap text-gray-300">{item.direction === 'rx' && rxHex ? item.hex : item.text}</span>
+            <span className="break-all whitespace-pre-wrap text-gray-300">{item.direction === 'rx' && displayHex ? item.hex : item.text}</span>
             {item.peer && <span className="ml-auto shrink-0 text-[10px] text-gray-700">{item.peer}</span>}
           </div>
         ))}
@@ -340,8 +385,8 @@ export default function AgentNetworkDebugger() {
               </span>
             </div>
             <div className={`grid min-h-0 flex-1 ${split ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
-              {renderPane(left, leftLogs, 'left')}
-              {split && renderPane(right, rightLogs, 'right')}
+              {renderPane(left, leftLogs, 'left', split ? leftRxHex : rxHex)}
+              {split && renderPane(right, rightLogs, 'right', rightRxHex)}
             </div>
           </div>
           <div className="shrink-0 border-t border-[#30363d] bg-[#0b1016] px-3 py-3">
@@ -358,9 +403,9 @@ export default function AgentNetworkDebugger() {
                 <label>
                   <input type="checkbox" checked={showTx} onChange={(event) => setShowTx(event.target.checked)} /> TX
                 </label>
-                <label>
+                {!split && <label>
                   <input type="checkbox" checked={rxHex} onChange={(event) => setRxHex(event.target.checked)} /> 接收 HEX
-                </label>
+                </label>}
                 <label>
                   <input type="checkbox" checked={timestamps} onChange={(event) => setTimestamps(event.target.checked)} /> 时间戳
                 </label>
@@ -370,12 +415,13 @@ export default function AgentNetworkDebugger() {
                 <label>
                   <input type="checkbox" checked={autoScroll} onChange={(event) => setAutoScroll(event.target.checked)} /> 跟随
                 </label>
-                <button onClick={analyzeRx} disabled={!active?.logs.some((item) => item.direction === 'rx')} title="将当前会话 RX 原始数据送入协议工作台" aria-label="用协议工作台解析 RX">
+                <button onClick={analyzeRx} disabled={!active?.rawEvents.some((item) => item.direction === 'rx')} title="将当前会话 RX 原始数据送入协议工作台" aria-label="用协议工作台解析 RX">
                   <Braces size={14} />
                 </button>
                 <button onClick={exportLogs} disabled={!active?.logs.length} title="导出日志">
                   <Download size={14} />
                 </button>
+                <button onClick={exportRaw} disabled={!active?.rawEvents.some(item => item.direction === 'rx')} title="导出 RX 原始数据">RAW</button>
                 <button onClick={() => activeId && setSessions((all) => all.map((item) => (item.id === activeId ? { ...item, logs: [] } : item)))} disabled={!active} title="清空当前会话显示">
                   <Trash2 size={14} />
                 </button>
@@ -454,6 +500,11 @@ export default function AgentNetworkDebugger() {
                 </div>
               </div>
               <div>
+                <div className="mb-2 flex max-h-20 flex-wrap gap-1 overflow-y-auto rounded border border-[#30363d] bg-[#090d12] p-2 scrollbar-thin">
+                  <span className="mr-1 self-center text-[10px] font-semibold text-gray-500">快捷指令</span>
+                  {shortcuts.map(item => { const cycling = cyclingShortcutIds.includes(item.id); return <div key={item.id} className={`flex overflow-hidden rounded border ${cycling ? 'border-green-500/50 bg-green-500/10' : 'border-[#30363d] bg-[#161b22]'}`}><button onClick={() => activeId && void sendTo(activeId, item.value, item.hex ? 'hex' : 'text', false)} disabled={!canSend} className="max-w-32 truncate px-2 py-1 text-[11px] text-gray-300 disabled:opacity-40">{item.name}{item.hex && <small className="ml-1 text-purple-400">HEX</small>}</button><button onClick={() => toggleShortcutCycle(item.id)} disabled={!canSend && !cycling} className={`border-l border-[#30363d] px-1.5 disabled:opacity-40 ${cycling ? 'text-green-400' : 'text-gray-600'}`} title={cycling ? '停止周期发送' : `每 ${item.intervalMs}ms 周期发送`}><Clock3 size={10} /></button><button onClick={() => deleteShortcut(item.id)} className="border-l border-[#30363d] px-1.5 text-gray-600 hover:text-red-400" title="删除快捷指令"><X size={10} /></button></div>; })}
+                  {!shortcuts.length && <span className="text-[10px] text-gray-700">输入内容后可保存为快捷指令</span>}
+                </div>
                 <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-gray-500">
                   <span className="rounded-md border border-purple-500/25 bg-purple-500/10 px-2 py-1 text-purple-300">
                     发送到：
@@ -462,6 +513,7 @@ export default function AgentNetworkDebugger() {
                   <label>
                     <input type="checkbox" checked={hexMode} onChange={(event) => setHexMode(event.target.checked)} /> 发送 HEX
                   </label>
+                  <select aria-label="发送行尾" value={lineEnding} disabled={hexMode} onChange={(event) => setLineEnding(event.target.value as TerminalLineEnding)} className="rounded border border-[#30363d] bg-[#161b22] px-2 py-1 disabled:opacity-40"><option value="none">不追加行尾</option><option value="crlf">CRLF</option><option value="cr">CR</option><option value="lf">LF</option></select>
                   <label>
                     <input type="checkbox" checked={cycle} onChange={(event) => setCycle(event.target.checked)} disabled={!canSend || !input} /> 循环发送
                   </label>
@@ -490,6 +542,7 @@ export default function AgentNetworkDebugger() {
                   )}
                 </div>
                 <div className="flex gap-2">
+                  <input value={shortcutName} onChange={(event) => setShortcutName(event.target.value)} placeholder="快捷指令名称" className="w-28 rounded-lg border border-[#30363d] bg-[#161b22] px-2 py-2 text-xs outline-none" />
                   <input
                     value={input}
                     onChange={(event) => setInput(event.target.value)}
@@ -504,6 +557,7 @@ export default function AgentNetworkDebugger() {
                     <Send size={14} />
                     发送
                   </button>
+                  <button onClick={addShortcut} disabled={!input.trim() || shortcuts.length >= shortcutLimit} className="rounded-lg border border-[#30363d] px-2 text-xs text-gray-300 disabled:opacity-40" title="保存快捷指令"><Plus size={13} /></button>
                 </div>
               </div>
             </div>

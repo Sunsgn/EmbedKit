@@ -98,6 +98,21 @@ describe('WebSocketDebugger independent transport', () => {
     expect(screen.getByText('01 02 FF')).toBeVisible();
   });
 
+  it('reuses shared shortcuts and applies an explicit text line ending', () => {
+    render(<WebSocketDebugger />);
+    fireEvent.click(screen.getByRole('button', { name: '连接' }));
+    const socket = FakeWebSocket.instances[0];
+    act(() => socket.open());
+    fireEvent.change(screen.getByLabelText('发送行尾'), { target: { value: 'crlf' } });
+    fireEvent.change(screen.getByPlaceholderText('快捷指令名称'), { target: { value: '心跳' } });
+    fireEvent.change(screen.getByPlaceholderText('输入文本，Enter 发送'), { target: { value: 'AT' } });
+    fireEvent.click(screen.getByTitle('保存快捷指令'));
+    fireEvent.click(screen.getByRole('button', { name: '心跳' }));
+
+    expect(socket.sent).toEqual(['AT\r\n']);
+    expect(screen.getByTitle('每 1000ms 周期发送')).toBeEnabled();
+  });
+
   it('hands received frames to the protocol workspace', () => {
     render(<WebSocketDebugger />);
     fireEvent.click(screen.getByRole('button', { name: '连接' }));

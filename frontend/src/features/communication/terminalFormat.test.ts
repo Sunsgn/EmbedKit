@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  appendTerminalLineEnding,
   formatTerminalLog,
   formatTerminalTime,
   safeTerminalFileName,
   terminalDirectionLabel,
+  terminalRxBytes,
   utf8ByteLength,
 } from "./terminalFormat";
 
@@ -27,5 +29,15 @@ describe("communication terminal formatting", () => {
     expect(safeTerminalFileName("tcp:127.0.0.1/9000")).toBe(
       "tcp-127.0.0.1-9000",
     );
+  });
+
+  it("appends one explicit network line ending without duplicating an existing ending", () => {
+    expect(appendTerminalLineEnding("AT", "crlf")).toBe("AT\r\n");
+    expect(appendTerminalLineEnding("AT\n", "crlf")).toBe("AT\r\n");
+    expect(appendTerminalLineEnding("AT", "none")).toBe("AT");
+  });
+
+  it("reconstructs RAW RX bytes without display text or TX data", () => {
+    expect([...terminalRxBytes([{ direction: "rx", hex: "AA 0D 0A" }, { direction: "tx", hex: "FF" }, { direction: "rx", hex: "55" }])]).toEqual([0xaa, 0x0d, 0x0a, 0x55]);
   });
 });
