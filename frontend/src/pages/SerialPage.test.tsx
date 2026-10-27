@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import SerialPage from './SerialPage';
 
@@ -50,6 +50,40 @@ describe('SerialPage browser-direct mode', () => {
     const stored = JSON.parse(sessionStorage.getItem('embedkit.communication-capture.pending') || '{}');
     expect(stored).toMatchObject({ transport: 'serial', byteLength: 14 });
     expect(stored.records[0].hex).toBe('64 65 76 69 63 65 20 72 65 61 64 79 0D 0A');
+    view.unmount();
+  });
+
+  it('keeps HEX display independent for the left and right split panes', async () => {
+    const createPort = (text: string) => ({
+      readable: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode(`${text}\n`)); } }),
+      writable: new WritableStream<Uint8Array>(),
+      open: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      getInfo: () => ({}),
+      setSignals: vi.fn().mockResolvedValue(undefined),
+    });
+    const requestPort = vi.fn().mockResolvedValueOnce(createPort('left')).mockResolvedValueOnce(createPort('right'));
+    Object.defineProperty(navigator, 'serial', { configurable: true, value: { requestPort, addEventListener: vi.fn(), removeEventListener: vi.fn() } });
+
+    const view = render(<SerialPage />);
+    fireEvent.click(screen.getByRole('button', { name: /添加/ }));
+    expect(await screen.findByText('left')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: /添加/ }));
+    expect(await screen.findByText('right')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '双窗口' }));
+
+    const leftTerminal = screen.getByTestId('browser-serial-terminal-left');
+    const rightTerminal = screen.getByTestId('browser-serial-terminal-right');
+    const leftHex = screen.getByRole('checkbox', { name: '左侧窗口 HEX' });
+    const rightHex = screen.getByRole('checkbox', { name: '右侧窗口 HEX' });
+    expect(leftHex).not.toBeChecked();
+    expect(rightHex).not.toBeChecked();
+
+    fireEvent.click(leftHex);
+    expect(within(leftTerminal).getByText('72 69 67 68 74')).toBeVisible();
+    expect(within(rightTerminal).getByText('left')).toBeVisible();
+    expect(rightHex).not.toBeChecked();
+    expect(JSON.parse(localStorage.getItem('embedkit.serial.settings') || '{}')).toMatchObject({ version: 2, leftRxHex: true, rightRxHex: false });
     view.unmount();
   });
 });

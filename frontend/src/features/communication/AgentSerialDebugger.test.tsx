@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AgentSerialDebugger from './AgentSerialDebugger';
 import * as serialAgent from '../../services/serialAgent';
@@ -17,6 +17,7 @@ vi.mock('../../services/serialAgent', () => ({
 describe('AgentSerialDebugger independent degradation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     sessionStorage.clear();
     window.location.hash = '';
     vi.mocked(serialAgent.listSerialPorts).mockReset();
@@ -77,5 +78,36 @@ describe('AgentSerialDebugger independent degradation', () => {
     fireEvent.click(analyze);
     const stored = JSON.parse(sessionStorage.getItem('embedkit.communication-capture.pending') || '{}');
     expect(stored).toMatchObject({ transport: 'serial', sessionId: 'session-rx', endpoint: 'COM7 · 115200 8N1', byteLength: 4 });
+  });
+
+  it('keeps HEX display independent for the left and right split panes', async () => {
+    const createSession = (id: string, path: string, text: string, hex: string) => ({
+      id, path, baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false,
+      state: 'connected' as const, rxBytes: text.length, txBytes: 0, openedAt: '2026-10-27T00:00:00Z',
+      events: [{ id: 1, timestamp: '2026-10-27T00:00:01Z', direction: 'rx' as const, text, hex, byteLength: text.length }],
+    });
+    const leftSession = createSession('session-left', 'COM1', 'left', '6C 65 66 74');
+    const rightSession = createSession('session-right', 'COM2', 'right', '72 69 67 68 74');
+    vi.mocked(serialAgent.listSerialPorts).mockResolvedValue([]);
+    vi.mocked(serialAgent.listSerialSessions).mockResolvedValue([leftSession, rightSession]);
+    vi.mocked(serialAgent.readSerialSession).mockImplementation(() => new Promise(() => undefined));
+
+    render(<AgentSerialDebugger />);
+    const splitButton = await screen.findByRole('button', { name: '双窗口' });
+    await waitFor(() => expect(splitButton).toBeEnabled());
+    fireEvent.click(splitButton);
+
+    const leftTerminal = screen.getByTestId('agent-serial-terminal-left');
+    const rightTerminal = screen.getByTestId('agent-serial-terminal-right');
+    const leftHex = screen.getByRole('checkbox', { name: '左侧窗口 HEX' });
+    const rightHex = screen.getByRole('checkbox', { name: '右侧窗口 HEX' });
+    expect(leftHex).not.toBeChecked();
+    expect(rightHex).not.toBeChecked();
+
+    fireEvent.click(leftHex);
+    expect(within(leftTerminal).getByText('6C 65 66 74')).toBeVisible();
+    expect(within(rightTerminal).getByText('right')).toBeVisible();
+    expect(rightHex).not.toBeChecked();
+    expect(JSON.parse(localStorage.getItem('embedkit.serial.settings') || '{}')).toMatchObject({ version: 2, leftRxHex: true, rightRxHex: false });
   });
 });
