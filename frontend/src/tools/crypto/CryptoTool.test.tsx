@@ -55,7 +55,7 @@ describe("CryptoTool", () => {
     expect(screen.getByRole("status")).toHaveTextContent("核对一致 · 9 字节");
   });
 
-  it("explains IV requirements and allows an explicit zero IV for legacy verification", async () => {
+  it("explains IV requirements and allows an explicit zero IV", async () => {
     render(<CryptoTool />);
     await waitFor(() => expect(screen.getByText("AES-128 ECB 通过")).toBeVisible());
 
@@ -66,7 +66,7 @@ describe("CryptoTool", () => {
 
     fireEvent.click(screen.getByLabelText("使用全零IV"));
     expect(screen.getByLabelText("密码向量")).toBeDisabled();
-    expect(screen.getByText(/本次计算明确使用全零IV/)).toBeVisible();
+    expect(screen.getByText("本次计算明确使用全零IV，请确认与设备或协议的参数一致。")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "执行加密" }));
     await waitFor(() => expect(screen.getByLabelText("密码输出")).toBeVisible());
 
