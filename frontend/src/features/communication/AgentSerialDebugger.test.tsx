@@ -68,7 +68,7 @@ describe('AgentSerialDebugger independent degradation', () => {
   });
 
   it('hands real RX bytes to the protocol workspace with source context', async () => {
-    const session = { id: 'session-rx', path: 'COM7', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false, state: 'connected' as const, rxBytes: 4, txBytes: 0, openedAt: '2026-10-15T00:00:00Z', events: [{ id: 1, timestamp: '2026-10-15T00:00:01Z', direction: 'rx' as const, text: '', hex: 'AA 55 01 00', byteLength: 4 }] };
+    const session = { id: 'session-rx', path: 'COM7', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false, frameMode: 'raw' as const, state: 'connected' as const, rxBytes: 4, txBytes: 0, openedAt: '2026-10-15T00:00:00Z', events: [{ id: 1, timestamp: '2026-10-15T00:00:01Z', direction: 'rx' as const, text: '', hex: 'AA 0D 0A 55', byteLength: 4 }] };
     vi.mocked(serialAgent.listSerialPorts).mockResolvedValue([]);
     vi.mocked(serialAgent.listSerialSessions).mockResolvedValue([session]);
     vi.mocked(serialAgent.readSerialSession).mockImplementation(() => new Promise(() => undefined));
@@ -79,6 +79,8 @@ describe('AgentSerialDebugger independent degradation', () => {
     fireEvent.click(analyze);
     const stored = JSON.parse(sessionStorage.getItem('embedkit.communication-capture.pending') || '{}');
     expect(stored).toMatchObject({ transport: 'serial', sessionId: 'session-rx', endpoint: 'COM7 · 115200 8N1', byteLength: 4 });
+    expect(stored.records).toHaveLength(1);
+    expect(stored.records[0].hex).toBe('AA 0D 0A 55');
   });
 
   it('keeps HEX display independent for the left and right split panes', async () => {
@@ -112,7 +114,7 @@ describe('AgentSerialDebugger independent degradation', () => {
     expect(JSON.parse(localStorage.getItem('embedkit.serial.settings') || '{}')).toMatchObject({ version: 3, leftRxHex: true, rightRxHex: false });
   });
 
-  it('merges raw Local Agent chunks into one continuous RX display without waiting', async () => {
+  it('uses CR/LF and report gaps as Local Agent display boundaries without waiting', async () => {
     const session = {
       id: 'session-stream', path: 'COM8', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false,
       frameMode: 'raw' as const, frameGapMs: 30, state: 'connected' as const, rxBytes: 28, txBytes: 0, openedAt: '2026-10-27T00:00:00Z',
@@ -128,8 +130,10 @@ describe('AgentSerialDebugger independent degradation', () => {
 
     render(<AgentSerialDebugger />);
     const terminal = await screen.findByTestId('agent-serial-terminal-left');
-    await waitFor(() => expect(terminal.textContent).toContain('first line\r\nsecond line'));
+    await waitFor(() => expect(terminal.textContent).toContain('second line'));
+    expect(within(terminal).getByText('first line')).toBeVisible();
+    expect(within(terminal).getByText('second line')).toBeVisible();
     expect(terminal.textContent).toContain('third');
-    expect(within(terminal).getAllByText('RX')).toHaveLength(2);
+    expect(within(terminal).getAllByText('RX')).toHaveLength(3);
   });
 });

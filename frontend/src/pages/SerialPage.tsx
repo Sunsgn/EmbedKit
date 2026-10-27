@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Braces, Check, Clock3, Download, FileUp, Pause, Pencil, Play, Plus, Radio, Search, Send, Settings, Square, Trash2, Wifi, WifiOff, X } from 'lucide-react';
 import { COMMUNICATION_CAPTURE_MAX_BYTES, createCommunicationCapture, writePendingCommunicationCapture, type CaptureEventInput } from '../services/communicationCapture';
+import { isCrLfContinuation, mayMergeSerialDisplay, splitSerialDisplayBytes } from '../services/serialDisplay';
 
 type Parity = 'none' | 'even' | 'odd';
 type FlowControl = 'none' | 'hardware';
@@ -10,7 +11,7 @@ type FrameMode = 'auto' | 'line' | 'idle' | 'fixed' | 'raw';
 interface PortInfo { usbVendorId?: number; usbProductId?: number; bluetoothServiceClassId?: string }
 interface Port extends EventTarget { name?: string; path?: string; readable: ReadableStream<Uint8Array> | null; writable: WritableStream<Uint8Array> | null; open(o: { baudRate: number; dataBits: number; stopBits: number; parity: Parity; flowControl: FlowControl; bufferSize?: number }): Promise<void>; close(): Promise<void>; getInfo(): PortInfo; setSignals?(s: { dataTerminalReady?: boolean; requestToSend?: boolean }): Promise<void> }
 interface SerialManager extends EventTarget { requestPort(): Promise<Port> }
-interface Entry { id: number; timestamp: string; lastReceivedAt: number; direction: Direction; text: string; bytes?: number[] }
+interface Entry { id: number; timestamp: string; lastReceivedAt: number; direction: Direction; text: string; bytes?: number[]; closed?: boolean }
 interface Shortcut { id: number; name: string; value: string; hex: boolean; intervalMs?: number }
 interface Session { id: number; name: string; state: State; baud: number; config: string; entries: Entry[]; rx: number; tx: number; rate: number; paused: number; captureBytes: number }
 interface Runtime { port: Port; reader: ReadableStreamDefaultReader<Uint8Array> | null; reading: boolean; writing: boolean; buffer: number[]; timer: number | null; lastBytes: number; lastTime: number }
@@ -18,7 +19,6 @@ interface RawCapture { events: CaptureEventInput[]; byteLength: number; truncate
 
 const MAX_ENTRIES = 5000;
 const MAX_MERGED_RX_BYTES = 64 * 1024;
-const RX_BURST_MERGE_MS = 200;
 const settingsKey = 'embedkit.serial.settings';
 const shortcutsKey = 'embedkit.serial.shortcuts';
 const shortcutLimitKey = 'embedkit.serial.shortcut-limit';
@@ -68,22 +68,42 @@ export default function SerialPage() {
   useEffect(() => { localStorage.setItem(shortcutsKey, JSON.stringify(shortcuts)); }, [shortcuts]);
   useEffect(() => { localStorage.setItem(shortcutLimitKey, String(shortcutLimit)); }, [shortcutLimit]);
 
-  const append = useCallback((id: number, text: string, direction: Direction, bytes?: Uint8Array, mergeRx = false) => update(id, (s) => {
-    const incoming = bytes ? [...bytes] : undefined, last = s.entries[s.entries.length - 1], receivedAt = Date.now();
-    if (mergeRx && direction === 'rx' && incoming && last?.direction === 'rx' && last.bytes && receivedAt - last.lastReceivedAt <= RX_BURST_MERGE_MS && last.bytes.length + incoming.length <= MAX_MERGED_RX_BYTES) {
-      const merged = [...last.bytes, ...incoming], entries = [...s.entries.slice(0, -1), { ...last, lastReceivedAt: receivedAt, text: new TextDecoder().decode(new Uint8Array(merged)), bytes: merged }];
-      return { ...s, entries };
-    }
+  const append = useCallback((id: number, text: string, direction: Direction, bytes?: Uint8Array) => update(id, (s) => {
+    const incoming = bytes ? [...bytes] : undefined, receivedAt = Date.now();
     return { ...s, entries: [...s.entries, { id: ++entrySeq.current, timestamp: now(), lastReceivedAt: receivedAt, direction, text, bytes: incoming }].slice(-MAX_ENTRIES) };
   }), [update]);
-  const emit = useCallback((id: number, bytes: number[], mergeRx = false) => {
+  const emit = useCallback((id: number, bytes: number[]) => {
     if (!bytes.length) return; const data = new Uint8Array(bytes), text = new TextDecoder().decode(data);
-    if (pausedRef.current) update(id, (s) => ({ ...s, paused: s.paused + data.length })); else append(id, text, 'rx', data, mergeRx);
+    if (pausedRef.current) update(id, (s) => ({ ...s, paused: s.paused + data.length })); else append(id, text, 'rx', data);
   }, [append, update]);
+  const appendContinuous = useCallback((id: number, chunk: Uint8Array) => {
+    if (!chunk.length) return;
+    if (pausedRef.current) { update(id, (s) => ({ ...s, paused: s.paused + chunk.length })); return; }
+    const receivedAt = Date.now();
+    update(id, (session) => {
+      let source = [...chunk], entries = [...session.entries], last = entries[entries.length - 1];
+      if (last?.direction === 'rx' && last.bytes && isCrLfContinuation(last.bytes, source)) {
+        const bytes = [...last.bytes, source[0]];
+        entries[entries.length - 1] = { ...last, lastReceivedAt: receivedAt, text: new TextDecoder().decode(new Uint8Array(bytes)), bytes, closed: true };
+        source = source.slice(1);
+      }
+      for (const segment of splitSerialDisplayBytes(source)) {
+        last = entries[entries.length - 1];
+        const canMerge = last?.direction === 'rx' && last.bytes && mayMergeSerialDisplay(last.closed === true, last.lastReceivedAt, receivedAt) && last.bytes.length + segment.bytes.length <= MAX_MERGED_RX_BYTES;
+        if (canMerge) {
+          const bytes = [...last.bytes!, ...segment.bytes];
+          entries[entries.length - 1] = { ...last, lastReceivedAt: receivedAt, text: new TextDecoder().decode(new Uint8Array(bytes)), bytes, closed: segment.closed };
+        } else {
+          entries.push({ id: ++entrySeq.current, timestamp: now(), lastReceivedAt: receivedAt, direction: 'rx', text: new TextDecoder().decode(new Uint8Array(segment.bytes)), bytes: segment.bytes, closed: segment.closed });
+        }
+      }
+      return { ...session, entries: entries.slice(-MAX_ENTRIES) };
+    });
+  }, [update]);
   const flush = useCallback((id: number) => { const r = runtimes.current.get(id); if (r?.buffer.length) { const b = r.buffer; r.buffer = []; emit(id, b); } }, [emit]);
   const process = useCallback((id: number, chunk: Uint8Array) => {
     const r = runtimes.current.get(id); if (!r) return; const mode = modeRef.current;
-    if (mode === 'raw') return emit(id, [...chunk], true); r.buffer.push(...chunk);
+    if (mode === 'raw') return appendContinuous(id, chunk); r.buffer.push(...chunk);
     if (mode === 'fixed') { while (r.buffer.length >= lengthRef.current) emit(id, r.buffer.splice(0, lengthRef.current)); return; }
     if (mode === 'idle') { if (r.timer !== null) clearTimeout(r.timer); r.timer = window.setTimeout(() => { r.timer = null; flush(id); }, gapRef.current); return; }
     for (;;) { const at = r.buffer.findIndex((b) => b === 10 || b === 13); if (at < 0) break; const frame = r.buffer.splice(0, at); while (r.buffer[0] === 10 || r.buffer[0] === 13) r.buffer.shift(); if (frame.length) emit(id, frame); }
@@ -93,7 +113,7 @@ export default function SerialPage() {
       if (r.timer !== null) clearTimeout(r.timer);
       r.timer = window.setTimeout(() => { r.timer = null; flush(id); }, gapRef.current);
     }
-  }, [emit, flush]);
+  }, [appendContinuous, emit, flush]);
   const changeFrameMode = (next: FrameMode) => {
     for (const [id, runtime] of runtimes.current) {
       const buffered = drainRuntimeBuffer(runtime);
@@ -191,7 +211,7 @@ export default function SerialPage() {
   const shown = useMemo(() => visibleEntries(leftPane, filter, leftDisplayHex, showRx, showTx), [filter, leftDisplayHex, leftPane, showRx, showTx]);
   const secondaryShown = useMemo(() => visibleEntries(rightPane, filter, rightDisplayHex, showRx, showTx), [filter, rightDisplayHex, rightPane, showRx, showTx]);
   const save = (format: 'txt' | 'csv') => { if (!active?.entries.length) return; const content = format === 'csv' ? ['timestamp,port,direction,length,data', ...active.entries.map((e) => [e.timestamp, `"${active.name}"`, e.direction, e.bytes?.length ?? new TextEncoder().encode(e.text).length, `"${(e.bytes ? hex(e.bytes) : e.text).replace(/"/g, '""')}"`].join(','))].join('\n') : active.entries.map((e) => `[${e.timestamp}] [${active.name}] [${e.direction.toUpperCase()}] ${e.bytes && activeDisplayHex ? hex(e.bytes) : e.text}`).join('\n'); const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' })); const a = document.createElement('a'); a.href = url; a.download = `serial-${active.id}.${format}`; a.click(); URL.revokeObjectURL(url); };
-  const saveRaw = () => { if (!active) return; const bytes = active.entries.filter((e) => e.direction === 'rx' && e.bytes).flatMap((e) => e.bytes!); if (!bytes.length) return; const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' })); const a = document.createElement('a'); a.href = url; a.download = `serial-${active.id}-rx.bin`; a.click(); URL.revokeObjectURL(url); };
+  const saveRaw = () => { if (!active) return; const capture = rawCaptures.current.get(active.id); const bytes = capture?.events.filter((event) => event.direction === 'rx').flatMap((event) => ((event.hex ?? '').match(/[\dA-F]{2}/gi) ?? []).map((value) => Number.parseInt(value, 16))) ?? []; if (!bytes.length) return; const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' })); const a = document.createElement('a'); a.href = url; a.download = `serial-${active.id}-rx.bin`; a.click(); URL.revokeObjectURL(url); };
   const analyzeRx = () => {
     if (!active) return;
     try {

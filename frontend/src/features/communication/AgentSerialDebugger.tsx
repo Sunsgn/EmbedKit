@@ -3,30 +3,47 @@ import { Braces, Check, Clock3, Download, FlaskConical, Pencil, PlugZap, Plus, R
 import { closeSerialSession, listSerialPorts, listSerialSessions, openSerialSession, readSerialSession, sendSerialData, setSerialSignals, updateSerialBaudRate, type SerialAgentEvent, type SerialAgentPort, type SerialAgentSession, type SerialFrameMode } from '../../services/serialAgent';
 import { createCommunicationCapture, writePendingCommunicationCapture } from '../../services/communicationCapture';
 import { writeSerialTestSessionHandoff } from '../../services/testSessionHandoff';
+import { isCrLfContinuation, mayMergeSerialDisplay, splitSerialDisplayBytes } from '../../services/serialDisplay';
 
-interface ViewEvent extends SerialAgentEvent { receivedThrough?: string }
-interface ViewSession extends Omit<SerialAgentSession, 'events'> { logs: ViewEvent[] }
+interface ViewEvent extends SerialAgentEvent { receivedThrough?: string; closed?: boolean }
+interface ViewSession extends Omit<SerialAgentSession, 'events'> { logs: ViewEvent[]; rawEvents: SerialAgentEvent[] }
 interface Shortcut { id: number; name: string; value: string; hex: boolean; intervalMs: number }
 type LineEnding = 'none' | 'cr' | 'lf' | 'crlf';
 const shortcutsKey = 'embedkit.serial.shortcuts';
 const shortcutLimitKey = 'embedkit.serial.shortcut-limit';
 const serialSettingsKey = 'embedkit.serial.settings';
 const maxAgentLogs = 5000;
+const maxAgentRawEvents = 20000;
 const maxMergedRxBytes = 64 * 1024;
-const rxBurstMergeMs = 200;
 const appendEnding = (value: string, ending: LineEnding) => ending === 'none' ? value : `${value.replace(/(?:\r\n|\r|\n)$/, '')}${ending === 'crlf' ? '\r\n' : ending === 'cr' ? '\r' : '\n'}`;
 const loadShortcuts = (): Shortcut[] => { try { return (JSON.parse(localStorage.getItem(shortcutsKey) || '[]') as Array<Partial<Shortcut>>).filter(item => item.name && item.value).map(item => ({ id: Number(item.id) || Date.now() + Math.random(), name: String(item.name), value: String(item.value), hex: item.hex === true, intervalMs: Math.max(100, Math.min(60000, Number(item.intervalMs) || 1000)) })); } catch { return []; } };
 const loadShortcutLimit = () => Math.max(1, Math.min(100, Number(localStorage.getItem(shortcutLimitKey)) || 20));
 const loadDisplaySettings = () => { try { return JSON.parse(localStorage.getItem(serialSettingsKey) || '{}') as Record<string, unknown>; } catch { return {}; } };
 const formatTimestamp = (value: string) => { const date = new Date(value), pad = (part: number, length = 2) => String(part).padStart(length, '0'); return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`; };
 const decodeHex = (value: string) => new TextDecoder().decode(new Uint8Array((value.match(/[\dA-F]{2}/gi) ?? []).map(byte => Number.parseInt(byte, 16))));
-const appendAgentLogs = (existing: ViewEvent[], incoming: SerialAgentEvent[], mergeRawRx: boolean) => incoming.reduce<ViewEvent[]>((logs, event) => {
-  const last = logs[logs.length - 1], elapsed = Date.parse(event.timestamp) - Date.parse(last?.receivedThrough ?? last?.timestamp ?? '');
-  if (mergeRawRx && event.direction === 'rx' && last?.direction === 'rx' && elapsed >= 0 && elapsed <= rxBurstMergeMs && last.byteLength + event.byteLength <= maxMergedRxBytes) {
-    const hex = `${last.hex} ${event.hex}`.trim();
-    return [...logs.slice(0, -1), { ...event, timestamp: last.timestamp, receivedThrough: event.timestamp, text: decodeHex(hex), hex, byteLength: last.byteLength + event.byteLength }];
+const hexBytes = (value: string) => (value.match(/[\dA-F]{2}/gi) ?? []).map(byte => Number.parseInt(byte, 16));
+const bytesHex = (bytes: number[]) => bytes.map(byte => byte.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+const toViewEvent = (event: SerialAgentEvent, bytes: number[], index: number, closed: boolean): ViewEvent => {
+  const hex = bytesHex(bytes);
+  return { ...event, id: event.id + index / 1000, text: decodeHex(hex), hex, byteLength: bytes.length, closed };
+};
+const appendAgentLogs = (existing: ViewEvent[], incoming: SerialAgentEvent[], segmentRawRx: boolean) => incoming.reduce<ViewEvent[]>((logs, event) => {
+  if (!segmentRawRx || event.direction !== 'rx') return [...logs, { ...event, closed: true }].slice(-maxAgentLogs);
+  let bytes = hexBytes(event.hex), next = [...logs], last = next[next.length - 1], segmentIndex = 0;
+  if (last?.direction === 'rx' && isCrLfContinuation(hexBytes(last.hex), bytes)) {
+    const mergedBytes = [...hexBytes(last.hex), bytes[0]], hex = bytesHex(mergedBytes);
+    next[next.length - 1] = { ...last, receivedThrough: event.timestamp, text: decodeHex(hex), hex, byteLength: mergedBytes.length, closed: true };
+    bytes = bytes.slice(1);
   }
-  return [...logs, event].slice(-maxAgentLogs);
+  for (const segment of splitSerialDisplayBytes(bytes)) {
+    last = next[next.length - 1];
+    const lastReceivedAt = Date.parse(last?.receivedThrough ?? last?.timestamp ?? ''), receivedAt = Date.parse(event.timestamp);
+    if (last?.direction === 'rx' && mayMergeSerialDisplay(last.closed === true, lastReceivedAt, receivedAt) && last.byteLength + segment.bytes.length <= maxMergedRxBytes) {
+      const mergedBytes = [...hexBytes(last.hex), ...segment.bytes], hex = bytesHex(mergedBytes);
+      next[next.length - 1] = { ...last, receivedThrough: event.timestamp, text: decodeHex(hex), hex, byteLength: mergedBytes.length, closed: segment.closed };
+    } else next.push(toViewEvent(event, segment.bytes, segmentIndex++, segment.closed));
+  }
+  return next.slice(-maxAgentLogs);
 }, existing);
 
 export default function AgentSerialDebugger() {
@@ -56,7 +73,7 @@ export default function AgentSerialDebugger() {
     try {
       const [foundPorts, foundSessions] = await Promise.all([listSerialPorts(), listSerialSessions()]);
       setPorts(foundPorts); setPath(current => current || foundPorts[0]?.path || ''); setAvailable(true);
-      setSessions(current => foundSessions.map(item => { const existing = current.find(old => old.id === item.id); const logs = existing?.logs ?? appendAgentLogs([], item.events, item.frameMode === 'raw'); const latest = item.events[item.events.length - 1]?.id ?? 0; lastIds.current.set(item.id, latest); return { ...item, logs }; }));
+      setSessions(current => foundSessions.map(item => { const existing = current.find(old => old.id === item.id); const rawEvents = existing?.rawEvents ?? item.events.slice(-maxAgentRawEvents); const logs = existing?.logs ?? appendAgentLogs([], item.events, item.frameMode === 'raw'); const latest = item.events[item.events.length - 1]?.id ?? 0; lastIds.current.set(item.id, latest); return { ...item, logs, rawEvents }; }));
       setActiveId(current => current ?? foundSessions[0]?.id ?? null); setError('');
     } catch (reason) { setAvailable(false); setError(reason instanceof Error ? reason.message : String(reason)); }
   }, []);
@@ -65,7 +82,7 @@ export default function AgentSerialDebugger() {
     if (!sessions.length) return;
     let stopped = false, timer = 0;
     const poll = async () => {
-      await Promise.all(sessionsRef.current.map(async item => { try { const current = await readSerialSession(item.id, lastIds.current.get(item.id) ?? 0); if (stopped) return; if (current.events.length) lastIds.current.set(item.id, current.events[current.events.length - 1].id); setSessions(all => all.map(old => old.id === item.id ? { ...current, logs: appendAgentLogs(old.logs, current.events, (current.frameMode ?? old.frameMode) === 'raw') } : old)); } catch (reason) { if (!stopped) setError(reason instanceof Error ? reason.message : String(reason)); } }));
+      await Promise.all(sessionsRef.current.map(async item => { try { const current = await readSerialSession(item.id, lastIds.current.get(item.id) ?? 0); if (stopped) return; if (current.events.length) lastIds.current.set(item.id, current.events[current.events.length - 1].id); setSessions(all => all.map(old => old.id === item.id ? { ...current, logs: appendAgentLogs(old.logs, current.events, (current.frameMode ?? old.frameMode) === 'raw'), rawEvents: [...old.rawEvents, ...current.events].slice(-maxAgentRawEvents) } : old)); } catch (reason) { if (!stopped) setError(reason instanceof Error ? reason.message : String(reason)); } }));
       if (!stopped) timer = window.setTimeout(poll, 100);
     };
     void poll(); return () => { stopped = true; clearTimeout(timer); };
@@ -73,7 +90,7 @@ export default function AgentSerialDebugger() {
 
   const connect = async () => {
     if (!path) return; setError('');
-    try { const opened = await openSerialSession({ path, baudRate: Number(baudRate), dataBits: Number(dataBits), stopBits: Number(stopBits), parity, flowControl, dtr, rts, frameMode, frameGapMs: Math.max(5, Math.min(2000, Number(frameGapMs) || 30)) }); const view = { ...opened, logs: appendAgentLogs([], opened.events, opened.frameMode === 'raw') }; lastIds.current.set(opened.id, opened.events[opened.events.length - 1]?.id ?? 0); setSessions(all => [...all.filter(item => item.id !== opened.id), view]); setActiveId(opened.id); }
+    try { const opened = await openSerialSession({ path, baudRate: Number(baudRate), dataBits: Number(dataBits), stopBits: Number(stopBits), parity, flowControl, dtr, rts, frameMode, frameGapMs: Math.max(5, Math.min(2000, Number(frameGapMs) || 30)) }); const view = { ...opened, logs: appendAgentLogs([], opened.events, opened.frameMode === 'raw'), rawEvents: opened.events.slice(-maxAgentRawEvents) }; lastIds.current.set(opened.id, opened.events[opened.events.length - 1]?.id ?? 0); setSessions(all => [...all.filter(item => item.id !== opened.id), view]); setActiveId(opened.id); }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
   };
   const disconnect = async (id: string) => { try { await closeSerialSession(id); } catch { /* 会话可能已经关闭 */ } lastIds.current.delete(id); setSessions(all => { const rest = all.filter(item => item.id !== id); setActiveId(current => current === id ? rest[0]?.id ?? null : current); if (rest.length < 2) setSplit(false); return rest; }); };
@@ -102,7 +119,7 @@ export default function AgentSerialDebugger() {
   const analyzeRx = () => {
     if (!active) return;
     try {
-      writePendingCommunicationCapture(createCommunicationCapture({ transport: 'serial', sessionId: active.id, endpoint: `${active.path} · ${active.baudRate} ${active.dataBits}${active.parity === 'none' ? 'N' : active.parity[0].toUpperCase()}${active.stopBits}`, events: active.logs }));
+      writePendingCommunicationCapture(createCommunicationCapture({ transport: 'serial', sessionId: active.id, endpoint: `${active.path} · ${active.baudRate} ${active.dataBits}${active.parity === 'none' ? 'N' : active.parity[0].toUpperCase()}${active.stopBits}`, events: active.rawEvents }));
       window.location.hash = '/toolbox/frame';
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
   };

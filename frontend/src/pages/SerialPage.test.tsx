@@ -54,7 +54,7 @@ describe('SerialPage browser-direct mode', () => {
     view.unmount();
   });
 
-  it('continuously appends every received chunk without waiting for an idle gap', async () => {
+  it('shows received data immediately and starts a new record after a CR/LF boundary', async () => {
     const readable = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new TextEncoder().encode('first line\r\n'));
@@ -67,11 +67,53 @@ describe('SerialPage browser-direct mode', () => {
     const view = render(<SerialPage />);
     fireEvent.click(screen.getByRole('button', { name: /添加/ }));
     const terminal = await screen.findByTestId('browser-serial-terminal-left');
-    await waitFor(() => expect(terminal.textContent).toContain('first line\r\nsecond line'));
-    expect(within(terminal).getAllByText('RX')).toHaveLength(1);
+    await waitFor(() => expect(terminal.textContent).toContain('second line'));
+    expect(within(terminal).getByText('first line')).toBeVisible();
+    expect(within(terminal).getByText('second line')).toBeVisible();
+    expect(within(terminal).getAllByText('RX')).toHaveLength(2);
     expect(screen.getByText('RX 23 B')).toBeVisible();
     expect(JSON.parse(localStorage.getItem('embedkit.serial.settings') || '{}')).toMatchObject({ version: 3, frameMode: 'raw' });
     view.unmount();
+  });
+
+  it('treats CRLF split across browser reads as one boundary without an empty RX record', async () => {
+    const readable = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('one\r'));
+        controller.enqueue(new TextEncoder().encode('\ntwo\r\n'));
+      },
+    });
+    const port = { readable, writable: new WritableStream<Uint8Array>(), open: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined), getInfo: () => ({}), setSignals: vi.fn().mockResolvedValue(undefined) };
+    Object.defineProperty(navigator, 'serial', { configurable: true, value: { requestPort: vi.fn().mockResolvedValue(port), addEventListener: vi.fn(), removeEventListener: vi.fn() } });
+
+    const view = render(<SerialPage />);
+    fireEvent.click(screen.getByRole('button', { name: /添加/ }));
+    const terminal = await screen.findByTestId('browser-serial-terminal-left');
+    await waitFor(() => expect(within(terminal).getAllByText('RX')).toHaveLength(2));
+    expect(within(terminal).getByText('one')).toBeVisible();
+    expect(within(terminal).getByText('two')).toBeVisible();
+    view.unmount();
+  });
+
+  it('exports the untouched capture bytes instead of rebuilding RAW data from display rows', async () => {
+    const expected = new TextEncoder().encode('one\r\ntwo\r\n');
+    const readable = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(expected.slice(0, 4)); controller.enqueue(expected.slice(4)); } });
+    const port = { readable, writable: new WritableStream<Uint8Array>(), open: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined), getInfo: () => ({}), setSignals: vi.fn().mockResolvedValue(undefined) };
+    Object.defineProperty(navigator, 'serial', { configurable: true, value: { requestPort: vi.fn().mockResolvedValue(port), addEventListener: vi.fn(), removeEventListener: vi.fn() } });
+    let exported: Blob | undefined;
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn((blob: Blob) => { exported = blob; return 'blob:serial-test'; }) });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+
+    const view = render(<SerialPage />);
+    fireEvent.click(screen.getByRole('button', { name: /添加/ }));
+    await waitFor(() => expect(screen.getByText(`RX ${expected.length} B`)).toBeVisible());
+    fireEvent.click(screen.getByRole('button', { name: 'RAW' }));
+    expect(exported).toBeDefined();
+    expect([...new Uint8Array(await exported!.arrayBuffer())]).toEqual([...expected]);
+    view.unmount();
+    Reflect.deleteProperty(URL, 'createObjectURL');
+    Reflect.deleteProperty(URL, 'revokeObjectURL');
   });
 
   it('starts a new timestamped RX record when the next report is not part of the same burst', async () => {
