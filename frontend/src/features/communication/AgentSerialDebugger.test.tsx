@@ -114,14 +114,15 @@ describe('AgentSerialDebugger independent degradation', () => {
     expect(JSON.parse(localStorage.getItem('embedkit.serial.settings') || '{}')).toMatchObject({ version: 3, leftRxHex: true, rightRxHex: false });
   });
 
-  it('uses CR/LF and report gaps as Local Agent display boundaries without waiting', async () => {
+  it('keeps multiline Local Agent output in one receive burst without waiting', async () => {
     const session = {
       id: 'session-stream', path: 'COM8', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false,
       frameMode: 'raw' as const, frameGapMs: 30, state: 'connected' as const, rxBytes: 28, txBytes: 0, openedAt: '2026-10-27T00:00:00Z',
       events: [
         { id: 1, timestamp: '2026-10-27T00:00:01Z', direction: 'rx' as const, text: 'first line\r\n', hex: '66 69 72 73 74 20 6C 69 6E 65 0D 0A', byteLength: 12 },
-        { id: 2, timestamp: '2026-10-27T00:00:01.010Z', direction: 'rx' as const, text: 'second line', hex: '73 65 63 6F 6E 64 20 6C 69 6E 65', byteLength: 11 },
-        { id: 3, timestamp: '2026-10-27T00:00:02.010Z', direction: 'rx' as const, text: 'third', hex: '74 68 69 72 64', byteLength: 5 },
+        { id: 2, timestamp: '2026-10-27T00:00:01.005Z', direction: 'tx' as const, text: 'poll', hex: '70 6F 6C 6C', byteLength: 4 },
+        { id: 3, timestamp: '2026-10-27T00:00:01.010Z', direction: 'rx' as const, text: 'second line', hex: '73 65 63 6F 6E 64 20 6C 69 6E 65', byteLength: 11 },
+        { id: 4, timestamp: '2026-10-27T00:00:02.010Z', direction: 'rx' as const, text: 'third', hex: '74 68 69 72 64', byteLength: 5 },
       ],
     };
     vi.mocked(serialAgent.listSerialPorts).mockResolvedValue([]);
@@ -130,10 +131,9 @@ describe('AgentSerialDebugger independent degradation', () => {
 
     render(<AgentSerialDebugger />);
     const terminal = await screen.findByTestId('agent-serial-terminal-left');
-    await waitFor(() => expect(terminal.textContent).toContain('second line'));
-    expect(within(terminal).getByText('first line')).toBeVisible();
-    expect(within(terminal).getByText('second line')).toBeVisible();
+    await waitFor(() => expect(terminal.textContent).toContain('first line\r\nsecond line'));
+    expect(terminal.textContent).toContain('poll');
     expect(terminal.textContent).toContain('third');
-    expect(within(terminal).getAllByText('RX')).toHaveLength(3);
+    expect(within(terminal).getAllByText('RX')).toHaveLength(2);
   });
 });

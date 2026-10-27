@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Braces, Check, Clock3, Download, FileUp, Pause, Pencil, Play, Plus, Radio, Search, Send, Settings, Square, Trash2, Wifi, WifiOff, X } from 'lucide-react';
 import { COMMUNICATION_CAPTURE_MAX_BYTES, createCommunicationCapture, writePendingCommunicationCapture, type CaptureEventInput } from '../services/communicationCapture';
-import { isCrLfContinuation, mayMergeSerialDisplay, splitSerialDisplayBytes } from '../services/serialDisplay';
+import { mayMergeSerialReceive } from '../services/serialDisplay';
 
 type Parity = 'none' | 'even' | 'odd';
 type FlowControl = 'none' | 'hardware';
@@ -11,7 +11,7 @@ type FrameMode = 'auto' | 'line' | 'idle' | 'fixed' | 'raw';
 interface PortInfo { usbVendorId?: number; usbProductId?: number; bluetoothServiceClassId?: string }
 interface Port extends EventTarget { name?: string; path?: string; readable: ReadableStream<Uint8Array> | null; writable: WritableStream<Uint8Array> | null; open(o: { baudRate: number; dataBits: number; stopBits: number; parity: Parity; flowControl: FlowControl; bufferSize?: number }): Promise<void>; close(): Promise<void>; getInfo(): PortInfo; setSignals?(s: { dataTerminalReady?: boolean; requestToSend?: boolean }): Promise<void> }
 interface SerialManager extends EventTarget { requestPort(): Promise<Port> }
-interface Entry { id: number; timestamp: string; lastReceivedAt: number; direction: Direction; text: string; bytes?: number[]; closed?: boolean }
+interface Entry { id: number; timestamp: string; lastReceivedAt: number; direction: Direction; text: string; bytes?: number[] }
 interface Shortcut { id: number; name: string; value: string; hex: boolean; intervalMs?: number }
 interface Session { id: number; name: string; state: State; baud: number; config: string; entries: Entry[]; rx: number; tx: number; rate: number; paused: number; captureBytes: number }
 interface Runtime { port: Port; reader: ReadableStreamDefaultReader<Uint8Array> | null; reading: boolean; writing: boolean; buffer: number[]; timer: number | null; lastBytes: number; lastTime: number }
@@ -81,21 +81,15 @@ export default function SerialPage() {
     if (pausedRef.current) { update(id, (s) => ({ ...s, paused: s.paused + chunk.length })); return; }
     const receivedAt = Date.now();
     update(id, (session) => {
-      let source = [...chunk], entries = [...session.entries], last = entries[entries.length - 1];
-      if (last?.direction === 'rx' && last.bytes && isCrLfContinuation(last.bytes, source)) {
-        const bytes = [...last.bytes, source[0]];
-        entries[entries.length - 1] = { ...last, lastReceivedAt: receivedAt, text: new TextDecoder().decode(new Uint8Array(bytes)), bytes, closed: true };
-        source = source.slice(1);
-      }
-      for (const segment of splitSerialDisplayBytes(source)) {
-        last = entries[entries.length - 1];
-        const canMerge = last?.direction === 'rx' && last.bytes && mayMergeSerialDisplay(last.closed === true, last.lastReceivedAt, receivedAt) && last.bytes.length + segment.bytes.length <= MAX_MERGED_RX_BYTES;
-        if (canMerge) {
-          const bytes = [...last.bytes!, ...segment.bytes];
-          entries[entries.length - 1] = { ...last, lastReceivedAt: receivedAt, text: new TextDecoder().decode(new Uint8Array(bytes)), bytes, closed: segment.closed };
-        } else {
-          entries.push({ id: ++entrySeq.current, timestamp: now(), lastReceivedAt: receivedAt, direction: 'rx', text: new TextDecoder().decode(new Uint8Array(segment.bytes)), bytes: segment.bytes, closed: segment.closed });
-        }
+      const incoming = [...chunk], entries = [...session.entries];
+      let lastRxIndex = entries.length - 1;
+      while (lastRxIndex >= 0 && entries[lastRxIndex].direction !== 'rx') lastRxIndex -= 1;
+      const lastRx = entries[lastRxIndex];
+      if (lastRx?.bytes && mayMergeSerialReceive(lastRx.lastReceivedAt, receivedAt) && lastRx.bytes.length + incoming.length <= MAX_MERGED_RX_BYTES) {
+        const bytes = [...lastRx.bytes, ...incoming];
+        entries[lastRxIndex] = { ...lastRx, lastReceivedAt: receivedAt, text: new TextDecoder().decode(new Uint8Array(bytes)), bytes };
+      } else {
+        entries.push({ id: ++entrySeq.current, timestamp: now(), lastReceivedAt: receivedAt, direction: 'rx', text: new TextDecoder().decode(chunk), bytes: incoming });
       }
       return { ...session, entries: entries.slice(-MAX_ENTRIES) };
     });

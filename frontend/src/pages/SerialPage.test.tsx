@@ -54,7 +54,7 @@ describe('SerialPage browser-direct mode', () => {
     view.unmount();
   });
 
-  it('shows received data immediately and starts a new record after a CR/LF boundary', async () => {
+  it('shows received data immediately and keeps CR/LF lines in one receive burst', async () => {
     const readable = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new TextEncoder().encode('first line\r\n'));
@@ -67,16 +67,14 @@ describe('SerialPage browser-direct mode', () => {
     const view = render(<SerialPage />);
     fireEvent.click(screen.getByRole('button', { name: /添加/ }));
     const terminal = await screen.findByTestId('browser-serial-terminal-left');
-    await waitFor(() => expect(terminal.textContent).toContain('second line'));
-    expect(within(terminal).getByText('first line')).toBeVisible();
-    expect(within(terminal).getByText('second line')).toBeVisible();
-    expect(within(terminal).getAllByText('RX')).toHaveLength(2);
+    await waitFor(() => expect(terminal.textContent).toContain('first line\r\nsecond line'));
+    expect(within(terminal).getAllByText('RX')).toHaveLength(1);
     expect(screen.getByText('RX 23 B')).toBeVisible();
     expect(JSON.parse(localStorage.getItem('embedkit.serial.settings') || '{}')).toMatchObject({ version: 3, frameMode: 'raw' });
     view.unmount();
   });
 
-  it('treats CRLF split across browser reads as one boundary without an empty RX record', async () => {
+  it('preserves CRLF split across browser reads inside one receive burst', async () => {
     const readable = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new TextEncoder().encode('one\r'));
@@ -89,9 +87,8 @@ describe('SerialPage browser-direct mode', () => {
     const view = render(<SerialPage />);
     fireEvent.click(screen.getByRole('button', { name: /添加/ }));
     const terminal = await screen.findByTestId('browser-serial-terminal-left');
-    await waitFor(() => expect(within(terminal).getAllByText('RX')).toHaveLength(2));
-    expect(within(terminal).getByText('one')).toBeVisible();
-    expect(within(terminal).getByText('two')).toBeVisible();
+    await waitFor(() => expect(terminal.textContent).toContain('one\r\ntwo\r\n'));
+    expect(within(terminal).getAllByText('RX')).toHaveLength(1);
     view.unmount();
   });
 

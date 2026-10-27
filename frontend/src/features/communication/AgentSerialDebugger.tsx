@@ -3,9 +3,9 @@ import { Braces, Check, Clock3, Download, FlaskConical, Pencil, PlugZap, Plus, R
 import { closeSerialSession, listSerialPorts, listSerialSessions, openSerialSession, readSerialSession, sendSerialData, setSerialSignals, updateSerialBaudRate, type SerialAgentEvent, type SerialAgentPort, type SerialAgentSession, type SerialFrameMode } from '../../services/serialAgent';
 import { createCommunicationCapture, writePendingCommunicationCapture } from '../../services/communicationCapture';
 import { writeSerialTestSessionHandoff } from '../../services/testSessionHandoff';
-import { isCrLfContinuation, mayMergeSerialDisplay, splitSerialDisplayBytes } from '../../services/serialDisplay';
+import { mayMergeSerialReceive } from '../../services/serialDisplay';
 
-interface ViewEvent extends SerialAgentEvent { receivedThrough?: string; closed?: boolean }
+interface ViewEvent extends SerialAgentEvent { receivedThrough?: string }
 interface ViewSession extends Omit<SerialAgentSession, 'events'> { logs: ViewEvent[]; rawEvents: SerialAgentEvent[] }
 interface Shortcut { id: number; name: string; value: string; hex: boolean; intervalMs: number }
 type LineEnding = 'none' | 'cr' | 'lf' | 'crlf';
@@ -23,27 +23,16 @@ const formatTimestamp = (value: string) => { const date = new Date(value), pad =
 const decodeHex = (value: string) => new TextDecoder().decode(new Uint8Array((value.match(/[\dA-F]{2}/gi) ?? []).map(byte => Number.parseInt(byte, 16))));
 const hexBytes = (value: string) => (value.match(/[\dA-F]{2}/gi) ?? []).map(byte => Number.parseInt(byte, 16));
 const bytesHex = (bytes: number[]) => bytes.map(byte => byte.toString(16).padStart(2, '0').toUpperCase()).join(' ');
-const toViewEvent = (event: SerialAgentEvent, bytes: number[], index: number, closed: boolean): ViewEvent => {
-  const hex = bytesHex(bytes);
-  return { ...event, id: event.id + index / 1000, text: decodeHex(hex), hex, byteLength: bytes.length, closed };
-};
-const appendAgentLogs = (existing: ViewEvent[], incoming: SerialAgentEvent[], segmentRawRx: boolean) => incoming.reduce<ViewEvent[]>((logs, event) => {
-  if (!segmentRawRx || event.direction !== 'rx') return [...logs, { ...event, closed: true }].slice(-maxAgentLogs);
-  let bytes = hexBytes(event.hex), next = [...logs], last = next[next.length - 1], segmentIndex = 0;
-  if (last?.direction === 'rx' && isCrLfContinuation(hexBytes(last.hex), bytes)) {
-    const mergedBytes = [...hexBytes(last.hex), bytes[0]], hex = bytesHex(mergedBytes);
-    next[next.length - 1] = { ...last, receivedThrough: event.timestamp, text: decodeHex(hex), hex, byteLength: mergedBytes.length, closed: true };
-    bytes = bytes.slice(1);
+const appendAgentLogs = (existing: ViewEvent[], incoming: SerialAgentEvent[], groupRawRx: boolean) => incoming.reduce<ViewEvent[]>((logs, event) => {
+  let lastRxIndex = logs.length - 1;
+  while (lastRxIndex >= 0 && logs[lastRxIndex].direction !== 'rx') lastRxIndex -= 1;
+  const lastRx = logs[lastRxIndex], lastReceivedAt = Date.parse(lastRx?.receivedThrough ?? lastRx?.timestamp ?? ''), receivedAt = Date.parse(event.timestamp);
+  if (groupRawRx && event.direction === 'rx' && lastRx && mayMergeSerialReceive(lastReceivedAt, receivedAt) && lastRx.byteLength + event.byteLength <= maxMergedRxBytes) {
+    const mergedBytes = [...hexBytes(lastRx.hex), ...hexBytes(event.hex)], hex = bytesHex(mergedBytes), next = [...logs];
+    next[lastRxIndex] = { ...event, id: lastRx.id, timestamp: lastRx.timestamp, receivedThrough: event.timestamp, text: decodeHex(hex), hex, byteLength: mergedBytes.length };
+    return next;
   }
-  for (const segment of splitSerialDisplayBytes(bytes)) {
-    last = next[next.length - 1];
-    const lastReceivedAt = Date.parse(last?.receivedThrough ?? last?.timestamp ?? ''), receivedAt = Date.parse(event.timestamp);
-    if (last?.direction === 'rx' && mayMergeSerialDisplay(last.closed === true, lastReceivedAt, receivedAt) && last.byteLength + segment.bytes.length <= maxMergedRxBytes) {
-      const mergedBytes = [...hexBytes(last.hex), ...segment.bytes], hex = bytesHex(mergedBytes);
-      next[next.length - 1] = { ...last, receivedThrough: event.timestamp, text: decodeHex(hex), hex, byteLength: mergedBytes.length, closed: segment.closed };
-    } else next.push(toViewEvent(event, segment.bytes, segmentIndex++, segment.closed));
-  }
-  return next.slice(-maxAgentLogs);
+  return [...logs, event].slice(-maxAgentLogs);
 }, existing);
 
 export default function AgentSerialDebugger() {
