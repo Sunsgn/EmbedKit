@@ -1,5 +1,69 @@
 @import "tailwindcss";
 
+:root {
+  --theme-canvas: #0d1117;
+  --theme-panel: #161b22;
+  --theme-panel-soft: #111820;
+  --theme-sidebar: #141920;
+  --theme-hover: #1c2128;
+  --theme-border: #30363d;
+  --theme-border-strong: #484f58;
+  --theme-text-100: #f3f4f6;
+  --theme-text-200: #e5e7eb;
+  --theme-text-300: #d1d5db;
+  --theme-text-400: #9ca3af;
+  --theme-text-500: #6b7280;
+  --theme-text-600: #4b5563;
+  --theme-text-700: #374151;
+  --theme-accent-200: #bfdbfe;
+  --theme-accent-300: #93c5fd;
+  --theme-accent-400: #60a5fa;
+  --theme-accent-500: #3b82f6;
+  --theme-accent-600: #2563eb;
+}
+
+html[data-color-mode='dark'][data-dark-surface='graphite'] {
+  --theme-canvas: #141517;
+  --theme-panel: #1c1e21;
+  --theme-panel-soft: #181a1d;
+  --theme-sidebar: #191b1f;
+  --theme-hover: #26292e;
+  --theme-border: #383c42;
+  --theme-border-strong: #50555d;
+}
+
+html[data-color-mode='dark'][data-dark-surface='navy'] {
+  --theme-canvas: #0b1424;
+  --theme-panel: #111d31;
+  --theme-panel-soft: #0e192a;
+  --theme-sidebar: #0f1a2c;
+  --theme-hover: #182944;
+  --theme-border: #29405e;
+  --theme-border-strong: #3a587c;
+}
+
+html[data-color-mode='light'] {
+  --theme-canvas: #f3f6fa;
+  --theme-panel: #ffffff;
+  --theme-panel-soft: #f8fafc;
+  --theme-sidebar: #ffffff;
+  --theme-hover: #e8eef6;
+  --theme-border: #cbd5e1;
+  --theme-border-strong: #94a3b8;
+  --theme-text-100: #0f172a;
+  --theme-text-200: #1e293b;
+  --theme-text-300: #334155;
+  --theme-text-400: #475569;
+  --theme-text-500: #64748b;
+  --theme-text-600: #64748b;
+  --theme-text-700: #94a3b8;
+}
+
+html[data-accent='cyan'] { --theme-accent-200: #a5f3fc; --theme-accent-300: #67e8f9; --theme-accent-400: #22d3ee; --theme-accent-500: #06b6d4; --theme-accent-600: #0891b2; }
+html[data-accent='emerald'] { --theme-accent-200: #a7f3d0; --theme-accent-300: #6ee7b7; --theme-accent-400: #34d399; --theme-accent-500: #10b981; --theme-accent-600: #059669; }
+html[data-accent='violet'] { --theme-accent-200: #ddd6fe; --theme-accent-300: #c4b5fd; --theme-accent-400: #a78bfa; --theme-accent-500: #8b5cf6; --theme-accent-600: #7c3aed; }
+html[data-accent='orange'] { --theme-accent-200: #fed7aa; --theme-accent-300: #fdba74; --theme-accent-400: #fb923c; --theme-accent-500: #f97316; --theme-accent-600: #ea580c; }
+
 @layer base {
   * {
     margin: 0;
@@ -12,9 +76,8 @@
       'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    background-color: #0d1117;
-    color: #e6edf3;
-    color-scheme: dark;
+    background-color: var(--theme-canvas);
+    color: var(--theme-text-200);
   }
 
   #root {
@@ -23,7 +86,7 @@
   }
 
   ::selection {
-    background: rgb(59 130 246 / 0.35);
+    background: color-mix(in srgb, var(--theme-accent-500) 35%, transparent);
     color: white;
   }
 
@@ -38,9 +101,74 @@
   input:focus-visible,
   select:focus-visible,
   textarea:focus-visible {
-    outline: 2px solid rgb(59 130 246 / 0.55);
+    outline: 2px solid color-mix(in srgb, var(--theme-accent-500) 55%, transparent);
     outline-offset: 2px;
   }
+}
+
+/* 统一外观兼容层：逐步接管既有 Tailwind 固定色，不改变页面领域逻辑。 */
+.theme-shell,
+.theme-main { background-color: var(--theme-canvas) !important; }
+.theme-main { background-image: radial-gradient(circle at 80% -20%, color-mix(in srgb, var(--theme-accent-500) 9%, transparent), transparent 36%) !important; }
+.theme-sidebar { background-color: color-mix(in srgb, var(--theme-sidebar) 96%, transparent) !important; }
+html[data-color-mode='light'] .dashboard-hero {
+  background-image: linear-gradient(135deg, color-mix(in srgb, var(--theme-accent-500) 9%, white), white 52%, rgb(245 243 255)) !important;
+}
+
+[class~="bg-[#0d1117]"], [class~="bg-[#0b1016]"], [class~="bg-[#090d12]"] { background-color: var(--theme-canvas) !important; }
+[class~="bg-[#0d1117]/60"] { background-color: color-mix(in srgb, var(--theme-canvas) 60%, transparent) !important; }
+[class~="bg-[#161b22]"], [class~="bg-[#161b22]/95"] { background-color: var(--theme-panel) !important; }
+[class~="bg-[#111820]"] { background-color: var(--theme-panel-soft) !important; }
+[class~="bg-[#141920]/95"] { background-color: color-mix(in srgb, var(--theme-sidebar) 95%, transparent) !important; }
+[class~="bg-[#1c2128]"] { background-color: var(--theme-hover) !important; }
+[class~="hover:bg-[#1c2128]"]:hover { background-color: var(--theme-hover) !important; }
+[class~="border-[#30363d]"], [class~="border-[#30363d]/80"], [class~="border-[#30363d]/70"], [class~="border-[#30363d]/60"] { border-color: var(--theme-border) !important; }
+[class~="border-[#484f58]"] { border-color: var(--theme-border-strong) !important; }
+
+[class~="text-gray-100"] { color: var(--theme-text-100) !important; }
+[class~="text-gray-200"] { color: var(--theme-text-200) !important; }
+[class~="text-gray-300"] { color: var(--theme-text-300) !important; }
+[class~="text-gray-400"] { color: var(--theme-text-400) !important; }
+[class~="text-gray-500"] { color: var(--theme-text-500) !important; }
+[class~="text-gray-600"] { color: var(--theme-text-600) !important; }
+[class~="text-gray-700"] { color: var(--theme-text-700) !important; }
+html[data-color-mode='light'] [class~="hover:text-white"]:hover { color: var(--theme-text-100) !important; }
+html[data-color-mode='light'] [class~="text-white"] { color: var(--theme-text-100) !important; }
+html[data-color-mode='light'] [class~="bg-blue-600"][class~="text-white"],
+html[data-color-mode='light'] [class~="bg-blue-500"][class~="text-white"],
+html[data-color-mode='light'] [class~="bg-red-600"][class~="text-white"],
+html[data-color-mode='light'] [class~="bg-green-600"][class~="text-white"],
+html[data-color-mode='light'] [class~="bg-purple-600"][class~="text-white"],
+html[data-color-mode='light'] [class~="bg-gray-600"][class~="text-white"] { color: white !important; }
+html[data-color-mode='light'] [class~="hover:bg-white/5"]:hover,
+html[data-color-mode='light'] [class~="hover:bg-white/[0.04]"]:hover { background-color: rgb(15 23 42 / 0.06) !important; }
+
+[class~="text-blue-200"] { color: var(--theme-accent-200) !important; }
+[class~="text-blue-300"] { color: var(--theme-accent-300) !important; }
+[class~="text-blue-400"] { color: var(--theme-accent-400) !important; }
+[class~="text-blue-500"] { color: var(--theme-accent-500) !important; }
+[class~="bg-blue-500"] { background-color: var(--theme-accent-500) !important; }
+[class~="bg-blue-600"] { background-color: var(--theme-accent-600) !important; }
+[class~="hover:bg-blue-500"]:hover { background-color: var(--theme-accent-500) !important; }
+[class~="bg-blue-500/5"] { background-color: color-mix(in srgb, var(--theme-accent-500) 5%, transparent) !important; }
+[class~="bg-blue-500/10"] { background-color: color-mix(in srgb, var(--theme-accent-500) 10%, transparent) !important; }
+[class~="bg-blue-500/15"] { background-color: color-mix(in srgb, var(--theme-accent-500) 15%, transparent) !important; }
+[class~="bg-blue-500/20"] { background-color: color-mix(in srgb, var(--theme-accent-500) 20%, transparent) !important; }
+[class~="border-blue-500"] { border-color: var(--theme-accent-500) !important; }
+[class~="border-blue-500/20"] { border-color: color-mix(in srgb, var(--theme-accent-500) 20%, transparent) !important; }
+[class~="border-blue-500/30"] { border-color: color-mix(in srgb, var(--theme-accent-500) 30%, transparent) !important; }
+[class~="border-blue-500/40"] { border-color: color-mix(in srgb, var(--theme-accent-500) 40%, transparent) !important; }
+[class~="border-blue-500/50"] { border-color: color-mix(in srgb, var(--theme-accent-500) 50%, transparent) !important; }
+[class~="border-blue-500/60"] { border-color: color-mix(in srgb, var(--theme-accent-500) 60%, transparent) !important; }
+input, select, textarea { accent-color: var(--theme-accent-500); }
+
+html[data-reduce-motion='true'] *,
+html[data-reduce-motion='true'] *::before,
+html[data-reduce-motion='true'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+  transition-duration: 0.01ms !important;
 }
 
 /* 快捷指令使用终端右侧独立区域；隐藏旧的底部临时容器。 */
@@ -53,11 +181,11 @@
   .field {
     margin-top: 0.25rem;
     width: 100%;
-    border: 1px solid #30363d;
+    border: 1px solid var(--theme-border);
     border-radius: 0.5rem;
-    background: #0d1117;
+    background: var(--theme-canvas);
     padding: 0.5rem 0.75rem;
-    color: white;
+    color: var(--theme-text-100);
   }
 
   .field:disabled {
@@ -68,16 +196,16 @@
     display: inline-flex;
     align-items: center;
     gap: 0.25rem;
-    border: 1px solid #30363d;
+    border: 1px solid var(--theme-border);
     border-radius: 0.375rem;
     padding: 0.375rem 0.625rem;
-    color: #9ca3af;
+    color: var(--theme-text-400);
     font-size: 0.625rem;
   }
 
   .build-button:hover:not(:disabled) {
-    border-color: rgb(59 130 246 / 0.5);
-    color: #bfdbfe;
+    border-color: color-mix(in srgb, var(--theme-accent-500) 50%, transparent);
+    color: var(--theme-accent-200);
   }
 
   .build-button:disabled {
@@ -87,11 +215,11 @@
   .serial-settings .field {
     margin-top: 0.25rem;
     width: 100%;
-    border: 1px solid #30363d;
+    border: 1px solid var(--theme-border);
     border-radius: 0.25rem;
-    background: #0d1117;
+    background: var(--theme-canvas);
     padding: 0.375rem 0.5rem;
-    color: white;
+    color: var(--theme-text-100);
   }
 
   .serial-settings .field:disabled {
@@ -101,7 +229,7 @@
   .serial-page input[type='checkbox'] {
     width: 0.8rem;
     height: 0.8rem;
-    accent-color: #3b82f6;
+    accent-color: var(--theme-accent-500);
     vertical-align: -0.1rem;
   }
 
@@ -114,7 +242,7 @@
   .serial-page button:focus-visible,
   .serial-page select:focus-visible,
   .serial-page input:focus-visible {
-    outline: 2px solid rgb(59 130 246 / 0.55);
+    outline: 2px solid color-mix(in srgb, var(--theme-accent-500) 55%, transparent);
     outline-offset: 2px;
   }
 
@@ -124,7 +252,7 @@
 
   .scrollbar-thin {
     scrollbar-width: thin;
-    scrollbar-color: #30363d transparent;
+    scrollbar-color: var(--theme-border) transparent;
   }
 
   .scrollbar-thin::-webkit-scrollbar {
@@ -137,12 +265,12 @@
   }
 
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    background-color: #30363d;
+    background-color: var(--theme-border);
     border-radius: 3px;
   }
 
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    background-color: #484f58;
+    background-color: var(--theme-border-strong);
   }
 }
 .automation-page > div > .grid > aside:last-child {

@@ -12,6 +12,7 @@ interface StorageRule {
 }
 
 const RULES: StorageRule[] = [
+  { key: 'embedkit.appearance', label: '外观与主题设置', shape: 'object' },
   { key: 'embedkit.tool-preferences', label: '工具收藏与最近使用', shape: 'object' },
   { key: 'embedkit.serial.settings', label: '串口显示设置', shape: 'object' },
   { key: 'embedkit.serial.shortcuts', label: '串口快捷指令', shape: 'array' },

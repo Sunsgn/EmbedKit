@@ -10,7 +10,7 @@ describe('local settings health diagnostics', () => {
 
     const report = inspectStorageHealth(localStorage, new Date('2026-10-12T08:00:00.000Z'));
 
-    expect(report).toMatchObject({ schema: 'embedkit.storage-health', version: 1, checked: 8, generatedAt: '2026-10-12T08:00:00.000Z' });
+    expect(report).toMatchObject({ schema: 'embedkit.storage-health', version: 1, checked: 9, generatedAt: '2026-10-12T08:00:00.000Z' });
     expect(report.issues).toEqual([
       expect.objectContaining({ key: 'embedkit.serial.shortcuts', reason: 'invalid-json' }),
       expect.objectContaining({ key: 'embedkit.network.send-history', reason: 'unexpected-shape' }),

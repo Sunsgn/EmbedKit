@@ -49,6 +49,13 @@ describe('workspace backup', () => {
     expect(localStorage.getItem('embedkit.part-selection-records')).toBe('[]');
   });
 
+  it('keeps versioned appearance preferences portable', () => {
+    const value = backup() as WorkspaceBackup & { local: Record<string, unknown> };
+    value.local['embedkit.appearance'] = { schema: 'embedkit.appearance', version: 1, colorMode: 'light', darkSurface: 'navy', accent: 'cyan', reduceMotion: true };
+    const parsed = parseWorkspaceBackup(JSON.stringify(value));
+    expect(parsed.local['embedkit.appearance']).toEqual(value.local['embedkit.appearance']);
+  });
+
   it('rejects incompatible, oversized, and structurally invalid backups', () => {
     expect(() => parseWorkspaceBackup('{}')).toThrow(/格式或版本/);
     expect(() => parseWorkspaceBackup('x'.repeat(WORKSPACE_BACKUP_MAX_BYTES + 1))).toThrow(/16 MiB/);

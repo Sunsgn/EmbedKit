@@ -9,6 +9,7 @@ export const WORKSPACE_BACKUP_MAX_BYTES = 16 * 1024 * 1024;
 const MAX_LOCAL_VALUE_BYTES = 4 * 1024 * 1024;
 const PORTABLE_LOCAL_KEYS = [
   'embedkit.tool-preferences',
+  'embedkit.appearance',
   'embedkit.serial.settings',
   'embedkit.serial.shortcuts',
   'embedkit.serial.shortcut-limit',

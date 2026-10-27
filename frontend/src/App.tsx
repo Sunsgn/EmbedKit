@@ -1,9 +1,11 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { HashRouter as Router, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { Cpu, Menu, RefreshCw, WifiOff, X } from 'lucide-react';
+import { Cpu, Menu, RefreshCw, Settings, WifiOff, X } from 'lucide-react';
 import { activatePwaUpdate, subscribePwaUpdate } from './services/pwa';
 import AppErrorBoundary from './components/AppErrorBoundary';
 import { navSections } from './appNavigation';
+import AppearanceSettings from './components/AppearanceSettings';
+import { applyAppearance, loadAppearance, saveAppearance, type AppearanceSettings as AppearanceValue } from './services/appearance';
 
 const DashboardPage = lazy(() => import('./pages/DashboardPage'));
 const EngineeringProjectsPage = lazy(() => import('./pages/EngineeringProjectsPage'));
@@ -23,12 +25,12 @@ function LoadingPage() {
   return <div className="flex h-full items-center justify-center text-sm text-gray-500"><span className="mr-2 h-4 w-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />正在加载工作区…</div>;
 }
 
-function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (value: boolean) => void }) {
+function Sidebar({ isOpen, setIsOpen, onAppearance }: { isOpen: boolean; setIsOpen: (value: boolean) => void; onAppearance: () => void }) {
   const navigate = useNavigate();
   const location = useLocation();
   return <>
     {isOpen && <div className="fixed inset-0 z-40 bg-black/50 lg:hidden" onClick={() => setIsOpen(false)} />}
-    <aside className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-[#30363d]/80 bg-[#141920]/95 shadow-2xl shadow-black/30 backdrop-blur transition-transform duration-200 lg:static ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
+    <aside className={`theme-sidebar fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-[#30363d]/80 bg-[#141920]/95 shadow-2xl shadow-black/30 backdrop-blur transition-transform duration-200 lg:static ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
       <div className="flex items-center justify-between border-b border-[#30363d]/80 px-4 py-[18px]">
         <button onClick={() => navigate('/')} className="flex items-center gap-2 text-left">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-lg shadow-blue-950/50"><Cpu size={19} /></span>
@@ -45,20 +47,36 @@ function Sidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (value: bo
           })}</div>
         </section>)}
       </nav>
-      <div className="border-t border-[#30363d]/80 p-4"><div className="flex items-center justify-between rounded-lg border border-[#30363d]/70 bg-[#0d1117]/60 px-3 py-2"><span><b className="block text-[11px] font-medium text-gray-400">EmbedKit v0.2.0</b><small className="text-[9px] text-gray-600">本地优先 · 数据可控</small></span><i className="h-2 w-2 rounded-full bg-green-400 shadow-sm shadow-green-400" title="本地工作台可用" /></div></div>
+      <div className="space-y-2 border-t border-[#30363d]/80 p-4"><button type="button" onClick={onAppearance} className="flex w-full items-center gap-2 rounded-lg border border-[#30363d]/70 px-3 py-2 text-xs text-gray-400 hover:bg-white/[0.04] hover:text-white"><Settings size={14} />外观与主题</button><div className="flex items-center justify-between rounded-lg border border-[#30363d]/70 bg-[#0d1117]/60 px-3 py-2"><span><b className="block text-[11px] font-medium text-gray-400">EmbedKit v0.2.0</b><small className="text-[9px] text-gray-600">本地优先 · 数据可控</small></span><i className="h-2 w-2 rounded-full bg-green-400 shadow-sm shadow-green-400" title="本地工作台可用" /></div></div>
     </aside>
   </>;
 }
 
 function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [appearance, setAppearance] = useState<AppearanceValue>(() => loadAppearance());
+  const [appearanceSaveFailed, setAppearanceSaveFailed] = useState(false);
   const [online, setOnline] = useState(() => navigator.onLine), [updateAvailable, setUpdateAvailable] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
   useEffect(() => { const connected = () => setOnline(true), disconnected = () => setOnline(false); window.addEventListener('online', connected); window.addEventListener('offline', disconnected); const unsubscribe = subscribePwaUpdate(setUpdateAvailable); return () => { window.removeEventListener('online', connected); window.removeEventListener('offline', disconnected); unsubscribe(); }; }, []);
-  return <div className="flex h-screen bg-[#0d1117]">
-    <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
-    <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_80%_-20%,rgba(59,130,246,0.08),transparent_36%),#0d1117]">
+  useEffect(() => {
+    const media = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+    const apply = () => applyAppearance(appearance, document.documentElement, media?.matches ?? true);
+    apply();
+    if (appearance.colorMode !== 'system') return;
+    media?.addEventListener?.('change', apply);
+    return () => media?.removeEventListener?.('change', apply);
+  }, [appearance]);
+  const changeAppearance = (next: AppearanceValue) => {
+    setAppearance(next);
+    applyAppearance(next);
+    setAppearanceSaveFailed(!saveAppearance(next));
+  };
+  return <div className="theme-shell flex h-screen bg-[#0d1117]">
+    <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} onAppearance={() => { setAppearanceOpen(true); setSidebarOpen(false); }} />
+    <main className="theme-main flex min-w-0 flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_80%_-20%,rgba(59,130,246,0.08),transparent_36%),#0d1117]">
       <header className="flex h-13 shrink-0 items-center border-b border-[#30363d]/80 bg-[#161b22]/95 px-4 shadow-sm shadow-black/20 backdrop-blur lg:hidden"><button onClick={() => setSidebarOpen(true)} className="rounded-lg p-1.5 text-gray-400 hover:bg-white/5 hover:text-white" aria-label="打开菜单"><Menu size={20} /></button><span className="ml-3 text-sm font-semibold">EmbedKit</span><span className="ml-2 rounded bg-blue-500/10 px-1.5 py-0.5 text-[9px] text-blue-400">WORKBENCH</span></header>
       {!online && <div className="flex shrink-0 items-center justify-center gap-2 border-b border-yellow-500/20 bg-yellow-500/10 px-3 py-1.5 text-[10px] text-yellow-300"><WifiOff size={12} />离线模式：浏览器工具和已缓存资料可用；Local Agent 与联网来源按当前连接状态工作。</div>}
       {updateAvailable && <div className="flex shrink-0 items-center justify-center gap-2 border-b border-blue-500/20 bg-blue-500/10 px-3 py-1.5 text-[10px] text-blue-300">发现新版本<button onClick={activatePwaUpdate} className="flex items-center gap-1 rounded border border-blue-500/30 px-2 py-0.5"><RefreshCw size={10} />更新并重载</button></div>}
@@ -85,6 +103,7 @@ function AppShell() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes></Suspense></AppErrorBoundary></div>
     </main>
+    <AppearanceSettings open={appearanceOpen} value={appearance} saveFailed={appearanceSaveFailed} onChange={changeAppearance} onClose={() => setAppearanceOpen(false)} />
   </div>;
 }
 

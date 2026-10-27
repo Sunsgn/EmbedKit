@@ -22,15 +22,16 @@ const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function CodeEd
   ref,
 ) {
   const editorRef = useRef<ReactCodeMirrorRef>(null);
+  const isDark = document.documentElement.dataset.colorMode !== 'light';
   const extensions = useMemo(() => {
     const languageExtension = /^(?:c|h|cc|cpp|cxx)$/i.test(language) ? [cpp()] : [];
     return [
       ...languageExtension,
       EditorView.theme({
-        '&': { height: '100%', fontSize: `${fontSize}px`, backgroundColor: '#0d1117' },
+        '&': { height: '100%', fontSize: `${fontSize}px`, backgroundColor: 'var(--theme-canvas)' },
         '.cm-scroller': { overflow: 'auto', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' },
         '.cm-content': { minHeight: '100%' },
-        '.cm-gutters': { backgroundColor: '#111820', borderRight: '1px solid #30363d' },
+        '.cm-gutters': { backgroundColor: 'var(--theme-panel-soft)', borderRight: '1px solid var(--theme-border)' },
       }),
     ];
   }, [fontSize, language]);
@@ -55,7 +56,7 @@ const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(function CodeEd
         ref={editorRef}
         value={value}
         height={resolvedHeight}
-        theme="dark"
+        theme={isDark ? 'dark' : 'light'}
         extensions={extensions}
         editable={!readOnly}
         readOnly={readOnly}
