@@ -2,8 +2,9 @@ import { agentRequest } from './agentClient';
 
 export interface SerialAgentPort { path: string; manufacturer: string; serialNumber: string; vendorId: string; productId: string; pnpId: string; friendlyName: string }
 export interface SerialAgentEvent { id: number; timestamp: string; direction: 'rx' | 'tx' | 'system'; text: string; hex: string; byteLength: number }
-export interface SerialAgentSession { id: string; path: string; baudRate: number; dataBits: number; stopBits: number; parity: string; flowControl: string; dtr: boolean; rts: boolean; state: 'connecting' | 'connected' | 'error' | 'closed'; rxBytes: number; txBytes: number; openedAt: string; events: SerialAgentEvent[]; reused?: boolean }
-export interface OpenSerialOptions { path: string; baudRate: number; dataBits?: number; stopBits?: number; parity?: string; flowControl?: string; dtr?: boolean; rts?: boolean }
+export type SerialFrameMode = 'auto' | 'line' | 'idle' | 'raw';
+export interface SerialAgentSession { id: string; path: string; baudRate: number; dataBits: number; stopBits: number; parity: string; flowControl: string; dtr: boolean; rts: boolean; frameMode?: SerialFrameMode; frameGapMs?: number; state: 'connecting' | 'connected' | 'error' | 'closed'; rxBytes: number; txBytes: number; openedAt: string; events: SerialAgentEvent[]; reused?: boolean }
+export interface OpenSerialOptions { path: string; baudRate: number; dataBits?: number; stopBits?: number; parity?: string; flowControl?: string; dtr?: boolean; rts?: boolean; frameMode?: SerialFrameMode; frameGapMs?: number }
 
 export async function listSerialPorts() { return (await agentRequest<{ ports: SerialAgentPort[] }>('/api/serial/ports')).ports; }
 export async function listSerialSessions() { return (await agentRequest<{ sessions: SerialAgentSession[] }>('/api/serial/sessions')).sessions; }

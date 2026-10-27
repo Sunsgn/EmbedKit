@@ -53,6 +53,7 @@ describe('AgentSerialDebugger independent degradation', () => {
     await waitFor(() => expect(screen.getByText('Agent：在线 · 0 个会话')).toBeVisible());
     fireEvent.click(screen.getByRole('button', { name: '连接' }));
     await waitFor(() => expect(screen.getByText('VIRTUAL0 · 115200 8N1')).toBeVisible());
+    expect(serialAgent.openSerialSession).toHaveBeenCalledWith(expect.objectContaining({ path: 'VIRTUAL0', frameMode: 'raw', frameGapMs: 30 }));
 
     fireEvent.change(screen.getByLabelText('发送行尾'), { target: { value: 'crlf' } });
     const input = screen.getByPlaceholderText('输入内容，Enter 发送');
@@ -108,6 +109,25 @@ describe('AgentSerialDebugger independent degradation', () => {
     expect(within(leftTerminal).getByText('6C 65 66 74')).toBeVisible();
     expect(within(rightTerminal).getByText('right')).toBeVisible();
     expect(rightHex).not.toBeChecked();
-    expect(JSON.parse(localStorage.getItem('embedkit.serial.settings') || '{}')).toMatchObject({ version: 2, leftRxHex: true, rightRxHex: false });
+    expect(JSON.parse(localStorage.getItem('embedkit.serial.settings') || '{}')).toMatchObject({ version: 3, leftRxHex: true, rightRxHex: false });
+  });
+
+  it('merges raw Local Agent chunks into one continuous RX display without waiting', async () => {
+    const session = {
+      id: 'session-stream', path: 'COM8', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false,
+      frameMode: 'raw' as const, frameGapMs: 30, state: 'connected' as const, rxBytes: 23, txBytes: 0, openedAt: '2026-10-27T00:00:00Z',
+      events: [
+        { id: 1, timestamp: '2026-10-27T00:00:01Z', direction: 'rx' as const, text: 'first line\r\n', hex: '66 69 72 73 74 20 6C 69 6E 65 0D 0A', byteLength: 12 },
+        { id: 2, timestamp: '2026-10-27T00:00:01.010Z', direction: 'rx' as const, text: 'second line', hex: '73 65 63 6F 6E 64 20 6C 69 6E 65', byteLength: 11 },
+      ],
+    };
+    vi.mocked(serialAgent.listSerialPorts).mockResolvedValue([]);
+    vi.mocked(serialAgent.listSerialSessions).mockResolvedValue([session]);
+    vi.mocked(serialAgent.readSerialSession).mockImplementation(() => new Promise(() => undefined));
+
+    render(<AgentSerialDebugger />);
+    const terminal = await screen.findByTestId('agent-serial-terminal-left');
+    await waitFor(() => expect(terminal.textContent).toContain('first line\r\nsecond line'));
+    expect(within(terminal).getAllByText('RX')).toHaveLength(1);
   });
 });

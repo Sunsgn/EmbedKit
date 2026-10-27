@@ -5,6 +5,7 @@ import SerialPage from './SerialPage';
 describe('SerialPage browser-direct mode', () => {
   afterEach(() => {
     Reflect.deleteProperty(navigator, 'serial');
+    localStorage.clear();
     vi.restoreAllMocks();
   });
 
@@ -53,6 +54,26 @@ describe('SerialPage browser-direct mode', () => {
     view.unmount();
   });
 
+  it('continuously appends every received chunk without waiting for an idle gap', async () => {
+    const readable = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('first line\r\n'));
+        controller.enqueue(new TextEncoder().encode('second line'));
+      },
+    });
+    const port = { readable, writable: new WritableStream<Uint8Array>(), open: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined), getInfo: () => ({}), setSignals: vi.fn().mockResolvedValue(undefined) };
+    Object.defineProperty(navigator, 'serial', { configurable: true, value: { requestPort: vi.fn().mockResolvedValue(port), addEventListener: vi.fn(), removeEventListener: vi.fn() } });
+
+    const view = render(<SerialPage />);
+    fireEvent.click(screen.getByRole('button', { name: /添加/ }));
+    const terminal = await screen.findByTestId('browser-serial-terminal-left');
+    await waitFor(() => expect(terminal.textContent).toContain('first line\r\nsecond line'));
+    expect(within(terminal).getAllByText('RX')).toHaveLength(1);
+    expect(screen.getByText('RX 23 B')).toBeVisible();
+    expect(JSON.parse(localStorage.getItem('embedkit.serial.settings') || '{}')).toMatchObject({ version: 3, frameMode: 'raw' });
+    view.unmount();
+  });
+
   it('keeps HEX display independent for the left and right split panes', async () => {
     const createPort = (text: string) => ({
       readable: new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode(`${text}\n`)); } }),
@@ -80,10 +101,10 @@ describe('SerialPage browser-direct mode', () => {
     expect(rightHex).not.toBeChecked();
 
     fireEvent.click(leftHex);
-    expect(within(leftTerminal).getByText('72 69 67 68 74')).toBeVisible();
+    expect(within(leftTerminal).getByText('72 69 67 68 74 0A')).toBeVisible();
     expect(within(rightTerminal).getByText('left')).toBeVisible();
     expect(rightHex).not.toBeChecked();
-    expect(JSON.parse(localStorage.getItem('embedkit.serial.settings') || '{}')).toMatchObject({ version: 2, leftRxHex: true, rightRxHex: false });
+    expect(JSON.parse(localStorage.getItem('embedkit.serial.settings') || '{}')).toMatchObject({ version: 3, leftRxHex: true, rightRxHex: false });
     view.unmount();
   });
 });
