@@ -31,8 +31,11 @@ describe('CommunicationPage independent mode', () => {
   it('switches independently between all communication transports', () => {
     render(<CommunicationPage />);
 
-    fireEvent.click(screen.getByRole('tab', { name: /WebSocket/ }));
+    const websocket = screen.getByRole('tab', { name: /WebSocket/ });
+    fireEvent.click(websocket);
     expect(screen.getByText('独立 WebSocket 工作区')).toBeVisible();
+    expect(websocket).toHaveClass('text-blue-300');
+    expect(websocket).not.toHaveClass('text-green-300');
 
     fireEvent.click(screen.getByRole('tab', { name: /TCP \/ UDP/ }));
     expect(screen.getByText('独立 TCP UDP 工作区')).toBeVisible();

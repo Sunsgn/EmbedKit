@@ -111,17 +111,21 @@ html[data-accent='orange'] { --theme-accent-200: #fed7aa; --theme-accent-300: #f
 .theme-main { background-color: var(--theme-canvas) !important; }
 .theme-main { background-image: radial-gradient(circle at 80% -20%, color-mix(in srgb, var(--theme-accent-500) 9%, transparent), transparent 36%) !important; }
 .theme-sidebar { background-color: color-mix(in srgb, var(--theme-sidebar) 96%, transparent) !important; }
+.communication-toolbar { background-color: color-mix(in srgb, var(--theme-panel-soft) 95%, transparent) !important; }
 html[data-color-mode='light'] .dashboard-hero {
   background-image: linear-gradient(135deg, color-mix(in srgb, var(--theme-accent-500) 9%, white), white 52%, rgb(245 243 255)) !important;
 }
 
 [class~="bg-[#0d1117]"], [class~="bg-[#0b1016]"], [class~="bg-[#090d12]"] { background-color: var(--theme-canvas) !important; }
 [class~="bg-[#0d1117]/60"] { background-color: color-mix(in srgb, var(--theme-canvas) 60%, transparent) !important; }
+[class~="bg-[#0d1117]/70"] { background-color: color-mix(in srgb, var(--theme-canvas) 70%, transparent) !important; }
+[class~="bg-[#0d1117]/80"] { background-color: color-mix(in srgb, var(--theme-canvas) 80%, transparent) !important; }
 [class~="bg-[#161b22]"], [class~="bg-[#161b22]/95"] { background-color: var(--theme-panel) !important; }
-[class~="bg-[#111820]"] { background-color: var(--theme-panel-soft) !important; }
+[class~="bg-[#111820]"], [class~="bg-[#111820]/95"] { background-color: var(--theme-panel-soft) !important; }
 [class~="bg-[#141920]/95"] { background-color: color-mix(in srgb, var(--theme-sidebar) 95%, transparent) !important; }
 [class~="bg-[#1c2128]"] { background-color: var(--theme-hover) !important; }
 [class~="hover:bg-[#1c2128]"]:hover { background-color: var(--theme-hover) !important; }
+.group:hover [class~="group-hover:bg-[#202731]"] { background-color: var(--theme-hover) !important; }
 [class~="border-[#30363d]"], [class~="border-[#30363d]/80"], [class~="border-[#30363d]/70"], [class~="border-[#30363d]/60"] { border-color: var(--theme-border) !important; }
 [class~="border-[#484f58]"] { border-color: var(--theme-border-strong) !important; }
 
