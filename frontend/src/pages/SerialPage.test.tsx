@@ -54,6 +54,35 @@ describe('SerialPage browser-direct mode', () => {
     view.unmount();
   });
 
+  it('continues receiving after a device reset reports a serial BREAK', async () => {
+    const interrupted = new ReadableStream<Uint8Array>({
+      start(controller) { controller.error(new DOMException('Break received', 'NetworkError')); },
+    });
+    const resumed = new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode('boot complete\r\n')); },
+    });
+    let readableAccesses = 0;
+    const port = {
+      get readable() { readableAccesses += 1; return readableAccesses === 1 ? interrupted : resumed; },
+      writable: new WritableStream<Uint8Array>(),
+      open: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      getInfo: () => ({}),
+      setSignals: vi.fn().mockResolvedValue(undefined),
+    };
+    Object.defineProperty(navigator, 'serial', { configurable: true, value: { requestPort: vi.fn().mockResolvedValue(port), addEventListener: vi.fn(), removeEventListener: vi.fn() } });
+
+    const view = render(<SerialPage />);
+    fireEvent.click(screen.getByRole('button', { name: /添加/ }));
+
+    expect(await screen.findByText(/检测到串口 BREAK.*正在自动恢复读取/)).toBeVisible();
+    expect(await screen.findByText('boot complete')).toBeVisible();
+    expect(screen.getByText('RX 15 B')).toBeVisible();
+    expect(screen.queryByText(/读取失败：Break received/)).not.toBeInTheDocument();
+    expect(screen.getByText(/^已连接 串口/)).toBeVisible();
+    view.unmount();
+  });
+
   it('retries one transient first-open failure without reporting a false connection failure', async () => {
     const port = {
       readable: new ReadableStream<Uint8Array>(),

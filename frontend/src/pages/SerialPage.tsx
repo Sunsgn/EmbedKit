@@ -35,6 +35,7 @@ function portName(port: Port, index: number) { const i = port.getInfo(); const d
 function drainRuntimeBuffer(runtime: Runtime) { if (runtime.timer !== null) clearTimeout(runtime.timer); const buffered = runtime.buffer; runtime.timer = null; runtime.buffer = []; return buffered; }
 function isTransientOpenError(reason: unknown) { const name = reason instanceof DOMException ? reason.name : '', message = reason instanceof Error ? reason.message : String(reason); return name === 'NetworkError' || /failed to open serial port|serial port.*temporarily unavailable/i.test(message); }
 function isPortChooserCancellation(reason: unknown) { const name = reason instanceof DOMException ? reason.name : '', message = reason instanceof Error ? reason.message : String(reason); return name === 'NotFoundError' || name === 'AbortError' || /cancel|no port selected/i.test(message); }
+function isRecoverableSerialReadError(reason: unknown) { const message = reason instanceof Error ? reason.message : String(reason); return /break received|framing error|parity error|buffer overrun|overrun error/i.test(message); }
 async function openPort(port: Port, options: PortOpenOptions) {
   try { await port.open(options); return false; }
   catch (reason) {
@@ -131,10 +132,32 @@ export default function SerialPage() {
     setFrameMode(next);
   };
   const read = useCallback(async (id: number) => {
-    const r = runtimes.current.get(id); if (!r?.port.readable || r.reading) return; r.reading = true; r.buffer = []; const reader = r.port.readable.getReader(); r.reader = reader;
-    try { while (r.reading) { const { value, done } = await reader.read(); if (done) break; if (value?.length) { const capture = rawCaptures.current.get(id) ?? { events: [], byteLength: 0, truncated: false }, remaining = COMMUNICATION_CAPTURE_MAX_BYTES - capture.byteLength, captured = value.slice(0, Math.max(0, remaining)); if (captured.length) { capture.events.push({ timestamp: new Date().toISOString(), direction: 'rx', hex: hex([...captured]) }); capture.byteLength += captured.length; } if (captured.length < value.length) capture.truncated = true; rawCaptures.current.set(id, capture); update(id, (s) => ({ ...s, rx: s.rx + value.length, captureBytes: capture.byteLength })); process(id, value); } } }
-    catch (e) { if (r.reading) append(id, `读取失败：${e instanceof Error ? e.message : String(e)}`, 'system'); }
-    finally { r.reading = false; if (r.reader === reader) r.reader = null; try { reader.releaseLock(); } catch { /* 已释放 */ } }
+    const r = runtimes.current.get(id); if (!r || r.reading) return; r.reading = true; r.buffer = [];
+    try {
+      while (r.reading) {
+        const readable = r.port.readable;
+        if (!readable) break;
+        const reader = readable.getReader(); r.reader = reader;
+        let recoverableError: unknown = null;
+        try {
+          while (r.reading) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            if (value?.length) { const capture = rawCaptures.current.get(id) ?? { events: [], byteLength: 0, truncated: false }, remaining = COMMUNICATION_CAPTURE_MAX_BYTES - capture.byteLength, captured = value.slice(0, Math.max(0, remaining)); if (captured.length) { capture.events.push({ timestamp: new Date().toISOString(), direction: 'rx', hex: hex([...captured]) }); capture.byteLength += captured.length; } if (captured.length < value.length) capture.truncated = true; rawCaptures.current.set(id, capture); update(id, (s) => ({ ...s, rx: s.rx + value.length, captureBytes: capture.byteLength })); process(id, value); }
+          }
+        } catch (reason) {
+          if (r.reading && isRecoverableSerialReadError(reason)) recoverableError = reason;
+          else if (r.reading) append(id, `读取失败：${reason instanceof Error ? reason.message : String(reason)}`, 'system');
+        } finally {
+          if (r.reader === reader) r.reader = null;
+          try { reader.releaseLock(); } catch { /* 已释放 */ }
+        }
+        if (!recoverableError || !r.reading) break;
+        const message = recoverableError instanceof Error ? recoverableError.message : String(recoverableError);
+        append(id, /break received/i.test(message) ? '检测到串口 BREAK（设备可能已重启），正在自动恢复读取' : `检测到可恢复的串口线路错误（${message}），正在继续读取`, 'system');
+        await new Promise(resolve => window.setTimeout(resolve, 50));
+      }
+    } finally { r.reading = false; r.reader = null; }
   }, [append, process, update]);
   const stop = useCallback(async (id: number, close = true) => { const r = runtimes.current.get(id); if (!r) return; r.reading = false; if (r.timer !== null) clearTimeout(r.timer); flush(id); const reader = r.reader; r.reader = null; if (reader) { try { await reader.cancel(); } catch { /* 已断开 */ } try { reader.releaseLock(); } catch { /* 已释放 */ } } if (close) try { await r.port.close(); } catch { /* 已关闭 */ } }, [flush]);
 
