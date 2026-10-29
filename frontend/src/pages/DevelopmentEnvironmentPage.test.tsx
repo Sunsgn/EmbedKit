@@ -56,6 +56,23 @@ describe('DevelopmentEnvironmentPage', () => {
     expect(createSoftwareInstallJob).not.toHaveBeenCalled();
   });
 
+  it('shows bundled serial support and offers managed tools without a project', async () => {
+    vi.mocked(listEngineeringProjects).mockResolvedValue([]);
+    vi.mocked(getAgentStatus).mockResolvedValue({ available: true, name: 'Agent', version: '1', protocolVersion: 1, uptimeSeconds: 1, capabilities: ['serial', 'local-file-read', 'tcp-client', 'elf-analysis', 'software-environment', 'software-installation'], serialSessions: 0, networkSessions: 0, buildJobs: 0 });
+    vi.mocked(scanDevelopmentSoftware).mockResolvedValue({ schemaVersion: 1, platform: 'win32', architecture: 'x64', detectedAt: '', unavailable: [], installations: [] });
+    vi.mocked(listSoftwareInstallManifests).mockResolvedValue([manifest]);
+    vi.mocked(selectLocalDirectory).mockResolvedValue({ cancelled: true, kind: 'directory' });
+
+    render(<DevelopmentEnvironmentPage />);
+
+    expect(screen.getByText('系统串口通信')).toBeVisible();
+    expect(await screen.findAllByText('已内置')).toHaveLength(4);
+    expect(screen.getByText(/不创建工程也可安装/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '安装 Ninja' }));
+    expect(await screen.findByText('未选择安装目录，未进行任何更改。')).toBeVisible();
+    expect(createSoftwareInstallJob).not.toHaveBeenCalled();
+  });
+
   it('confirms installation, polls the job and rescans after verification', async () => {
     vi.mocked(listEngineeringProjects).mockResolvedValue([ninjaProject]);
     vi.mocked(getAgentStatus).mockResolvedValue({ available: true, name: 'Agent', version: '1', protocolVersion: 1, uptimeSeconds: 1, capabilities: ['software-environment', 'software-installation'], serialSessions: 0, networkSessions: 0, buildJobs: 0 });
