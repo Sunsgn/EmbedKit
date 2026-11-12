@@ -12,6 +12,9 @@ import { deleteLocalPartDocument, importLocalPartDocument, listLocalPartDocument
 import type { FunctionSolution } from '../types';
 
 const PartDocumentWorkspace = lazy(() => import('../features/resources/PartDocumentWorkspace'));
+const EmbeddedKnowledgeBase = lazy(() => import('../features/resources/EmbeddedKnowledgeBase'));
+
+type ResourceMode = 'catalog' | 'knowledge' | 'solution' | 'records';
 
 interface CatalogItem {
   id: string;
@@ -174,9 +177,9 @@ function hasChipDocumentation(item: CatalogItem) {
 }
 
 export default function ChipLibPage() {
-  const [mode, setMode] = useState<'catalog' | 'solution' | 'records'>(() => {
+  const [mode, setMode] = useState<ResourceMode>(() => {
     const stored = localStorage.getItem('embedkit.resources-mode');
-    return stored === 'solution' || stored === 'records' ? stored : 'catalog';
+    return stored === 'knowledge' || stored === 'solution' || stored === 'records' ? stored : 'catalog';
   });
   const [openedSolution, setOpenedSolution] = useState<FunctionSolution>();
   const [search, setSearch] = useState('');
@@ -212,13 +215,19 @@ export default function ChipLibPage() {
           </div>
         </header>
 
-        <nav aria-label="资料中心模式" className="mb-5 grid gap-2 sm:grid-cols-2">
+        <nav aria-label="资料中心模式" className="mb-5 grid gap-2 md:grid-cols-3">
           {[
             {
               id: 'catalog' as const,
               name: '按型号查询器件',
               detail: '型号、手册、CAD 与来源导航',
               icon: Search,
+            },
+            {
+              id: 'knowledge' as const,
+              name: '嵌入式开发知识库',
+              detail: '方法、案例、模板与 AI 约束',
+              icon: BookOpen,
             },
             {
               id: 'records' as const,
@@ -238,6 +247,7 @@ export default function ChipLibPage() {
         </nav>
 
         {mode === 'solution' && <FunctionalSelectionCenter initialSolution={openedSolution} />}
+        {mode === 'knowledge' && <Suspense fallback={<div className="flex min-h-80 items-center justify-center text-sm text-gray-500"><Loader2 className="mr-2 animate-spin" />正在加载本地知识库…</div>}><EmbeddedKnowledgeBase /></Suspense>}
         {mode === 'records' && (
           <FunctionSolutionRecords
             onOpen={(solution) => {

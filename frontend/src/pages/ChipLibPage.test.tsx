@@ -20,6 +20,17 @@ describe('ChipLibPage layout', () => {
     expect(screen.queryByRole('heading', { name: '批量型号核验' })).not.toBeInTheDocument();
   });
 
+  it('opens the offline embedded development knowledge base and persists the workspace', async () => {
+    render(<ChipLibPage />);
+    fireEvent.click(screen.getByRole('button', { name: /嵌入式开发知识库/ }));
+    expect(await screen.findByRole('region', { name: '嵌入式开发知识库' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '搜索知识库' })).toBeInTheDocument();
+    expect(screen.getByText('12 份文档')).toBeInTheDocument();
+    expect(localStorage.getItem('embedkit.resources-mode')).toBe('knowledge');
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索知识库' }), { target: { value: 'OV3660 位映射' } });
+    expect(screen.getByRole('button', { name: /RV1106 Linux 用户应用项目总结/ })).toBeInTheDocument();
+  });
+
   it('carries pasted recommendation candidates into the verification workspace', () => {
     render(<ChipLibPage />);
     fireEvent.click(screen.getByRole('button', { name: /批量核验 AI 给出的型号/ }));
