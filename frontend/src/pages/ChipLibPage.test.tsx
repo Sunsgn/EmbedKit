@@ -31,6 +31,23 @@ describe('ChipLibPage layout', () => {
     expect(screen.getByRole('button', { name: /RV1106 Linux 用户应用项目总结/ })).toBeInTheDocument();
   });
 
+  it('records local engineering experience and blocks unverified conclusions', async () => {
+    render(<ChipLibPage />);
+    fireEvent.click(screen.getByRole('button', { name: /嵌入式开发知识库/ }));
+    await screen.findByRole('region', { name: '嵌入式开发知识库' });
+    fireEvent.click(screen.getByRole('button', { name: '本地工程经验' }));
+    fireEvent.change(screen.getByLabelText('标题 *'), { target: { value: 'UART DMA 超时' } });
+    fireEvent.change(screen.getByLabelText('症状 *'), { target: { value: '连续接收后停止' } });
+    fireEvent.change(screen.getByLabelText('记录状态'), { target: { value: 'verified' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('证据引用和复测步骤');
+    fireEvent.change(screen.getByLabelText('记录状态'), { target: { value: 'draft' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    expect(screen.getByRole('status')).toHaveTextContent('经验记录已保存');
+    expect(localStorage.getItem('embedkit.knowledge-experiences')).toContain('UART DMA 超时');
+    expect(localStorage.getItem('embedkit.knowledge-workspace')).toBe('experiences');
+  });
+
   it('carries pasted recommendation candidates into the verification workspace', () => {
     render(<ChipLibPage />);
     fireEvent.click(screen.getByRole('button', { name: /批量核验 AI 给出的型号/ }));

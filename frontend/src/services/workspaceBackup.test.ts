@@ -49,6 +49,16 @@ describe('workspace backup', () => {
     expect(localStorage.getItem('embedkit.part-selection-records')).toBe('[]');
   });
 
+  it('validates and restores the versioned local engineering experience library', async () => {
+    const value = backup() as WorkspaceBackup & { local: Record<string, unknown> };
+    value.local['embedkit.knowledge-experiences'] = { schema: 'embedkit.knowledge-experiences', version: 1, exportedAt: '2026-11-12T00:00:00.000Z', records: [{ schemaVersion: 1, id: 'uart-1', title: 'UART 超时', symptom: '接收停止', context: '', applicability: '', possibleCauses: [], diagnosticSteps: [], resolutionSteps: [], rollbackSteps: [], retestSteps: [], evidenceReferences: [], status: 'draft', createdAt: '2026-11-12T00:00:00.000Z', updatedAt: '2026-11-12T00:00:00.000Z' }] };
+    const parsed = parseWorkspaceBackup(JSON.stringify(value));
+    await applyWorkspaceBackup(parsed, localStorage, async () => undefined);
+    expect(localStorage.getItem('embedkit.knowledge-experiences')).toContain('UART 超时');
+    (value.local['embedkit.knowledge-experiences'] as Record<string, unknown>).version = 2;
+    expect(() => parseWorkspaceBackup(JSON.stringify(value))).toThrow(/经验库格式或版本/);
+  });
+
   it('keeps versioned appearance preferences portable', () => {
     const value = backup() as WorkspaceBackup & { local: Record<string, unknown> };
     value.local['embedkit.appearance'] = { schema: 'embedkit.appearance', version: 1, colorMode: 'light', darkSurface: 'navy', accent: 'cyan', reduceMotion: true };

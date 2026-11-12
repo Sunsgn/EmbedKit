@@ -21,6 +21,7 @@ const RULES: StorageRule[] = [
   { key: 'embedkit.automation.suites', label: '集成测试套件', shape: 'array' },
   { key: 'embedkit-learning-progress', label: '学习进度', shape: 'object' },
   { key: 'embedkit.build-analysis-records', label: '构建分析摘要', shape: 'array' },
+  { key: 'embedkit.knowledge-experiences', label: '本地工程经验', shape: 'object' },
 ];
 
 export interface StorageHealthIssue {
