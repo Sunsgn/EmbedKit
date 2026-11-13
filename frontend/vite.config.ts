@@ -11,6 +11,10 @@ export function repositoryMarkdownPlugin(): Plugin {
   const documents = {
     aiStandardsOverview: 'AI嵌入式开发规范/README.md',
     aiStartupProtocol: 'AI嵌入式开发规范/00-AI项目启动与推进协议.md',
+    aiTaskRouting: 'AI嵌入式开发规范/00A-任务定级与路由.md',
+    aiGateEvidence: 'AI嵌入式开发规范/00B-门禁与证据总表.md',
+    aiStopAuthorization: 'AI嵌入式开发规范/00C-停止规则与授权边界.md',
+    aiHandoffStatus: 'AI嵌入式开发规范/00D-交接包与状态模板.md',
     aiExecutionRules: 'AI嵌入式开发规范/01-AI执行总则.md',
     aiProjectInputs: 'AI嵌入式开发规范/01A-项目输入与立项.md',
     aiProjectWorkflow: 'AI嵌入式开发规范/02-完整项目开发流程.md',
@@ -20,6 +24,7 @@ export function repositoryMarkdownPlugin(): Plugin {
     aiProjectVariables: 'AI嵌入式开发规范/06-项目变量模板.md',
     aiDeliverableTemplates: 'AI嵌入式开发规范/07-交付物模板库.md',
     aiGateDirectoryMap: 'AI嵌入式开发规范/08-阶段门禁与目录映射表.md',
+    projectDirectoryFramework: '项目目录框架.md',
     generalGuide: 'AI辅助嵌入式产品开发通用指南.md',
     mcuProblemReview: 'MCU与RTOS问题解决及开发规避.md',
     linuxProblemReview: '嵌入式Linux问题解决及开发规避.md',
