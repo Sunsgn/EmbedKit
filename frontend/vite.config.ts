@@ -10,6 +10,7 @@ export function repositoryMarkdownPlugin(): Plugin {
   const resolvedId = '\0embedkit-repository-markdown'
   const documents = {
     aiStandardsOverview: 'AI嵌入式开发规范/README.md',
+    aiStartupProtocol: 'AI嵌入式开发规范/00-AI项目启动与推进协议.md',
     aiExecutionRules: 'AI嵌入式开发规范/01-AI执行总则.md',
     aiProjectInputs: 'AI嵌入式开发规范/01A-项目输入与立项.md',
     aiProjectWorkflow: 'AI嵌入式开发规范/02-完整项目开发流程.md',
@@ -17,6 +18,8 @@ export function repositoryMarkdownPlugin(): Plugin {
     aiHardwareStandard: 'AI嵌入式开发规范/04-原理图与PCB设计规范.md',
     aiVerificationStandard: 'AI嵌入式开发规范/05-验证与交付规范.md',
     aiProjectVariables: 'AI嵌入式开发规范/06-项目变量模板.md',
+    aiDeliverableTemplates: 'AI嵌入式开发规范/07-交付物模板库.md',
+    aiGateDirectoryMap: 'AI嵌入式开发规范/08-阶段门禁与目录映射表.md',
     generalGuide: 'AI辅助嵌入式产品开发通用指南.md',
     mcuProblemReview: 'MCU与RTOS问题解决及开发规避.md',
     linuxProblemReview: '嵌入式Linux问题解决及开发规避.md',
