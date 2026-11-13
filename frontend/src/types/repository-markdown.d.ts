@@ -1,6 +1,12 @@
 declare module 'virtual:embedkit-repository-markdown' {
   const documents: {
-    aiConstraints: string;
+    aiStandardsOverview: string;
+    aiExecutionRules: string;
+    aiProjectWorkflow: string;
+    aiSoftwareStandard: string;
+    aiHardwareStandard: string;
+    aiVerificationStandard: string;
+    aiProjectVariables: string;
     generalGuide: string;
     mcuProblemReview: string;
     linuxProblemReview: string;
