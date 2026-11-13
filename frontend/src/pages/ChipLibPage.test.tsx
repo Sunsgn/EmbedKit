@@ -1,10 +1,11 @@
 import 'fake-indexeddb/auto';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { deleteKnowledgeDocumentDatabaseForTests } from '../services/knowledgeDocumentLibrary';
 import { deleteLocalPartDocumentDatabaseForTests } from '../services/partDocumentLibrary';
 import ChipLibPage from './ChipLibPage';
 
-beforeEach(async () => { localStorage.clear(); vi.unstubAllGlobals(); await deleteLocalPartDocumentDatabaseForTests(); });
+beforeEach(async () => { localStorage.clear(); vi.unstubAllGlobals(); await deleteLocalPartDocumentDatabaseForTests(); await deleteKnowledgeDocumentDatabaseForTests(); });
 
 describe('ChipLibPage layout', () => {
   it('keeps model lookup primary and opens batch verification as a secondary workspace', () => {
@@ -25,10 +26,23 @@ describe('ChipLibPage layout', () => {
     fireEvent.click(screen.getByRole('button', { name: /嵌入式开发知识库/ }));
     expect(await screen.findByRole('region', { name: '嵌入式开发知识库' })).toHaveClass('theme-panel-soft', 'theme-border');
     expect(screen.getByRole('textbox', { name: '搜索知识库' })).toBeInTheDocument();
-    expect(screen.getByText('27 份文档')).toBeInTheDocument();
+    expect(screen.getByText('27 份内置文档')).toBeInTheDocument();
     expect(localStorage.getItem('embedkit.resources-mode')).toBe('knowledge');
     fireEvent.change(screen.getByRole('textbox', { name: '搜索知识库' }), { target: { value: 'DMA 物理位映射' } });
     expect(screen.getByRole('button', { name: /嵌入式 Linux 问题解决及开发规避/ })).toBeInTheDocument();
+  });
+
+  it('imports and searches a local document inside the knowledge base', async () => {
+    render(<ChipLibPage />);
+    fireEvent.click(screen.getByRole('button', { name: /嵌入式开发知识库/ }));
+    await screen.findByRole('region', { name: '嵌入式开发知识库' });
+    fireEvent.click(screen.getByRole('button', { name: '导入文档' }));
+    fireEvent.change(screen.getByLabelText('选择知识库文档'), { target: { files: [new File(['# CAN 调试\n检查终端电阻与错误帧。'], 'can-guide.md', { type: 'text/markdown' })] } });
+    expect(await screen.findByRole('button', { name: /CAN 调试/ })).toBeInTheDocument();
+    expect(screen.getAllByText(/检查终端电阻与错误帧/).length).toBeGreaterThan(0);
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索导入文档' }), { target: { value: '错误帧' } });
+    expect(screen.getByRole('button', { name: /CAN 调试/ })).toBeInTheDocument();
+    expect(localStorage.getItem('embedkit.knowledge-workspace')).toBe('documents');
   });
 
   it('records local engineering experience and blocks unverified conclusions', async () => {
