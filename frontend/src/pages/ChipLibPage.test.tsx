@@ -27,8 +27,8 @@ describe('ChipLibPage layout', () => {
     expect(screen.getByRole('textbox', { name: '搜索知识库' })).toBeInTheDocument();
     expect(screen.getByText('12 份文档')).toBeInTheDocument();
     expect(localStorage.getItem('embedkit.resources-mode')).toBe('knowledge');
-    fireEvent.change(screen.getByRole('textbox', { name: '搜索知识库' }), { target: { value: 'OV3660 位映射' } });
-    expect(screen.getByRole('button', { name: /RV1106 Linux 用户应用项目总结/ })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('textbox', { name: '搜索知识库' }), { target: { value: 'DMA 物理位映射' } });
+    expect(screen.getByRole('button', { name: /嵌入式 Linux 问题解决及开发规避/ })).toBeInTheDocument();
   });
 
   it('records local engineering experience and blocks unverified conclusions', async () => {

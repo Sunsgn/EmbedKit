@@ -11,8 +11,8 @@ export function repositoryMarkdownPlugin(): Plugin {
   const documents = {
     aiConstraints: 'AI嵌入式开发约束.md',
     generalGuide: 'AI辅助嵌入式产品开发通用指南.md',
-    a22Summary: 'FreeRTOS_A22家用燃气灶项目开发总结与整理建议.md',
-    rv1106Summary: 'RV1106_Linux用户应用项目开发总结与整理建议.md',
+    mcuProblemReview: 'MCU与RTOS问题解决及开发规避.md',
+    linuxProblemReview: '嵌入式Linux问题解决及开发规避.md',
     knowledgeOverview: '嵌入式开发知识库/README.md',
     engineeringMethod: '嵌入式开发知识库/01-通用工程方法.md',
     mcuRtos: '嵌入式开发知识库/02-MCU与RTOS开发.md',

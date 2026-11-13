@@ -226,7 +226,7 @@ export default function ChipLibPage() {
             {
               id: 'knowledge' as const,
               name: '嵌入式开发知识库',
-              detail: '方法、案例、模板与 AI 约束',
+              detail: '方法、问题复盘、模板与 AI 约束',
               icon: BookOpen,
             },
             {

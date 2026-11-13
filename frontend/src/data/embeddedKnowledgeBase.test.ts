@@ -10,9 +10,9 @@ describe('embeddedKnowledgeBase', () => {
 
   it('searches full content and preserves platform-specific boundaries', () => {
     expect(searchEmbeddedKnowledge('ISR DMA').map(document => document.id)).toContain('mcu-rtos');
-    expect(searchEmbeddedKnowledge('OV3660 位映射').map(document => document.id)).toContain('rv1106-case');
+    expect(searchEmbeddedKnowledge('DMA 物理位映射').map(document => document.id)).toContain('linux-problem-review');
     expect(searchEmbeddedKnowledge('', 'AI 约束').map(document => document.id)).toEqual(['ai-constraints']);
-    expect(knowledgeMatchSnippet(embeddedKnowledgeDocuments.find(document => document.id === 'rv1106-case')!, 'OV3660')).toContain('OV3660');
+    expect(knowledgeMatchSnippet(embeddedKnowledgeDocuments.find(document => document.id === 'linux-problem-review')!, '物理位映射')).toContain('物理位映射');
   });
 
   it('resolves internal markdown links without turning repository paths into web URLs', () => {
