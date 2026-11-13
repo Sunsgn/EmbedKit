@@ -25,7 +25,7 @@ describe('ChipLibPage layout', () => {
     fireEvent.click(screen.getByRole('button', { name: /嵌入式开发知识库/ }));
     expect(await screen.findByRole('region', { name: '嵌入式开发知识库' })).toHaveClass('theme-panel-soft', 'theme-border');
     expect(screen.getByRole('textbox', { name: '搜索知识库' })).toBeInTheDocument();
-    expect(screen.getByText('18 份文档')).toBeInTheDocument();
+    expect(screen.getByText('19 份文档')).toBeInTheDocument();
     expect(localStorage.getItem('embedkit.resources-mode')).toBe('knowledge');
     fireEvent.change(screen.getByRole('textbox', { name: '搜索知识库' }), { target: { value: 'DMA 物理位映射' } });
     expect(screen.getByRole('button', { name: /嵌入式 Linux 问题解决及开发规避/ })).toBeInTheDocument();

@@ -11,6 +11,7 @@ export function repositoryMarkdownPlugin(): Plugin {
   const documents = {
     aiStandardsOverview: 'AI嵌入式开发规范/README.md',
     aiExecutionRules: 'AI嵌入式开发规范/01-AI执行总则.md',
+    aiProjectInputs: 'AI嵌入式开发规范/01A-项目输入与立项.md',
     aiProjectWorkflow: 'AI嵌入式开发规范/02-完整项目开发流程.md',
     aiSoftwareStandard: 'AI嵌入式开发规范/03-软件编程技术规范.md',
     aiHardwareStandard: 'AI嵌入式开发规范/04-原理图与PCB设计规范.md',

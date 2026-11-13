@@ -1,6 +1,6 @@
 import repositoryMarkdown from 'virtual:embedkit-repository-markdown';
 
-const { aiStandardsOverview, aiExecutionRules, aiProjectWorkflow, aiSoftwareStandard, aiHardwareStandard, aiVerificationStandard, aiProjectVariables, generalGuide, mcuProblemReview, linuxProblemReview, knowledgeOverview, engineeringMethod, mcuRtos, embeddedLinux, communicationStorage, testingEvidence, caseBoundaries, engineeringTemplates } = repositoryMarkdown;
+const { aiStandardsOverview, aiExecutionRules, aiProjectInputs, aiProjectWorkflow, aiSoftwareStandard, aiHardwareStandard, aiVerificationStandard, aiProjectVariables, generalGuide, mcuProblemReview, linuxProblemReview, knowledgeOverview, engineeringMethod, mcuRtos, embeddedLinux, communicationStorage, testingEvidence, caseBoundaries, engineeringTemplates } = repositoryMarkdown;
 
 export type EmbeddedKnowledgeCategory = '知识导航' | '通用方法' | '平台开发' | '专题方法' | '工程模板' | 'AI 约束' | '问题复盘';
 
@@ -26,6 +26,7 @@ export const embeddedKnowledgeDocuments: EmbeddedKnowledgeDocument[] = [
   { id: 'templates', title: '工程模板', category: '工程模板', summary: '任务卡、事实表、资源预算、协议、测试、故障、发布和 AI 交付模板。', tags: ['模板', '任务卡', '测试记录', 'manifest'], sourcePath: 'docs/嵌入式开发知识库/07-工程模板.md', content: engineeringTemplates, evidence: '通用归纳' },
   { id: 'ai-constraints', title: 'AI 嵌入式产品开发规范', category: 'AI 约束', summary: '按 T0-T4 任务等级选择原子规则、必读分册和最小执行证据。', tags: ['AI', '规范入口', '任务分级', '规则路由'], sourcePath: 'docs/AI嵌入式开发规范/README.md', content: aiStandardsOverview, evidence: '执行约束' },
   { id: 'ai-execution-rules', title: 'AI 执行总则', category: 'AI 约束', summary: '用可审计规则 ID 约束 AI 的开工、事实、授权、停止和变更行为。', tags: ['AI', '权限', '安全', '证据', '停止规则'], sourcePath: 'docs/AI嵌入式开发规范/01-AI执行总则.md', content: aiExecutionRules, evidence: '执行约束' },
+  { id: 'ai-project-inputs', title: '项目输入与立项', category: 'AI 约束', summary: '定义完整项目的输入域、输入状态、冲突处理、阻塞等级和 G0-G5 阶段门禁。', tags: ['项目输入', '立项', '需求', '输入基线', '阶段门禁'], sourcePath: 'docs/AI嵌入式开发规范/01A-项目输入与立项.md', content: aiProjectInputs, evidence: '执行约束' },
   { id: 'ai-project-workflow', title: '完整嵌入式项目开发流程', category: 'AI 约束', summary: '约束 AI 执行需求、架构、设计、样机、Bring-up、验证、试产和维护门禁。', tags: ['项目流程', '需求', '架构', 'Bring-up', '试产'], sourcePath: 'docs/AI嵌入式开发规范/02-完整项目开发流程.md', content: aiProjectWorkflow, evidence: '执行约束' },
   { id: 'ai-software-standard', title: '软件编程技术规范', category: 'AI 约束', summary: '原子约束接口、内存、错误、并发、MCU/RTOS、Linux、协议、存储和升级。', tags: ['软件规范', 'MCU', 'RTOS', 'Linux', '通信', 'OTA'], sourcePath: 'docs/AI嵌入式开发规范/03-软件编程技术规范.md', content: aiSoftwareStandard, evidence: '执行约束' },
   { id: 'ai-hardware-standard', title: '原理图与 PCB 设计规范', category: 'AI 约束', summary: '原子约束器件、封装、电源、接口、原理图、布局布线、制造和样机验证。', tags: ['原理图', 'PCB', '器件', '封装', 'DFM'], sourcePath: 'docs/AI嵌入式开发规范/04-原理图与PCB设计规范.md', content: aiHardwareStandard, evidence: '执行约束' },
