@@ -22,10 +22,14 @@ describe('embeddedKnowledgeBase', () => {
     const constraints = embeddedKnowledgeDocuments.filter(document => document.category === 'AI 约束');
     expect(constraints).toHaveLength(7);
     expect(constraints.find(document => document.id === 'ai-constraints')?.content).toContain('任务类型与必读分册');
+    expect(constraints.find(document => document.id === 'ai-constraints')?.content).toContain('T0 只读');
+    expect(constraints.find(document => document.id === 'ai-execution-rules')?.content).toContain('M-START-001');
     expect(constraints.find(document => document.id === 'ai-project-workflow')?.content).toContain('板级 Bring-up');
-    expect(constraints.find(document => document.id === 'ai-software-standard')?.content).toContain('软件编程技术规范');
-    expect(constraints.find(document => document.id === 'ai-hardware-standard')?.content).toContain('原理图与 PCB 设计规范');
-    expect(constraints.find(document => document.id === 'ai-execution-rules')?.content).toContain('AI 不得自行批准采购、打样、量产');
+    expect(constraints.find(document => document.id === 'ai-software-standard')?.content).toContain('M-SW-DMA-001');
+    expect(constraints.find(document => document.id === 'ai-hardware-standard')?.content).toContain('M-HW-PCB-001');
+    expect(constraints.find(document => document.id === 'ai-verification-standard')?.content).toContain('M-VER-001');
+    expect(constraints.find(document => document.id === 'ai-project-variables')?.content).toContain('未知项处理表');
+    expect(constraints.find(document => document.id === 'ai-execution-rules')?.content).toContain('AI 不得自行批准采购、打样、试产、量产');
   });
 
   it('resolves internal markdown links without turning repository paths into web URLs', () => {
