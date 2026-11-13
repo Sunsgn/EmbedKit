@@ -23,7 +23,7 @@ describe('ChipLibPage layout', () => {
   it('opens the offline embedded development knowledge base and persists the workspace', async () => {
     render(<ChipLibPage />);
     fireEvent.click(screen.getByRole('button', { name: /嵌入式开发知识库/ }));
-    expect(await screen.findByRole('region', { name: '嵌入式开发知识库' })).toBeInTheDocument();
+    expect(await screen.findByRole('region', { name: '嵌入式开发知识库' })).toHaveClass('theme-panel-soft', 'theme-border');
     expect(screen.getByRole('textbox', { name: '搜索知识库' })).toBeInTheDocument();
     expect(screen.getByText('12 份文档')).toBeInTheDocument();
     expect(localStorage.getItem('embedkit.resources-mode')).toBe('knowledge');
@@ -36,6 +36,7 @@ describe('ChipLibPage layout', () => {
     fireEvent.click(screen.getByRole('button', { name: /嵌入式开发知识库/ }));
     await screen.findByRole('region', { name: '嵌入式开发知识库' });
     fireEvent.click(screen.getByRole('button', { name: '本地工程经验' }));
+    expect(screen.getByRole('heading', { name: '记录真实问题经验' }).closest('article')).toHaveClass('theme-canvas');
     fireEvent.change(screen.getByLabelText('标题 *'), { target: { value: 'UART DMA 超时' } });
     fireEvent.change(screen.getByLabelText('症状 *'), { target: { value: '连续接收后停止' } });
     fireEvent.change(screen.getByLabelText('记录状态'), { target: { value: 'verified' } });
