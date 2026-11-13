@@ -15,6 +15,15 @@ describe('embeddedKnowledgeBase', () => {
     expect(knowledgeMatchSnippet(embeddedKnowledgeDocuments.find(document => document.id === 'linux-problem-review')!, '物理位映射')).toContain('物理位映射');
   });
 
+  it('publishes AI work constraints for the full project, software, and PCB workflows', () => {
+    const constraints = embeddedKnowledgeDocuments.find(document => document.id === 'ai-constraints')!;
+    expect(constraints.title).toBe('AI 嵌入式产品开发工作规范');
+    expect(constraints.content).toContain('# 第一部分：完整嵌入式项目开发流程');
+    expect(constraints.content).toContain('# 第二部分：软件编程技术规范');
+    expect(constraints.content).toContain('# 第三部分：原理图与 PCB 设计技术规范');
+    expect(constraints.content).toContain('AI 不得自行批准采购、打样、量产');
+  });
+
   it('resolves internal markdown links without turning repository paths into web URLs', () => {
     const overview = embeddedKnowledgeDocuments[0];
     expect(resolveEmbeddedKnowledgeLink(overview, '02-MCU与RTOS开发.md')?.id).toBe('mcu-rtos');
