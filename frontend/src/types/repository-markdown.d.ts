@@ -8,13 +8,13 @@ declare module 'virtual:embedkit-repository-markdown' {
     aiHandoffStatus: string;
     aiExecutionRules: string;
     aiProjectInputs: string;
-    aiProjectWorkflow: string;
+    aiRequirementsArchitecture: string;
+    aiDetailedDesign: string;
     aiSoftwareStandard: string;
     aiHardwareStandard: string;
     aiVerificationStandard: string;
     aiProjectVariables: string;
     aiDeliverableTemplates: string;
-    aiGateDirectoryMap: string;
     projectDirectoryFramework: string;
     generalGuide: string;
     mcuProblemReview: string;

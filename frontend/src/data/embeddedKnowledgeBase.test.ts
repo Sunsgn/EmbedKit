@@ -13,9 +13,9 @@ describe('embeddedKnowledgeBase', () => {
     expect(searchEmbeddedKnowledge('DMA 物理位映射').map(document => document.id)).toContain('linux-problem-review');
     expect(searchEmbeddedKnowledge('', 'AI 约束').map(document => document.id)).toEqual([
       'ai-constraints', 'ai-startup-protocol', 'ai-task-routing', 'ai-gate-evidence', 'ai-stop-authorization', 'ai-handoff-status',
-      'ai-execution-rules', 'ai-project-inputs', 'ai-project-workflow', 'ai-software-standard',
-      'ai-hardware-standard', 'ai-verification-standard', 'ai-project-variables', 'ai-deliverable-templates', 'ai-gate-directory-map',
-      'ai-project-directory-framework',
+      'ai-execution-rules', 'ai-project-inputs', 'ai-requirements-architecture', 'ai-detailed-design',
+      'ai-software-standard', 'ai-hardware-standard', 'ai-verification-standard', 'ai-project-variables',
+      'ai-deliverable-templates', 'ai-project-directory-framework',
     ]);
     expect(knowledgeMatchSnippet(embeddedKnowledgeDocuments.find(document => document.id === 'linux-problem-review')!, '物理位映射')).toContain('物理位映射');
   });
@@ -34,26 +34,23 @@ describe('embeddedKnowledgeBase', () => {
     expect(constraints.find(document => document.id === 'ai-gate-evidence')?.content).toContain('B4 阻塞发布');
     expect(constraints.find(document => document.id === 'ai-stop-authorization')?.content).toContain('S-AUTH-008');
     expect(constraints.find(document => document.id === 'ai-handoff-status')?.content).toContain('M-PACK-004');
-    expect(constraints.find(document => document.id === 'ai-execution-rules')?.content).toContain('M-START-001');
-    expect(constraints.find(document => document.id === 'ai-execution-rules')?.content).toContain('M-DEC-001');
-    expect(constraints.find(document => document.id === 'ai-execution-rules')?.content).toContain('工程师恢复动作');
+    expect(constraints.find(document => document.id === 'ai-task-routing')?.content).toContain('M-START-001');
+    expect(constraints.find(document => document.id === 'ai-stop-authorization')?.content).toContain('M-DEC-001');
+    expect(constraints.find(document => document.id === 'ai-stop-authorization')?.content).toContain('工程师恢复动作');
     expect(constraints.find(document => document.id === 'ai-project-inputs')?.content).toContain('M-IN-001');
     expect(constraints.find(document => document.id === 'ai-project-inputs')?.content).toContain('M-IN-007');
-    expect(constraints.find(document => document.id === 'ai-project-inputs')?.content).toContain('G0 概念评估');
-    expect(constraints.find(document => document.id === 'ai-project-inputs')?.content).toContain('B4 阻塞发布');
-    expect(constraints.find(document => document.id === 'ai-project-workflow')?.content).toContain('板级 Bring-up');
-    expect(constraints.find(document => document.id === 'ai-project-workflow')?.content).toContain('M-FLOW-005');
+    expect(constraints.find(document => document.id === 'ai-requirements-architecture')?.content).toContain('M-REQ-001');
+    expect(constraints.find(document => document.id === 'ai-detailed-design')?.content).toContain('M-FLOW-005');
+    expect(constraints.find(document => document.id === 'ai-verification-standard')?.content).toContain('Bring-up顺序');
     expect(constraints.find(document => document.id === 'ai-software-standard')?.content).toContain('M-SW-DMA-001');
     expect(constraints.find(document => document.id === 'ai-hardware-standard')?.content).toContain('M-HW-PCB-001');
     expect(constraints.find(document => document.id === 'ai-verification-standard')?.content).toContain('M-VER-001');
     expect(constraints.find(document => document.id === 'ai-verification-standard')?.content).toContain('M-VER-009');
     expect(constraints.find(document => document.id === 'ai-project-variables')?.content).toContain('未知项处理表');
     expect(constraints.find(document => document.id === 'ai-deliverable-templates')?.content).toContain('TPL-01');
-    expect(constraints.find(document => document.id === 'ai-deliverable-templates')?.content).toContain('TPL-11');
-    expect(constraints.find(document => document.id === 'ai-deliverable-templates')?.content).toContain('最少必填字段');
-    expect(constraints.find(document => document.id === 'ai-gate-directory-map')?.content).toContain('兼容入口');
+    expect(constraints.find(document => document.id === 'ai-handoff-status')?.content).toContain('最少必填');
     expect(constraints.find(document => document.id === 'ai-project-directory-framework')?.content).toContain('工程师最小启动集');
-    expect(constraints.find(document => document.id === 'ai-execution-rules')?.content).toContain('AI 不得自行批准采购、打样、试产、量产');
+    expect(constraints.find(document => document.id === 'ai-stop-authorization')?.content).toContain('必须由责任人批准');
   });
 
   it('resolves internal markdown links without turning repository paths into web URLs', () => {
@@ -61,16 +58,17 @@ describe('embeddedKnowledgeBase', () => {
     expect(resolveEmbeddedKnowledgeLink(overview, '02-MCU与RTOS开发.md')?.id).toBe('mcu-rtos');
     expect(resolveEmbeddedKnowledgeLink(overview, '../AI嵌入式开发约束.md')?.id).toBe('ai-constraints');
     const aiOverview = embeddedKnowledgeDocuments.find(document => document.id === 'ai-constraints')!;
-    expect(resolveEmbeddedKnowledgeLink(aiOverview, '01A-项目输入与立项.md')?.id).toBe('ai-project-inputs');
-    expect(resolveEmbeddedKnowledgeLink(aiOverview, '03-软件编程技术规范.md')?.id).toBe('ai-software-standard');
+    expect(resolveEmbeddedKnowledgeLink(aiOverview, '02-项目输入与立项.md')?.id).toBe('ai-project-inputs');
+    expect(resolveEmbeddedKnowledgeLink(aiOverview, '03-需求与架构.md')?.id).toBe('ai-requirements-architecture');
+    expect(resolveEmbeddedKnowledgeLink(aiOverview, '04-详细设计.md')?.id).toBe('ai-detailed-design');
+    expect(resolveEmbeddedKnowledgeLink(aiOverview, '05-软件实现.md')?.id).toBe('ai-software-standard');
     expect(resolveEmbeddedKnowledgeLink(aiOverview, '00-AI项目启动与推进协议.md')?.id).toBe('ai-startup-protocol');
     expect(resolveEmbeddedKnowledgeLink(aiOverview, '00A-任务定级与路由.md')?.id).toBe('ai-task-routing');
     expect(resolveEmbeddedKnowledgeLink(aiOverview, '00B-门禁与证据总表.md')?.id).toBe('ai-gate-evidence');
     expect(resolveEmbeddedKnowledgeLink(aiOverview, '00C-停止规则与授权边界.md')?.id).toBe('ai-stop-authorization');
     expect(resolveEmbeddedKnowledgeLink(aiOverview, '00D-交接包与状态模板.md')?.id).toBe('ai-handoff-status');
-    expect(resolveEmbeddedKnowledgeLink(aiOverview, '07-交付物模板库.md')?.id).toBe('ai-deliverable-templates');
-    expect(resolveEmbeddedKnowledgeLink(aiOverview, '08-阶段门禁与目录映射表.md')?.id).toBe('ai-gate-directory-map');
-    expect(resolveEmbeddedKnowledgeLink(aiOverview, '../项目目录框架.md')?.id).toBe('ai-project-directory-framework');
+    expect(resolveEmbeddedKnowledgeLink(aiOverview, '09-交付物模板库.md')?.id).toBe('ai-deliverable-templates');
+    expect(resolveEmbeddedKnowledgeLink(aiOverview, '10-项目目录框架.md')?.id).toBe('ai-project-directory-framework');
     expect(resolveEmbeddedKnowledgeLink(overview, 'https://example.com')).toBeUndefined();
   });
 });
