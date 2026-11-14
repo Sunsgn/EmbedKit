@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "product_version": "6.0.0-rc.1",
+  "phase": "R6",
+  "state": "PARTIAL",
+  "host": "ZJZL-20240201AB",
+  "workspace": "D:\\python\\EmbedKit\\docs\\嵌入式开发\\V6.0_本地启动包",
+  "input_integrity": "PASS",
+  "input_files_verified": 15,
+  "baseline_sha256": "de55a35910687fa357de8add7e5b3973a1b17e01a8ba276c2ce6f27d78168019",
+  "completed": [
+    "R0_input_and_baseline_audit",
+    "R1_project_discovery_scoped_constraints_and_impact_routing",
+    "R2_state_authorization_evidence_recovery_and_negative_tests",
+    "R3_real_host_gcc_failure_fix_build_runtime_slice",
+    "R4_truthful_eda_capability_probe_and_safe_degradation",
+    "R5_interface_budget_version_nvm_safety_and_directory_contracts",
+    "R6_deterministic_package_clean_room_validation_and_54_case_assessment"
+    ,"unified_AI_constraint_entry_AGENTS_md"
+  ],
+  "acceptance_summary": {"PASS": 48, "FAIL": 0, "BLOCKED": 6, "NOT_RUN": 0},
+  "automated_tests": {"passed": 55, "failed": 0},
+  "candidate_zip": "out/AI嵌入式全栈工程统一约束包_V6.0.0_RC.zip",
+  "candidate_sha256": "2bfeb44d1c2bcd8c0772d7f0319a2c0ef32937af85b3a5b9505463b83167dd12",
+  "blocked": [
+    "SW-004: A22 FreeRTOS archive/source input unavailable",
+    "HW-002: native schematic and installed EDA unavailable",
+    "PCB-001..PCB-004: native PCB and KiCad/AD19 unavailable"
+  ],
+  "next_safe_action": "when an external blocker is removed, re-run probe and only the affected native-tool acceptance cases",
+  "forbidden_without_authorization": ["device_flash", "destructive_delete", "external_publish", "production_release", "git_push"]
+}

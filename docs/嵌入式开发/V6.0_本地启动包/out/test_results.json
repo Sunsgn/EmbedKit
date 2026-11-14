@@ -1,0 +1,499 @@
+{
+  "schema_version": "1.0",
+  "generated_at": "2026-11-14T11:43:24.989929+00:00",
+  "suite_exit_code": 0,
+  "summary": {
+    "PASS": 48,
+    "FAIL": 0,
+    "BLOCKED": 6,
+    "NOT_RUN": 0
+  },
+  "results": [
+    {
+      "case_id": "CORE-001",
+      "phase": "P0",
+      "domain": "PACK",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/R0-input-integrity.txt",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-002",
+      "phase": "P0",
+      "domain": "PACK",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "migration_map.csv",
+      "test_level": "REVIEW"
+    },
+    {
+      "case_id": "CORE-003",
+      "phase": "P1",
+      "domain": "ROUTING",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-004",
+      "phase": "P1",
+      "domain": "ROUTING",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-005",
+      "phase": "P1",
+      "domain": "ROUTING",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-006",
+      "phase": "P1",
+      "domain": "ROUTING",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-007",
+      "phase": "P1",
+      "domain": "ROUTING",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-008",
+      "phase": "P1",
+      "domain": "ROUTING",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-009",
+      "phase": "P1",
+      "domain": "ROUTING",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-010",
+      "phase": "P1",
+      "domain": "PROJECT",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-011",
+      "phase": "P1",
+      "domain": "PROJECT",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-012",
+      "phase": "P1",
+      "domain": "PROJECT",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-013",
+      "phase": "P1",
+      "domain": "PROJECT",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-014",
+      "phase": "P1",
+      "domain": "PROJECT",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-015",
+      "phase": "P1",
+      "domain": "PROJECT",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-016",
+      "phase": "P1",
+      "domain": "PROJECT",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-017",
+      "phase": "P2",
+      "domain": "STATE",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-018",
+      "phase": "P2",
+      "domain": "EVIDENCE",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-019",
+      "phase": "P2",
+      "domain": "EVIDENCE",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-020",
+      "phase": "P2",
+      "domain": "EVIDENCE",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-021",
+      "phase": "P2",
+      "domain": "EVIDENCE",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-022",
+      "phase": "P2",
+      "domain": "AUTH",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-023",
+      "phase": "P2",
+      "domain": "AUTH",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-024",
+      "phase": "P2",
+      "domain": "AUTH",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-025",
+      "phase": "P2",
+      "domain": "AUTH",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "SECURITY"
+    },
+    {
+      "case_id": "CORE-026",
+      "phase": "P2",
+      "domain": "RECOVERY",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-027",
+      "phase": "P2",
+      "domain": "RECOVERY",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-028",
+      "phase": "P2",
+      "domain": "RECOVERY",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "CORE-029",
+      "phase": "P2",
+      "domain": "STATE",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "SW-001",
+      "phase": "P3",
+      "domain": "SOFTWARE",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/R3-synthetic/result.json",
+      "test_level": "INTEGRATION"
+    },
+    {
+      "case_id": "SW-002",
+      "phase": "P3",
+      "domain": "SOFTWARE",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "SW-003",
+      "phase": "P3",
+      "domain": "SOFTWARE",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/R3-synthetic/result.json",
+      "test_level": "INTEGRATION"
+    },
+    {
+      "case_id": "SW-004",
+      "phase": "P3",
+      "domain": "SOFTWARE",
+      "status": "BLOCKED",
+      "reason": "required native EDA project/tool or external A22 input is unavailable",
+      "evidence": "tool_capabilities.json",
+      "test_level": "INTEGRATION"
+    },
+    {
+      "case_id": "SW-005",
+      "phase": "P3",
+      "domain": "SOFTWARE",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "HW-001",
+      "phase": "P4",
+      "domain": "SCHEMATIC",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "INTEGRATION"
+    },
+    {
+      "case_id": "HW-002",
+      "phase": "P4",
+      "domain": "SCHEMATIC",
+      "status": "BLOCKED",
+      "reason": "required native EDA project/tool or external A22 input is unavailable",
+      "evidence": "tool_capabilities.json",
+      "test_level": "EDA"
+    },
+    {
+      "case_id": "PCB-001",
+      "phase": "P4",
+      "domain": "PCB",
+      "status": "BLOCKED",
+      "reason": "required native EDA project/tool or external A22 input is unavailable",
+      "evidence": "tool_capabilities.json",
+      "test_level": "EDA"
+    },
+    {
+      "case_id": "PCB-002",
+      "phase": "P4",
+      "domain": "PCB",
+      "status": "BLOCKED",
+      "reason": "required native EDA project/tool or external A22 input is unavailable",
+      "evidence": "tool_capabilities.json",
+      "test_level": "EDA"
+    },
+    {
+      "case_id": "PCB-003",
+      "phase": "P4",
+      "domain": "PCB",
+      "status": "BLOCKED",
+      "reason": "required native EDA project/tool or external A22 input is unavailable",
+      "evidence": "tool_capabilities.json",
+      "test_level": "EDA"
+    },
+    {
+      "case_id": "PCB-004",
+      "phase": "P4",
+      "domain": "PCB",
+      "status": "BLOCKED",
+      "reason": "required native EDA project/tool or external A22 input is unavailable",
+      "evidence": "tool_capabilities.json",
+      "test_level": "EDA"
+    },
+    {
+      "case_id": "PCB-005",
+      "phase": "P4",
+      "domain": "PCB",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "PCB-006",
+      "phase": "P4",
+      "domain": "PCB",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "EDA"
+    },
+    {
+      "case_id": "INT-001",
+      "phase": "P5",
+      "domain": "INTEGRATION",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "INT-002",
+      "phase": "P5",
+      "domain": "INTEGRATION",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "REVIEW"
+    },
+    {
+      "case_id": "TEST-001",
+      "phase": "P5",
+      "domain": "VERIFICATION",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "REVIEW"
+    },
+    {
+      "case_id": "MFG-001",
+      "phase": "P5",
+      "domain": "MANUFACTURING",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "MFG-002",
+      "phase": "P5",
+      "domain": "MANUFACTURING",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "DIR-001",
+      "phase": "P5",
+      "domain": "DIRECTORY",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "PERF-001",
+      "phase": "P6",
+      "domain": "TOKEN",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "PERF-002",
+      "phase": "P6",
+      "domain": "TOKEN",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "PERF-003",
+      "phase": "P6",
+      "domain": "TOKEN",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "PACK-001",
+      "phase": "P6",
+      "domain": "PACK",
+      "status": "PASS",
+      "reason": "candidate package validated and tests/CLI reran from a clean temporary extraction",
+      "evidence": "evidence/R6-clean-room.json",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "PACK-002",
+      "phase": "P6",
+      "domain": "PACK",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    },
+    {
+      "case_id": "PACK-003",
+      "phase": "P6",
+      "domain": "PACK",
+      "status": "PASS",
+      "reason": "matching deterministic behavior is covered by the passing regression/integration suite",
+      "evidence": "evidence/acceptance-unittest.log",
+      "test_level": "AUTOMATED"
+    }
+  ]
+}

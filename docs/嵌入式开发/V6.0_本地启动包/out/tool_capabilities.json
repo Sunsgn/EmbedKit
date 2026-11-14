@@ -1,0 +1,86 @@
+{
+  "schema_version": "1.0",
+  "captured_at": "2026-11-14T11:43:24.786745+00:00",
+  "capabilities": [
+    {
+      "adapter": "git",
+      "capability": "version_control",
+      "status": "AVAILABLE_VERIFIED",
+      "executable": "E:\\git\\Git\\cmd\\git.EXE",
+      "version": "git version 2.42.0.windows.2",
+      "detail": "executable found and version command executed"
+    },
+    {
+      "adapter": "gcc",
+      "capability": "c_build",
+      "status": "AVAILABLE_VERIFIED",
+      "executable": "C:\\Users\\Administrator\\AppData\\mingw64\\bin\\gcc.EXE",
+      "version": "gcc.EXE (x86_64-win32-seh-rev0, Built by MinGW-W64 project) 8.1.0",
+      "detail": "executable found and version command executed"
+    },
+    {
+      "adapter": "cmake",
+      "capability": "cmake_build",
+      "status": "AVAILABLE_VERIFIED",
+      "executable": "C:\\Users\\Administrator\\.espressif\\tools\\cmake\\3.30.2\\bin\\cmake.EXE",
+      "version": "cmake version 3.30.2",
+      "detail": "executable found and version command executed"
+    },
+    {
+      "adapter": "ninja",
+      "capability": "ninja_build",
+      "status": "AVAILABLE_VERIFIED",
+      "executable": "D:\\xingshan\\f63sdk\\.venv\\Scripts\\ninja.EXE",
+      "version": "1.11.1.git.kitware.jobserver-1",
+      "detail": "executable found and version command executed"
+    },
+    {
+      "adapter": "kicad-cli",
+      "capability": "kicad_erc_drc",
+      "status": "UNAVAILABLE",
+      "executable": null,
+      "version": null,
+      "detail": "executable not found on PATH"
+    },
+    {
+      "adapter": "AltiumDesigner.exe",
+      "capability": "ad19_script_api",
+      "status": "UNAVAILABLE",
+      "executable": null,
+      "version": null,
+      "detail": "executable not found on PATH"
+    },
+    {
+      "adapter": "IarBuild.exe",
+      "capability": "iar_build",
+      "status": "UNAVAILABLE",
+      "executable": null,
+      "version": null,
+      "detail": "executable not found on PATH"
+    },
+    {
+      "adapter": "UV4.exe",
+      "capability": "keil_build",
+      "status": "UNAVAILABLE",
+      "executable": null,
+      "version": null,
+      "detail": "executable not found on PATH"
+    },
+    {
+      "adapter": "host-policy",
+      "capability": "mandatory_execution_path",
+      "status": "POLICY_ONLY",
+      "executable": null,
+      "version": null,
+      "detail": "CLI enforces adapters, but the host still exposes filesystem/shell paths outside this Python process"
+    },
+    {
+      "adapter": "hil",
+      "capability": "real_device_test",
+      "status": "BLOCKED_BY_AUTH",
+      "executable": null,
+      "version": null,
+      "detail": "no device identity, port, firmware identity, or dedicated authorization supplied"
+    }
+  ]
+}
