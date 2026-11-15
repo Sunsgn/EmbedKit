@@ -19,11 +19,12 @@
     ,"unified_AI_constraint_entry_AGENTS_md",
     "nine_domain_detailed_professional_constraints"
     ,"token_efficient_L0_and_on_demand_AI_context_routing"
+    ,"fifty_six_atomic_professional_rules_with_deterministic_AI_markdown"
   ],
   "acceptance_summary": {"PASS": 48, "FAIL": 0, "BLOCKED": 6, "NOT_RUN": 0},
-  "automated_tests": {"passed": 58, "failed": 0},
+  "automated_tests": {"passed": 59, "failed": 0},
   "candidate_zip": "out/AI嵌入式全栈工程统一约束包_V6.0.0_RC.zip",
-  "candidate_sha256": "f2579a5a6d43fc773030148c11bd893731b8a56f6eba2df7d74659b5faffa414",
+  "candidate_sha256": "9a097048535d93bb4313f24f44b556c24467d26384398c20b167c8badc15a49d",
   "blocked": [
     "SW-004: A22 FreeRTOS archive/source input unavailable",
     "HW-002: native schematic and installed EDA unavailable",

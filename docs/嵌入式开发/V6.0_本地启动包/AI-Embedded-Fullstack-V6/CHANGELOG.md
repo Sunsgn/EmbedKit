@@ -10,3 +10,4 @@
 - Added `AGENTS.md` as the single unified AI constraint entry, backed by validated executable rule registries.
 - Added detailed human-readable constraints for core, software, hardware, PCB, integration, verification, manufacturing, security/release, and directory domains; routing now loads both professional constraints and machine gates.
 - Reduced the mandatory AI entry to a compact L0, added a project-root AGENTS template, and separated `ai_read_files` from `machine_rule_files` to prevent full-rule context loading.
+- Expanded the nine domain registries to 56 atomic, testable constraints and added deterministic human-readable `RULES.md` generation.

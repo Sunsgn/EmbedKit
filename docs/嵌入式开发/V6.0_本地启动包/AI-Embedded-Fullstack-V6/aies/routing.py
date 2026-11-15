@@ -6,15 +6,15 @@ from .discovery import discover_constraint_files, require_project_root
 from .models import RouteDecision
 
 DOMAIN_RULES = {
-    "core": ("rules/core/CONSTRAINTS.md", "rules/core/rules.json"),
-    "software": ("rules/software/CONSTRAINTS.md", "rules/software/rules.json"),
-    "hardware": ("rules/hardware/CONSTRAINTS.md", "rules/hardware/rules.json"),
-    "pcb": ("rules/pcb/CONSTRAINTS.md", "rules/pcb/rules.json"),
-    "integration": ("rules/integration/CONSTRAINTS.md", "rules/integration/rules.json"),
-    "verification": ("rules/verification/CONSTRAINTS.md", "rules/verification/rules.json"),
-    "manufacturing": ("rules/manufacturing/CONSTRAINTS.md", "rules/manufacturing/rules.json"),
-    "security": ("rules/security_release/CONSTRAINTS.md", "rules/security_release/rules.json"),
-    "directory": ("rules/directory/CONSTRAINTS.md", "rules/directory/rules.json"),
+    "core": ("rules/core/CONSTRAINTS.md", "rules/core/RULES.md", "rules/core/rules.json"),
+    "software": ("rules/software/CONSTRAINTS.md", "rules/software/RULES.md", "rules/software/rules.json"),
+    "hardware": ("rules/hardware/CONSTRAINTS.md", "rules/hardware/RULES.md", "rules/hardware/rules.json"),
+    "pcb": ("rules/pcb/CONSTRAINTS.md", "rules/pcb/RULES.md", "rules/pcb/rules.json"),
+    "integration": ("rules/integration/CONSTRAINTS.md", "rules/integration/RULES.md", "rules/integration/rules.json"),
+    "verification": ("rules/verification/CONSTRAINTS.md", "rules/verification/RULES.md", "rules/verification/rules.json"),
+    "manufacturing": ("rules/manufacturing/CONSTRAINTS.md", "rules/manufacturing/RULES.md", "rules/manufacturing/rules.json"),
+    "security": ("rules/security_release/CONSTRAINTS.md", "rules/security_release/RULES.md", "rules/security_release/rules.json"),
+    "directory": ("rules/directory/CONSTRAINTS.md", "rules/directory/RULES.md", "rules/directory/rules.json"),
 }
 
 SIGNALS = {
@@ -88,8 +88,8 @@ def route_task(project_root: str, task: str, mode: str = "auto") -> RouteDecisio
         risk = "T4"
 
     project_mode = mode if mode != "auto" else ("PROJECT_EXISTING" if any(root.iterdir()) else "PROJECT_NEW")
-    ai_read_files = [DOMAIN_RULES[domain][0] for domain in domains]
-    machine_rule_files = [DOMAIN_RULES[domain][1] for domain in domains]
+    ai_read_files = [path for domain in domains for path in DOMAIN_RULES[domain][:2]]
+    machine_rule_files = [DOMAIN_RULES[domain][2] for domain in domains]
     task_tokens = {token for token in text.replace("/", " ").replace("-", " ").split() if len(token) >= 2}
     for constraint in discover_constraint_files(root):
         rel = constraint.relative_to(root).as_posix()
@@ -110,7 +110,7 @@ def route_task(project_root: str, task: str, mode: str = "auto") -> RouteDecisio
         candidate = (package_root / relative) if relative.startswith("rules/") else (root / relative)
         if candidate.is_file():
             selected_bytes += candidate.stat().st_size
-    full_domain_bytes = entry_bytes + sum((package_root / values[0]).stat().st_size for values in DOMAIN_RULES.values())
+    full_domain_bytes = entry_bytes + sum(sum((package_root / path).stat().st_size for path in values[:2]) for values in DOMAIN_RULES.values())
     context_metrics = {
         "l0_bytes": entry_bytes,
         "selected_ai_bytes": selected_bytes,

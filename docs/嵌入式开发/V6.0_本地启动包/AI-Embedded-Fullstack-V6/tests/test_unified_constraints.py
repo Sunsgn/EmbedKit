@@ -17,7 +17,7 @@ class UnifiedConstraintTests(unittest.TestCase):
             self.assertIn(status, content)
 
     def test_executable_rule_registries_have_required_contract_fields(self):
-        required = {"rule_id", "version", "owner", "trigger", "required_inputs", "actions", "required_evidence", "acceptance", "failure_policy", "links"}
+        required = {"rule_id", "version", "owner", "trigger", "applies_when", "required_inputs", "actions", "required_evidence", "acceptance", "failure_policy", "links"}
         rule_ids = set()
         files = sorted((PACKAGE_ROOT / "rules").glob("*/rules.json"))
         self.assertGreaterEqual(len(files), 9)
@@ -29,6 +29,7 @@ class UnifiedConstraintTests(unittest.TestCase):
             for term in ("适用范围", "证据", "验收", "失败"):
                 self.assertIn(term, content, detailed)
             data = json.loads(path.read_text(encoding="utf-8"))
+            self.assertGreaterEqual(len(data["rules"]), 6, path)
             for rule in data["rules"]:
                 self.assertTrue(required.issubset(rule), path)
                 self.assertNotIn(rule["rule_id"], rule_ids)
@@ -47,7 +48,7 @@ class UnifiedConstraintTests(unittest.TestCase):
         self.assertIn("rules/core/rules.json", route.rule_files)
         self.assertIn("rules/software/rules.json", route.rule_files)
         self.assertEqual(
-            ["rules/core/CONSTRAINTS.md", "rules/software/CONSTRAINTS.md"],
+            ["rules/core/CONSTRAINTS.md", "rules/core/RULES.md", "rules/software/CONSTRAINTS.md", "rules/software/RULES.md"],
             route.ai_read_files,
         )
         self.assertEqual(
@@ -65,6 +66,14 @@ class UnifiedConstraintTests(unittest.TestCase):
         self.assertNotIn("rules/hardware/CONSTRAINTS.md", route.ai_read_files)
         self.assertNotIn("rules/pcb/CONSTRAINTS.md", route.ai_read_files)
         self.assertNotIn("rules/manufacturing/CONSTRAINTS.md", route.ai_read_files)
+
+    def test_generated_atomic_rule_markdown_is_in_sync(self):
+        import sys
+        sys.path.insert(0, str(PACKAGE_ROOT / "tools"))
+        from render_rules import render_registry
+        for registry in sorted((PACKAGE_ROOT / "rules").glob("*/rules.json")):
+            rendered = registry.with_name("RULES.md")
+            self.assertEqual(render_registry(registry), rendered.read_text(encoding="utf-8"), rendered)
 
     def test_project_agent_template_enforces_on_demand_loading(self):
         content = (PACKAGE_ROOT / "templates" / "PROJECT_AGENTS.md").read_text(encoding="utf-8")

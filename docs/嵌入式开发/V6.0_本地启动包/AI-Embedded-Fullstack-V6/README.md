@@ -4,6 +4,8 @@ AIES is a local-first constraint system for AI-assisted embedded development. Th
 
 AI agents must read [`AGENTS.md`](AGENTS.md) first. It is the unified entry; [`rules/README.md`](rules/README.md) indexes detailed professional `CONSTRAINTS.md` files, and `rules.json` provides executable gates.
 
+Each domain also contains generated `RULES.md` with atomic rules: stable ID, trigger, applicability, required inputs, ordered actions, evidence, all-pass acceptance conditions, and failure policy. Project-specific numeric values must come from the target project rather than global defaults.
+
 For a new project, copy [`templates/PROJECT_AGENTS.md`](templates/PROJECT_AGENTS.md) to the project root as `AGENTS.md`, place this package at `.ai/AIES-V6`, and put project facts in `.ai/PROJECT_PROFILE.md` instead of editing global rules.
 
 Quick check from this directory:
