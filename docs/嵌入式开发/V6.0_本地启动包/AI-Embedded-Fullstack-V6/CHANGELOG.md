@@ -8,3 +8,4 @@
 - Added truthful KiCad, AD19, IAR, Keil, HIL capability probing and `POLICY_ONLY` host-isolation disclosure.
 - Added interface, error-budget, version compatibility, NVM migration, safety-contract, deterministic package, and package-tamper validators.
 - Added `AGENTS.md` as the single unified AI constraint entry, backed by validated executable rule registries.
+- Added detailed human-readable constraints for core, software, hardware, PCB, integration, verification, manufacturing, security/release, and directory domains; routing now loads both professional constraints and machine gates.

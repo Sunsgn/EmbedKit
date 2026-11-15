@@ -22,6 +22,12 @@ class UnifiedConstraintTests(unittest.TestCase):
         files = sorted((PACKAGE_ROOT / "rules").glob("*/rules.json"))
         self.assertGreaterEqual(len(files), 9)
         for path in files:
+            detailed = path.with_name("CONSTRAINTS.md")
+            self.assertTrue(detailed.is_file(), detailed)
+            content = detailed.read_text(encoding="utf-8")
+            self.assertGreater(len(content.encode("utf-8")), 1800, detailed)
+            for term in ("适用范围", "证据", "验收", "失败"):
+                self.assertIn(term, content, detailed)
             data = json.loads(path.read_text(encoding="utf-8"))
             for rule in data["rules"]:
                 self.assertTrue(required.issubset(rule), path)
@@ -31,7 +37,15 @@ class UnifiedConstraintTests(unittest.TestCase):
     def test_readme_points_to_unified_entry(self):
         content = (PACKAGE_ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("AGENTS.md", content)
-        self.assertIn("single unified AI constraint entry", content)
+        self.assertIn("detailed professional", content)
+
+    def test_route_returns_human_constraints_and_machine_rules(self):
+        from aies.routing import route_task
+        route = route_task(str(PACKAGE_ROOT), "修改 UART DMA 驱动")
+        self.assertIn("rules/core/CONSTRAINTS.md", route.rule_files)
+        self.assertIn("rules/software/CONSTRAINTS.md", route.rule_files)
+        self.assertIn("rules/core/rules.json", route.rule_files)
+        self.assertIn("rules/software/rules.json", route.rule_files)
 
 
 if __name__ == "__main__":

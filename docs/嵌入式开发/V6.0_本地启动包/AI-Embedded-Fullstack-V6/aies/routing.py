@@ -6,15 +6,15 @@ from .discovery import discover_constraint_files, require_project_root
 from .models import RouteDecision
 
 DOMAIN_RULES = {
-    "core": "rules/core/rules.json",
-    "software": "rules/software/rules.json",
-    "hardware": "rules/hardware/rules.json",
-    "pcb": "rules/pcb/rules.json",
-    "integration": "rules/integration/rules.json",
-    "verification": "rules/verification/rules.json",
-    "manufacturing": "rules/manufacturing/rules.json",
-    "security": "rules/security_release/rules.json",
-    "directory": "rules/directory/rules.json",
+    "core": ("rules/core/CONSTRAINTS.md", "rules/core/rules.json"),
+    "software": ("rules/software/CONSTRAINTS.md", "rules/software/rules.json"),
+    "hardware": ("rules/hardware/CONSTRAINTS.md", "rules/hardware/rules.json"),
+    "pcb": ("rules/pcb/CONSTRAINTS.md", "rules/pcb/rules.json"),
+    "integration": ("rules/integration/CONSTRAINTS.md", "rules/integration/rules.json"),
+    "verification": ("rules/verification/CONSTRAINTS.md", "rules/verification/rules.json"),
+    "manufacturing": ("rules/manufacturing/CONSTRAINTS.md", "rules/manufacturing/rules.json"),
+    "security": ("rules/security_release/CONSTRAINTS.md", "rules/security_release/rules.json"),
+    "directory": ("rules/directory/CONSTRAINTS.md", "rules/directory/rules.json"),
 }
 
 SIGNALS = {
@@ -88,7 +88,7 @@ def route_task(project_root: str, task: str, mode: str = "auto") -> RouteDecisio
         risk = "T4"
 
     project_mode = mode if mode != "auto" else ("PROJECT_EXISTING" if any(root.iterdir()) else "PROJECT_NEW")
-    rules = [DOMAIN_RULES[d] for d in domains]
+    rules = [path for domain in domains for path in DOMAIN_RULES[domain]]
     task_tokens = {token for token in text.replace("/", " ").replace("-", " ").split() if len(token) >= 2}
     for constraint in discover_constraint_files(root):
         rel = constraint.relative_to(root).as_posix()

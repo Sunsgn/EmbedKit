@@ -16,12 +16,13 @@
     "R4_truthful_eda_capability_probe_and_safe_degradation",
     "R5_interface_budget_version_nvm_safety_and_directory_contracts",
     "R6_deterministic_package_clean_room_validation_and_54_case_assessment"
-    ,"unified_AI_constraint_entry_AGENTS_md"
+    ,"unified_AI_constraint_entry_AGENTS_md",
+    "nine_domain_detailed_professional_constraints"
   ],
   "acceptance_summary": {"PASS": 48, "FAIL": 0, "BLOCKED": 6, "NOT_RUN": 0},
-  "automated_tests": {"passed": 55, "failed": 0},
+  "automated_tests": {"passed": 56, "failed": 0},
   "candidate_zip": "out/AI嵌入式全栈工程统一约束包_V6.0.0_RC.zip",
-  "candidate_sha256": "2bfeb44d1c2bcd8c0772d7f0319a2c0ef32937af85b3a5b9505463b83167dd12",
+  "candidate_sha256": "d95656d15e715ea6d1573f0ab947e4bad28f4366b5873c66aa7c427ce624bda5",
   "blocked": [
     "SW-004: A22 FreeRTOS archive/source input unavailable",
     "HW-002: native schematic and installed EDA unavailable",
