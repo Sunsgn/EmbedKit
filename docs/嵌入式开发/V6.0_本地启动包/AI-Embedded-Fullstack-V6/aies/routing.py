@@ -88,20 +88,39 @@ def route_task(project_root: str, task: str, mode: str = "auto") -> RouteDecisio
         risk = "T4"
 
     project_mode = mode if mode != "auto" else ("PROJECT_EXISTING" if any(root.iterdir()) else "PROJECT_NEW")
-    rules = [path for domain in domains for path in DOMAIN_RULES[domain]]
+    ai_read_files = [DOMAIN_RULES[domain][0] for domain in domains]
+    machine_rule_files = [DOMAIN_RULES[domain][1] for domain in domains]
     task_tokens = {token for token in text.replace("/", " ").replace("-", " ").split() if len(token) >= 2}
     for constraint in discover_constraint_files(root):
         rel = constraint.relative_to(root).as_posix()
+        if rel == "AGENTS.md":
+            reasons.append("project root AGENTS.md is the already-loaded entry and is not loaded twice")
+            continue
         scope = constraint.parent.relative_to(root).as_posix().lower()
         root_scoped = constraint.parent == root or rel == ".ai/PROJECT_PROFILE.md"
         scope_match = any(token in scope for token in task_tokens)
         if root_scoped or scope_match:
-            rules.append(rel)
+            ai_read_files.append(rel)
             reasons.append(f"project constraint selected for applicable scope: {rel}")
+    rules = [*ai_read_files, *machine_rule_files]
+    package_root = Path(__file__).resolve().parents[1]
+    entry_bytes = (package_root / "AGENTS.md").stat().st_size
+    selected_bytes = entry_bytes
+    for relative in ai_read_files:
+        candidate = (package_root / relative) if relative.startswith("rules/") else (root / relative)
+        if candidate.is_file():
+            selected_bytes += candidate.stat().st_size
+    full_domain_bytes = entry_bytes + sum((package_root / values[0]).stat().st_size for values in DOMAIN_RULES.values())
+    context_metrics = {
+        "l0_bytes": entry_bytes,
+        "selected_ai_bytes": selected_bytes,
+        "all_domain_bytes": full_domain_bytes,
+        "avoided_bytes": max(0, full_domain_bytes - selected_bytes),
+    }
     omissions = [
         "checked for safety-critical impact",
         "checked for hardware/software interface impact",
         "checked for manufacturing and field compatibility impact",
         "unknown domain does not authorize editing",
     ]
-    return RouteDecision(project_mode, depth, risk, domains, rules, reasons, omissions, unknowns)
+    return RouteDecision(project_mode, depth, risk, domains, rules, ai_read_files, machine_rule_files, context_metrics, reasons, omissions, unknowns)

@@ -39,6 +39,9 @@ class RouteDecision:
     risk: str
     domains: list[str]
     rule_files: list[str]
+    ai_read_files: list[str]
+    machine_rule_files: list[str]
+    context_metrics: dict[str, int]
     reasons: list[str]
     omission_checks: list[str]
     unknowns: list[str] = field(default_factory=list)

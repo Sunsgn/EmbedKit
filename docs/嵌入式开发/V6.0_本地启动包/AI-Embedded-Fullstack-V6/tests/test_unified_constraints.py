@@ -10,8 +10,8 @@ class UnifiedConstraintTests(unittest.TestCase):
     def test_single_ai_entry_is_compact_and_complete(self):
         entry = PACKAGE_ROOT / "AGENTS.md"
         content = entry.read_text(encoding="utf-8")
-        self.assertLessEqual(len(content.encode("utf-8")), 6 * 1024)
-        for section in ("目标与边界", "强制顺序", "路由、风险", "授权与工程保护", "证据、完成与恢复", "专业最低要求", "输出、效率"):
+        self.assertLessEqual(len(content.encode("utf-8")), 3 * 1024)
+        for section in ("强制加载顺序", "不可省略的全局底线", "使用定位"):
             self.assertIn(section, content)
         for status in ("UNAVAILABLE", "BLOCKED", "NOT_RUN", "POLICY_ONLY", "NEEDS_REVIEW"):
             self.assertIn(status, content)
@@ -46,6 +46,31 @@ class UnifiedConstraintTests(unittest.TestCase):
         self.assertIn("rules/software/CONSTRAINTS.md", route.rule_files)
         self.assertIn("rules/core/rules.json", route.rule_files)
         self.assertIn("rules/software/rules.json", route.rule_files)
+        self.assertEqual(
+            ["rules/core/CONSTRAINTS.md", "rules/software/CONSTRAINTS.md"],
+            route.ai_read_files,
+        )
+        self.assertEqual(
+            ["rules/core/rules.json", "rules/software/rules.json"],
+            route.machine_rule_files,
+        )
+        self.assertTrue(all(path.endswith(".md") for path in route.ai_read_files))
+        self.assertTrue(all(path.endswith(".json") for path in route.machine_rule_files))
+        self.assertLess(route.context_metrics["selected_ai_bytes"], route.context_metrics["all_domain_bytes"])
+        self.assertGreater(route.context_metrics["avoided_bytes"], 0)
+
+    def test_software_task_does_not_load_unrelated_professional_text(self):
+        from aies.routing import route_task
+        route = route_task(str(PACKAGE_ROOT), "修改 UART DMA 驱动")
+        self.assertNotIn("rules/hardware/CONSTRAINTS.md", route.ai_read_files)
+        self.assertNotIn("rules/pcb/CONSTRAINTS.md", route.ai_read_files)
+        self.assertNotIn("rules/manufacturing/CONSTRAINTS.md", route.ai_read_files)
+
+    def test_project_agent_template_enforces_on_demand_loading(self):
+        content = (PACKAGE_ROOT / "templates" / "PROJECT_AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("不得预读全部专业规则", content)
+        self.assertIn("ai_read_files", content)
+        self.assertIn("machine_rule_files", content)
 
 
 if __name__ == "__main__":

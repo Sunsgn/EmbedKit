@@ -6,14 +6,15 @@
 - Inputs: 15 files verified by `04-核对输入完整性.ps1`
 - V5.1.4 baseline SHA-256: `de55a35910687fa357de8add7e5b3973a1b17e01a8ba276c2ce6f27d78168019`
 - Unified AI entry: `AI-Embedded-Fullstack-V6/AGENTS.md` (single human/AI constraint authority; executable projections are under `rules/`).
+- Token loading: L0 is 2620 bytes; route output separates `ai_read_files` from `machine_rule_files`, reports selected/all/avoided bytes, and forbids preloading unrelated domains. New-project root template: `templates/PROJECT_AGENTS.md`.
 - Detailed professional constraints: `rules/{core,software,hardware,pcb,integration,verification,manufacturing,security_release,directory}/CONSTRAINTS.md`; `rules/README.md` is the catalog and routing loads applicable files.
 - Implemented: runnable `python -m aies` CLI; discovery; scoped project constraints; impact routing; planning/input locks; signed authorization validation; evidence and completion gates; append-only journal/recovery primitives; single-writer and dirty-worktree protection; typed GCC build adapter; deterministic interface/version/NVM/safety/directory validators; deterministic package validation.
 - Available: Python 3.11, Git, CMake, Ninja, GCC.
 - Unavailable: KiCad CLI, AD19, IAR and Keil command entries. A22 source archive is not present.
-- Tests: 56 passed, 0 failed.
+- Tests: 58 passed, 0 failed.
 - Acceptance matrix: 48 PASS, 0 FAIL, 6 BLOCKED, 0 NOT_RUN. Exact case results are in `test_results.json`.
 - Candidate: `AI嵌入式全栈工程统一约束包_V6.0.0_RC.zip`
-- Candidate SHA-256: `d95656d15e715ea6d1573f0ab947e4bad28f4366b5873c66aa7c427ce624bda5`
+- Candidate SHA-256: `f2579a5a6d43fc773030148c11bd893731b8a56f6eba2df7d74659b5faffa414`
 - Clean-room evidence: `evidence/R6-clean-room.json`.
 - Real host software evidence: `evidence/R3-synthetic/result.json`; this proves only the isolated host GCC fixture, not MCU/RTOS/device behavior.
 - Safety boundary: write only in this launch-package directory; no device, destructive, publish, or production actions.
