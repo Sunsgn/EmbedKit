@@ -25,6 +25,8 @@ class RuntimeMarkdownPackageTests(unittest.TestCase):
         self.assertEqual(10, result["workflows"])
         self.assertEqual(6, result["templates"])
         self.assertEqual(5, result["project_constraints"])
+        self.assertEqual(6, result["detail_packs"])
+        self.assertEqual(60, result["atomic_rules"])
 
     def test_runtime_entry_is_compact_and_routes_on_demand(self):
         entry = (RUNTIME_ROOT / "AGENTS.md").read_text(encoding="utf-8")
@@ -75,6 +77,36 @@ class RuntimeMarkdownPackageTests(unittest.TestCase):
         entry = (RUNTIME_ROOT / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("文件效力分类", entry)
         self.assertIn("UNKNOWN` 表格本身只是待确认事实", entry)
+
+    def test_common_software_hardware_pcb_rules_are_atomic_and_routed(self):
+        detail_root = RUNTIME_ROOT / ".ai" / "constraints" / "details"
+        expected = {
+            "software_execution_io.md": ("GPIO 与 Pinmux 配置", "中断注册、优先级与 ISR 内容", "DMA、Cache 与异步所有权", "ADC、PWM、定时器"),
+            "software_architecture_resource.md": ("RTOS、裸机与事件驱动", "共享状态、锁与消息队列", "状态机、时间与重试", "NVM、配置与掉电一致性"),
+            "hardware_power_digital.md": ("电源树、稳压与启动裕量", "去耦、旁路与储能", "复位、Boot Strap", "数字电平、方向与电平转换"),
+            "hardware_analog_safety.md": ("模拟信号链与动态范围", "误差、不确定度与温漂预算", "隔离、高压、爬电", "安全输出、联锁与失效方向"),
+            "pcb_layout_signal.md": ("叠层、参考层与回流路径", "线宽、间距、过孔与网络类", "差分对与高速串行接口", "模拟、数字和敏感网络布线"),
+            "pcb_power_emc_manufacturing.md": ("电源路径、电流与压降", "开关电源 PCB 回路", "串扰、边沿与 EMI 控制", "制造输出和独立回读"),
+        }
+        contract = ("触发条件：", "必须执行：", "禁止：", "必需证据：", "PASS 条件：", "失败处理：")
+        total = 0
+        for name, terms in expected.items():
+            content = (detail_root / name).read_text(encoding="utf-8")
+            sections = content.split("\n## ")[1:]
+            self.assertEqual(10, len(sections), name)
+            total += len(sections)
+            for section in sections:
+                for label in contract:
+                    self.assertIn(label, section, f"{name}: {section.splitlines()[0]}")
+            for term in terms:
+                self.assertIn(term, content, name)
+        self.assertEqual(60, total)
+        index = (RUNTIME_ROOT / ".ai" / "constraints" / "INDEX.md").read_text(encoding="utf-8")
+        for name in expected:
+            self.assertIn(f"details/{name}", index)
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in detail_root.glob("*.md"))
+        for forbidden_default in ("常用 6/6 mil", "常用 3 mm/6 mm"):
+            self.assertIn(forbidden_default, combined)
 
     def test_every_professional_section_has_a_unique_stable_rule_id(self):
         ids = []

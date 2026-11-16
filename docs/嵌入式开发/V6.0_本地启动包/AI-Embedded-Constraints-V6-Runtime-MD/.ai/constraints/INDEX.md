@@ -40,6 +40,19 @@
 | 需求、架构、预算、风险、ECO/ECN | `core.md`、`system.md` | `NEW_PROJECT_DISCOVERY.md` 或 `PROJECT_DELIVERY.md` |
 | 缺陷、异常、构建或设备失败 | `core.md` 加故障所属领域 | `DEFECT_FIX.md` |
 
+## 原子详细规则簇路由
+
+以下文件是对应专业领域的强制细化规则，只在任务命中时加载；不得只读取领域概述而跳过命中的详细规则。
+
+| 具体任务对象 | 在领域约束之外追加读取 |
+|---|---|
+| 启动、时钟、GPIO、Pinmux、中断、DMA/Cache、UART/I²C/SPI/CAN、ADC/PWM、看门狗、低功耗 | `details/software_execution_io.md` |
+| 模块分层、接口、RTOS/事件/裸机、并发、状态机、超时、内存、数值、NVM、日志、构建资源 | `details/software_architecture_resource.md` |
+| 电源树、去耦、上掉电、反灌、晶体、复位、Boot、数字电平、板级总线、器件降额 | `details/hardware_power_digital.md` |
+| 模拟链、ADC 前端、误差预算、运放/比较器、保护、隔离、接地、热、安全输出 | `details/hardware_analog_safety.md` |
+| PCB 叠层、参考层、布局、线宽/间距/过孔、时钟、高速/差分、模拟布线 | `details/pcb_layout_signal.md` |
+| PCB 大电流/去耦/开关电源、EMC、热、安规、DFM、制造输出和回读 | `details/pcb_power_emc_manufacturing.md` |
+
 ## 二级路由：目标文件
 
 | 文件或对象 | 补充约束 |
@@ -62,6 +75,12 @@
 | 现场日志、工单、远程配置和 RMA | `field_maintenance.md` |
 | BOM、替代料、PCN/EOL 和供应商文件 | `supply_chain_lifecycle.md` |
 | STEP、机械图、热仿真或装配文件 | `mechanical_thermal.md` |
+| 启动/BSP/Pinmux/IRQ/DMA/外设驱动源码 | `details/software_execution_io.md` |
+| 任务/队列/状态机/内存/NVM/日志/构建源码 | `details/software_architecture_resource.md` |
+| 电源/时钟/复位/数字接口原理图 | `details/hardware_power_digital.md` |
+| 模拟/ADC/保护/隔离/危险输出原理图 | `details/hardware_analog_safety.md` |
+| PCB 原生文件中的布局和信号规则 | `details/pcb_layout_signal.md` |
+| PCB 电源/EMC/热/安规规则及制造输出 | `details/pcb_power_emc_manufacturing.md` |
 
 ## 三级路由：影响传播
 
@@ -94,3 +113,4 @@
 - 软件约束较长时只读取与当前任务相关章节以及验收/失败门禁；不要重复读取已加载且未变化的部分。
 - 路由命中超过四个专业领域时，先进行影响分析并按任务阶段分批加载，不得一次全文读取。
 - 完整日志和证据保存到 `.ai/work/evidence/`，对话仅汇报摘要和路径。
+- `details/` 规则簇按上述具体任务加载；单一任务通常只加载一个或两个，不得一次全文读取全部详细规则。

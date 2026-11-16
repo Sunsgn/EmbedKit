@@ -1,5 +1,7 @@
 # 嵌入式软件开发详细约束
 
+启动、时钟、GPIO、中断、DMA、总线、ADC/PWM、看门狗和低功耗任务必须追加读取 `details/software_execution_io.md`；架构、接口、RTOS/并发、状态机、内存、数值、NVM、日志和构建资源任务必须追加读取 `details/software_architecture_resource.md`。本文件给出领域边界，详细规则簇给出不可省略的原子门禁。
+
 ## SW-001：适用范围、规则解释与事实来源
 
 适用于裸机、事件驱动、不同 RTOS、BSP/驱动、Bootloader、协议、存储及资源受限软件。Linux 内核/设备树另叠加 `embedded_linux`；软硬件接口、通信和构建产物另叠加对应领域规则。

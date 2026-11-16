@@ -22,6 +22,7 @@
 - `.ai/project_constraints/*.md`：当前项目的软件、硬件/PCB、验证/制造、安全/现场和系统/生命周期具体约束；首次识别后由 AI 按工程证据填写。
 - `.ai/constraints/INDEX.md`：任务、文件和影响三级路由。
 - `.ai/constraints/*.md`：25 个专业领域约束。
+- `.ai/constraints/details/*.md`：按具体工程对象加载的原子规则簇，当前覆盖软件、硬件和 PCB 的 60 条细化规则。
 - `.ai/workflows/*.md`：常见工程任务的执行闭环。
 - `.ai/templates/*.md`：AI 动态建立计划、状态、交接和证据时使用。
 

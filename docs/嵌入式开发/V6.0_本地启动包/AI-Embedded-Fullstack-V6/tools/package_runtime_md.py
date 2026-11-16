@@ -29,6 +29,11 @@ REQUIRED_PROJECT_CONSTRAINTS = {
     "software", "hardware_pcb", "verification_manufacturing",
     "security_release_field", "system_lifecycle",
 }
+REQUIRED_DETAILS = {
+    "software_execution_io", "software_architecture_resource",
+    "hardware_power_digital", "hardware_analog_safety",
+    "pcb_layout_signal", "pcb_power_emc_manufacturing",
+}
 FIXED_TIME = (2026, 1, 1, 0, 0, 0)
 
 
@@ -60,6 +65,20 @@ def validate_runtime(root: Path) -> dict:
     domains = {path.stem for path in (root / ".ai" / "constraints").glob("*.md") if path.stem != "INDEX"}
     if domains != REQUIRED_DOMAINS:
         errors.append(f"domain mismatch: missing={sorted(REQUIRED_DOMAINS-domains)}, extra={sorted(domains-REQUIRED_DOMAINS)}")
+    details = {path.stem for path in (root / ".ai" / "constraints" / "details").glob("*.md")}
+    if details != REQUIRED_DETAILS:
+        errors.append(f"detail mismatch: missing={sorted(REQUIRED_DETAILS-details)}, extra={sorted(details-REQUIRED_DETAILS)}")
+    atomic_contract = ("触发条件：", "必须执行：", "禁止：", "必需证据：", "PASS 条件：", "失败处理：")
+    atomic_count = 0
+    for path in sorted((root / ".ai" / "constraints" / "details").glob("*.md")):
+        content = path.read_text(encoding="utf-8")
+        sections = [section for section in content.split("\n## ")[1:]]
+        atomic_count += len(sections)
+        for section in sections:
+            heading = section.splitlines()[0] if section.splitlines() else path.name
+            missing = [term for term in atomic_contract if term not in section]
+            if missing:
+                errors.append(f"atomic rule lacks enforceable contract: {path.name}: {heading}: {missing}")
     workflows = {path.stem for path in (root / ".ai" / "workflows").glob("*.md")}
     if workflows != REQUIRED_WORKFLOWS:
         errors.append(f"workflow mismatch: missing={sorted(REQUIRED_WORKFLOWS-workflows)}, extra={sorted(workflows-REQUIRED_WORKFLOWS)}")
@@ -103,6 +122,8 @@ def validate_runtime(root: Path) -> dict:
         "workflows": len(workflows),
         "templates": len(templates),
         "project_constraints": len(project_constraints),
+        "detail_packs": len(details),
+        "atomic_rules": atomic_count,
     }
 
 
