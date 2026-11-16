@@ -17,19 +17,39 @@ SPEC.loader.exec_module(MODULE)
 
 
 class RuntimeMarkdownPackageTests(unittest.TestCase):
-    def test_root_concrete_constraint_document_is_directly_usable(self):
-        path = RUNTIME_ROOT / "具体工程约束.md"
-        content = path.read_text(encoding="utf-8")
-        for required in (
-            "AI 嵌入式开发具体工程约束",
-            "U_isr = Σ(f_i × C_i)",
-            "capacity >= ceil(R_peak × T_block) + F_max",
-            "R_min = (VDD - VOL_max) / IOL_max",
-            "I_rail,max = ΣI_load,max + I_dynamic + I_external",
-            "PLAN_ONLY / EDITABLE_LAYOUT / ROUTED / DRC_VERIFIED",
-            "PASS、FAIL、BLOCKED、NOT_RUN、UNAVAILABLE 和 UNKNOWN",
-        ):
-            self.assertIn(required, content)
+    def test_root_concrete_constraints_are_separated_by_profession(self):
+        expected = {
+            "软件开发具体约束.md": (
+                "AI 嵌入式软件开发具体约束",
+                "U_isr = Σ(f_i × C_i)",
+                "capacity >= ceil(R_peak × T_block) + F_max",
+                "NVM、Bootloader 与 OTA",
+            ),
+            "硬件开发具体约束.md": (
+                "AI 嵌入式硬件开发具体约束",
+                "I_rail,max = ΣI_load,max + I_dynamic + I_external",
+                "R_min=(VDD-VOL_max)/IOL_max",
+                "PLAN_ONLY / EDITABLE_LAYOUT / ROUTED / DRC_VERIFIED",
+            ),
+            "测试验证具体约束.md": (
+                "AI 嵌入式测试与验证具体约束",
+                "用例最小合同",
+                "PASS / FAIL / BLOCKED / NOT_RUN / UNAVAILABLE / NOT_APPLICABLE",
+                "缺陷复现与关闭",
+            ),
+            "项目目录与工程框架具体约束.md": (
+                "项目目录框架_V1.20",
+                "NEW` |",
+                "ORGANIZE 两轮六阶段闭环",
+                "达到50 MiB不得直接进入普通Git历史",
+                "生产备份/{产品代次}/",
+            ),
+        }
+        self.assertFalse((RUNTIME_ROOT / "具体工程约束.md").exists())
+        for name, terms in expected.items():
+            content = (RUNTIME_ROOT / name).read_text(encoding="utf-8")
+            for required in terms:
+                self.assertIn(required, content, name)
 
     def test_runtime_tree_is_complete_and_markdown_only(self):
         result = MODULE.validate_runtime(RUNTIME_ROOT)
