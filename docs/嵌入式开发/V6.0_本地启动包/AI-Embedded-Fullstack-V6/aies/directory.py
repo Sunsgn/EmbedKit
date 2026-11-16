@@ -27,8 +27,11 @@ def initialize_minimal_project(root: Path, framework_sha256: str, date: str) -> 
     (root / "CLAUDE.md").write_text("Directory tasks read .ai/PROJECT_PROFILE.md; reads do not authorize destructive or Git operations.\n", encoding="utf-8")
     (root / "README.md").write_text("# Embedded project\n\nProject facts are initially unknown; update `.ai/PROJECT_PROFILE.md` from verified sources.\n", encoding="utf-8")
     (root / ".gitignore").write_text("# Add only verified local outputs; no broad patterns are assumed.\n", encoding="utf-8")
-    (ai / "PROJECT_PROFILE.md").write_text(
-        f"# Project profile\n\n- Directory framework: V1.20\n- Framework SHA-256: {framework_sha256}\n- Fully read: {date}\n- Product/facts: UNKNOWN\n",
-        encoding="utf-8",
+    template = Path(__file__).resolve().parents[1] / "templates" / "PROJECT_PROFILE.md"
+    profile = template.read_text(encoding="utf-8")
+    provenance = (
+        "\n## 目录框架来源\n\n"
+        f"- 目录框架：V1.20\n- 框架 SHA-256：{framework_sha256}\n- 完整读取日期：{date}\n"
     )
+    (ai / "PROJECT_PROFILE.md").write_text(profile + provenance, encoding="utf-8")
     return {"created_directories": [".ai", *CORE_DIRS], "created_files": ["AGENTS.md", "CLAUDE.md", "README.md", ".gitignore", ".ai/PROJECT_PROFILE.md"]}

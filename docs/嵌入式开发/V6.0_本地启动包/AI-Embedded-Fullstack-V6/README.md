@@ -8,7 +8,7 @@ Each domain also contains generated `RULES.md` with atomic rules: stable ID, tri
 
 Professional coverage includes system engineering, software, board bring-up/debug, build/firmware artifacts, embedded Linux, communication buses/networks, hardware, PCB, integration, verification, reliability/EMC, mechanical/thermal, manufacturing, security/release, directory governance, and adapter/plugin extensions.
 
-For a new project, copy [`templates/PROJECT_AGENTS.md`](templates/PROJECT_AGENTS.md) to the project root as `AGENTS.md`, place this package at `.ai/AIES-V6`, and put project facts in `.ai/PROJECT_PROFILE.md` instead of editing global rules.
+For a new project, copy [`templates/PROJECT_AGENTS.md`](templates/PROJECT_AGENTS.md) to the root as `AGENTS.md`, copy [`templates/PROJECT_PROFILE.md`](templates/PROJECT_PROFILE.md) to `.ai/PROJECT_PROFILE.md`, and place this package at `.ai/AIES-V6`. Fill the profile only from verified sources; keep missing facts `UNKNOWN`.
 
 Quick check from this directory:
 

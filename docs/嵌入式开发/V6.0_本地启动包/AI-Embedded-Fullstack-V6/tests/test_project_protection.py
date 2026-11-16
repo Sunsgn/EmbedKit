@@ -38,6 +38,10 @@ class ProjectProtectionTests(unittest.TestCase):
         top = {path.name for path in self.root.iterdir()}
         self.assertEqual({".ai", "program", "开发文档", "硬件原理图PCB", "测试", "AGENTS.md", "CLAUDE.md", "README.md", ".gitignore"}, top)
         self.assertEqual(5, len(result["created_directories"]))
+        profile = (self.root / ".ai" / "PROJECT_PROFILE.md").read_text(encoding="utf-8")
+        self.assertIn("GPIO/Pinmux/默认安全电平", profile)
+        self.assertIn("正式构建目标", profile)
+        self.assertIn("框架 SHA-256", profile)
 
     def test_missing_target_resource_data_is_unknown_not_pass(self):
         result = resource_budget_report(None, None, None)

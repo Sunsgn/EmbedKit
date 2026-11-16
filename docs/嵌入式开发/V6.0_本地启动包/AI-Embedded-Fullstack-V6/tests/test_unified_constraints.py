@@ -81,6 +81,24 @@ class UnifiedConstraintTests(unittest.TestCase):
         self.assertIn("ai_read_files", content)
         self.assertIn("machine_rule_files", content)
 
+    def test_software_constraints_are_concrete_not_a_checklist(self):
+        content = (PACKAGE_ROOT / "rules" / "software" / "CONSTRAINTS.md").read_text(encoding="utf-8")
+        self.assertGreater(len(content.encode("utf-8")), 14000)
+        for required in (
+            "ISR 中禁止", "volatile", "tick 回绕", "优先级反转", "I²C 要处理 NACK",
+            "旧 output", "UNKNOWN/NOT_RUN", "半包、粘包", "任意指令点掉电",
+            "不得用经验值", "只允许报告实际达到",
+        ):
+            self.assertIn(required, content)
+
+    def test_project_profile_template_captures_project_specific_values(self):
+        content = (PACKAGE_ROOT / "templates" / "PROJECT_PROFILE.md").read_text(encoding="utf-8")
+        for required in (
+            "MCU/SoC", "RTOS/内核", "正式构建目标", "GPIO/Pinmux", "DMA 通道",
+            "队列/环形缓冲容量", "协议名称", "Bootloader/OTA", "已授权操作", "UNKNOWN",
+        ):
+            self.assertIn(required, content)
+
 
 if __name__ == "__main__":
     unittest.main()

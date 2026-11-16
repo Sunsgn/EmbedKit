@@ -2,7 +2,7 @@
 
 All project paths must already exist. Read-only commands do not create `.aies` state.
 
-For AI development constraints, place this package at `<project>/.ai/AIES-V6` and copy `templates/PROJECT_AGENTS.md` to `<project>/AGENTS.md`. On each task, the AI reads only the route output's `ai_read_files`; it must not preload all domain rules or machine JSON.
+For AI development constraints, place this package at `<project>/.ai/AIES-V6`, copy `templates/PROJECT_AGENTS.md` to `<project>/AGENTS.md`, and copy `templates/PROJECT_PROFILE.md` to `<project>/.ai/PROJECT_PROFILE.md`. Fill verified facts only and retain `UNKNOWN` values. On each task, the AI reads only `ai_read_files`; it must not preload all domain rules or machine JSON.
 
 ```powershell
 python -m aies inspect --project-root D:\work\demo --read-only --json
