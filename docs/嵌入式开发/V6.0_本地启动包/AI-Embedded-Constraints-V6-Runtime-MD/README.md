@@ -19,7 +19,7 @@
 - `AI-INSTRUCTIONS.md`：其他 AI 工具的通用入口。
 - `.ai/PROJECT_PROFILE.md`：当前工程事实、来源和授权边界。
 - `.ai/constraints/INDEX.md`：任务、文件和影响三级路由。
-- `.ai/constraints/*.md`：17 个专业领域约束。
+- `.ai/constraints/*.md`：25 个专业领域约束。
 - `.ai/workflows/*.md`：常见工程任务的执行闭环。
 - `.ai/templates/*.md`：AI 动态建立计划、状态、交接和证据时使用。
 

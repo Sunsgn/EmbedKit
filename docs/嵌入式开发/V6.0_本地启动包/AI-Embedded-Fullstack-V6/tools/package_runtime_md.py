@@ -13,6 +13,9 @@ REQUIRED_DOMAINS = {
     "verification", "manufacturing", "security_release", "directory",
     "bringup_debug", "build_artifacts", "embedded_linux", "communication",
     "reliability", "mechanical_thermal", "extension",
+    "power_energy", "bootloader_ota", "rf_wireless", "motor_control_power",
+    "sensing_calibration", "compliance_certification", "field_maintenance",
+    "supply_chain_lifecycle",
 }
 REQUIRED_WORKFLOWS = {
     "NEW_PROJECT_DISCOVERY", "SOFTWARE_CHANGE", "DRIVER_DEVELOPMENT",

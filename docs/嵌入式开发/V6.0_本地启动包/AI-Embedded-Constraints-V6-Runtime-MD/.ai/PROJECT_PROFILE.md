@@ -47,6 +47,8 @@
 | 任务、周期、截止期和栈 | UNKNOWN | UNKNOWN | 未调查 | 实时性 |
 | 队列/缓冲容量和满策略 | UNKNOWN | UNKNOWN | 未调查 | 资源 |
 | Flash/RAM/堆/栈预算 | UNKNOWN | UNKNOWN | 未调查 | 资源 |
+| 电源模式、睡眠、唤醒和续航目标 | UNKNOWN | UNKNOWN | 未调查 | 功耗 |
+| 电池/充电/低电量和棕断策略 | UNKNOWN | UNKNOWN | 未调查 | 能源 |
 
 ## 协议、存储与升级
 
@@ -57,6 +59,12 @@
 | NVM 分区、schema、掉电策略 | UNKNOWN | UNKNOWN | 未调查 | 存储 |
 | Bootloader/OTA/镜像认证 | UNKNOWN | UNKNOWN | 未调查 | 升级 |
 | 硬件/固件/配置兼容矩阵 | UNKNOWN | UNKNOWN | 未调查 | 集成 |
+| RF/无线频段、区域、天线和功率 | UNKNOWN | UNKNOWN | 未调查 | 无线 |
+| 电机/功率执行器及安全状态 | UNKNOWN | UNKNOWN | 未调查 | 控制 |
+| 测量链、误差预算和校准追溯 | UNKNOWN | UNKNOWN | 未调查 | 计量 |
+| 法规市场、标准和认证基线 | UNKNOWN | UNKNOWN | 未调查 | 合规 |
+| 关键器件、替代料和生命周期 | UNKNOWN | UNKNOWN | 未调查 | 供应链 |
+| 现场维护、日志和远程服务边界 | UNKNOWN | UNKNOWN | 未调查 | 服务 |
 
 ## 验证与授权
 

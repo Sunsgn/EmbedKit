@@ -21,7 +21,7 @@ class RuntimeMarkdownPackageTests(unittest.TestCase):
         result = MODULE.validate_runtime(RUNTIME_ROOT)
         self.assertTrue(result["valid"], result["errors"])
         self.assertTrue(result["markdown_only"])
-        self.assertEqual(17, result["domains"])
+        self.assertEqual(25, result["domains"])
         self.assertEqual(10, result["workflows"])
         self.assertEqual(6, result["templates"])
 
@@ -44,7 +44,25 @@ class RuntimeMarkdownPackageTests(unittest.TestCase):
                 self.assertIsNotNone(match, f"missing stable rule ID: {path}: {heading}")
                 ids.append(match.group(1))
         self.assertEqual(len(ids), len(set(ids)))
-        self.assertGreaterEqual(len(ids), 150)
+        self.assertGreaterEqual(len(ids), 220)
+
+    def test_added_specialist_domains_have_concrete_engineering_gates(self):
+        required = {
+            "power_energy.md": ("反向供电", "唤醒风暴", "典型电流"),
+            "bootloader_ota.md": ("任意指令点掉电", "最后可启动", "禁止降级"),
+            "rf_wireless.md": ("OTA 良好", "共存", "模组证书"),
+            "motor_control_power.md": ("直通", "急停", "上下桥互锁"),
+            "sensing_calibration.md": ("不确定度", "只保存最终系数", "独立验证点"),
+            "compliance_certification.md": ("AI 不得自行作法律结论", "预扫", "量产不一致"),
+            "field_maintenance.md": ("状态未知的非幂等写入", "RMA", "日志风暴"),
+            "supply_chain_lifecycle.md": ("完整 MPN", "PCN/EOL", "可疑批次"),
+        }
+        root = RUNTIME_ROOT / ".ai" / "constraints"
+        for name, terms in required.items():
+            content = (root / name).read_text(encoding="utf-8")
+            self.assertGreaterEqual(len(content.encode("utf-8")), 4500, name)
+            for term in terms:
+                self.assertIn(term, content, name)
 
     def test_deterministic_zip_contains_only_markdown(self):
         with tempfile.TemporaryDirectory() as directory:

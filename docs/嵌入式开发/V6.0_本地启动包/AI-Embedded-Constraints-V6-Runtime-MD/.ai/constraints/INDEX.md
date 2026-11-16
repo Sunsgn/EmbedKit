@@ -25,6 +25,14 @@
 | BOM、DFM、工装、烧录、校准、产测、追溯 | `core.md`、`manufacturing.md` | `DEVICE_TEST.md` 或 `PROJECT_DELIVERY.md` |
 | 身份、密钥、危险控制、安全启动、正式发布 | `core.md`、`security_release.md` | 匹配任务工作流 |
 | Embedded Linux、内核、DTS、驱动、rootfs | `core.md`、`embedded_linux.md` | `SOFTWARE_CHANGE.md` |
+| 电池、电源域、睡眠、唤醒、续航和能耗 | `core.md`、`power_energy.md`、`software.md` | `DRIVER_DEVELOPMENT.md` 或 `DEVICE_TEST.md` |
+| Bootloader、安全启动、A/B、OTA 和恢复 | `core.md`、`bootloader_ota.md`、`security_release.md` | `SOFTWARE_CHANGE.md`、`DEVICE_TEST.md` |
+| BLE、Wi-Fi、蜂窝、Sub-GHz、GNSS、天线、RF | `core.md`、`rf_wireless.md`、`communication.md` | `DRIVER_DEVELOPMENT.md` 或 `DEVICE_TEST.md` |
+| 电机、逆变器、功率级、PWM、执行器和控制环 | `core.md`、`motor_control_power.md`、`integration.md` | `DRIVER_DEVELOPMENT.md`、`DEVICE_TEST.md` |
+| 传感器、测量链、误差预算、计量和校准 | `core.md`、`sensing_calibration.md`、`integration.md` | `DRIVER_DEVELOPMENT.md` 或 `DEVICE_TEST.md` |
+| 安规、法规、区域准入、认证和符合性 | `core.md`、`compliance_certification.md` | `PROJECT_DELIVERY.md` |
+| 现场安装、维护、诊断、远程服务和 RMA | `core.md`、`field_maintenance.md` | `DEFECT_FIX.md` 或 `PROJECT_DELIVERY.md` |
+| 器件选型、替代料、PCN、EOL 和供应链 | `core.md`、`supply_chain_lifecycle.md` | `SCHEMATIC_REVIEW.md` 或 `PROJECT_DELIVERY.md` |
 | EMC、ESD、温湿度、振动、寿命、长稳 | `core.md`、`reliability.md`、`verification.md` | `DEVICE_TEST.md` |
 | 结构、外壳、公差、散热、装配、线束 | `core.md`、`mechanical_thermal.md` | 匹配评审或测试工作流 |
 | 适配器、插件、解析器、扩展接口 | `core.md`、`extension.md`、`verification.md` | `SOFTWARE_CHANGE.md` |
@@ -45,15 +53,29 @@
 | BOM、PnP、工艺、校准或产测文件 | `manufacturing.md` |
 | 协议、抓包、串口或网络日志 | `communication.md` |
 | 固件、Bootloader、签名或升级包 | `build_artifacts.md`、`security_release.md` |
+| 电池、功耗波形、睡眠/唤醒配置 | `power_energy.md` |
+| 分区表、镜像头、升级包和回退记录 | `bootloader_ota.md` |
+| 无线配置、天线、射频匹配或认证报告 | `rf_wireless.md` |
+| 电机参数、PWM/ADC、控制器或台架数据 | `motor_control_power.md` |
+| 传感器、误差预算、校准数据和证书 | `sensing_calibration.md` |
+| 标准清单、认证报告、标签和符合性声明 | `compliance_certification.md` |
+| 现场日志、工单、远程配置和 RMA | `field_maintenance.md` |
+| BOM、替代料、PCN/EOL 和供应商文件 | `supply_chain_lifecycle.md` |
 | STEP、机械图、热仿真或装配文件 | `mechanical_thermal.md` |
 
 ## 三级路由：影响传播
 
 - 修改 Pinmux、GPIO、复位、时钟或电源控制：增加 `integration.md` 和 `verification.md`；涉及原理图时增加 `hardware.md`。
-- 修改 ADC、传感、校准或阈值：增加 `hardware.md`、`integration.md`、`verification.md`；涉及生产校准时增加 `manufacturing.md`。
+- 修改 ADC、传感、校准或阈值：增加 `sensing_calibration.md`、`hardware.md`、`integration.md`、`verification.md`；涉及生产校准时增加 `manufacturing.md`。
 - 修改协议字段、端序、状态或版本：增加 `communication.md`、`integration.md`、`verification.md`。
 - 修改 NVM schema、配置或校准持久化：增加 `integration.md`、`verification.md`；影响生产数据时增加 `manufacturing.md`。
-- 修改 Bootloader、OTA、镜像地址或认证：增加 `build_artifacts.md`、`security_release.md`、`verification.md`。
+- 修改 Bootloader、OTA、镜像地址或认证：增加 `bootloader_ota.md`、`build_artifacts.md`、`security_release.md`、`verification.md`。
+- 修改睡眠、时钟门控、电池或续航：增加 `power_energy.md`、`integration.md`、`verification.md`。
+- 修改无线功率、频段、天线、匹配或射频结构：增加 `rf_wireless.md`、`hardware.md`、`pcb.md`、`mechanical_thermal.md`、`verification.md`。
+- 修改电机、功率级、PWM、保护或高能执行器：增加 `motor_control_power.md`、`security_release.md`、`integration.md`、`verification.md`。
+- 修改器件、替代料、BOM 或供应商：增加 `supply_chain_lifecycle.md`，并检查硬件、制造、可靠性和认证影响。
+- 修改认证配置、关键件、标签或目标市场：增加 `compliance_certification.md` 和相关验证领域。
+- 修改远程日志、服务命令、现场升级或维修流程：增加 `field_maintenance.md`、`security_release.md`、`verification.md`。
 - 生成 Gerber、钻孔、BOM 或 PnP：增加 `manufacturing.md`。
 - 修改危险执行器、保护、燃气、高压、加热或运动控制：增加 `security_release.md`、`integration.md`、`verification.md`，风险不足时禁止真实操作。
 - 修改板框、孔、连接器、器件高度或散热：增加 `mechanical_thermal.md`，并检查 PCB/硬件双向影响。
