@@ -5,11 +5,12 @@
 每个任务必须按以下顺序执行：
 
 1. 读取本文件，不得预读全部专业约束。
-2. 读取 `.ai/PROJECT_PROFILE.md` 和 `.ai/PROJECT_CONSTRAINTS.md`，确认项目事实、具体约束路由、未知项、冲突和授权边界。
-3. 按当前任务只读取一个或多个 `.ai/project_constraints/*.md` 项目约束；禁止预读全部项目约束。具体值未初始化时先执行首次识别，不得用通用规则代替项目参数。
-4. 读取 `.ai/constraints/INDEX.md`，按任务语义、目标文件和影响传播选择通用专业领域。
-5. 始终读取 `.ai/constraints/core.md`，其余只读取路由命中的约束；复杂任务再读取一个匹配的 `.ai/workflows/*.md`。
-6. 读取目标路径作用域内更具体的 `AGENTS.md`、`CLAUDE.md` 或 `CONSTRAINTS.md`。项目局部事实优先于通用规则，但不得绕过安全和证据底线。
+2. 读取根目录 `具体工程约束.md` 中与当前任务对象直接相关的章节；该文件是统一具体工程门禁，不得只读取入口而跳过具体条款。
+3. 读取 `.ai/PROJECT_PROFILE.md` 和 `.ai/PROJECT_CONSTRAINTS.md`，确认项目事实、具体约束路由、未知项、冲突和授权边界。
+4. 按当前任务只读取一个或多个 `.ai/project_constraints/*.md` 项目约束；禁止预读全部项目约束。具体值未初始化时先执行首次识别，不得用通用规则代替项目参数。
+5. 读取 `.ai/constraints/INDEX.md`，按任务语义、目标文件和影响传播选择通用专业领域。
+6. 始终读取 `.ai/constraints/core.md`，其余只读取路由命中的约束；复杂任务再读取一个匹配的 `.ai/workflows/*.md`。
+7. 读取目标路径作用域内更具体的 `AGENTS.md`、`CLAUDE.md` 或 `CONSTRAINTS.md`。项目局部事实优先于通用规则，但不得绕过安全和证据底线。
 
 ## 文件效力分类
 

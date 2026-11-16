@@ -14,6 +14,7 @@
 
 ## 目录说明
 
+- `具体工程约束.md`：根目录统一具体约束文档，可直接阅读；包含软件、实时性、总线、硬件、PCB、测试、证据和交付的计算与门禁。
 - `AGENTS.md`：Codex 的紧凑强制入口。
 - `CLAUDE.md`：Claude Code 的入口适配。
 - `AI-INSTRUCTIONS.md`：其他 AI 工具的通用入口。

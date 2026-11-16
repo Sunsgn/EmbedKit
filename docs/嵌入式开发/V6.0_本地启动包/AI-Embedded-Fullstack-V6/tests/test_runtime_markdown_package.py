@@ -17,6 +17,20 @@ SPEC.loader.exec_module(MODULE)
 
 
 class RuntimeMarkdownPackageTests(unittest.TestCase):
+    def test_root_concrete_constraint_document_is_directly_usable(self):
+        path = RUNTIME_ROOT / "具体工程约束.md"
+        content = path.read_text(encoding="utf-8")
+        for required in (
+            "AI 嵌入式开发具体工程约束",
+            "U_isr = Σ(f_i × C_i)",
+            "capacity >= ceil(R_peak × T_block) + F_max",
+            "R_min = (VDD - VOL_max) / IOL_max",
+            "I_rail,max = ΣI_load,max + I_dynamic + I_external",
+            "PLAN_ONLY / EDITABLE_LAYOUT / ROUTED / DRC_VERIFIED",
+            "PASS、FAIL、BLOCKED、NOT_RUN、UNAVAILABLE 和 UNKNOWN",
+        ):
+            self.assertIn(required, content)
+
     def test_runtime_tree_is_complete_and_markdown_only(self):
         result = MODULE.validate_runtime(RUNTIME_ROOT)
         self.assertTrue(result["valid"], result["errors"])
