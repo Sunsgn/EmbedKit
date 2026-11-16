@@ -42,7 +42,7 @@ class UnifiedConstraintTests(unittest.TestCase):
 
     def test_route_returns_human_constraints_and_machine_rules(self):
         from aies.routing import route_task
-        route = route_task(str(PACKAGE_ROOT), "修改 UART DMA 驱动")
+        route = route_task(str(PACKAGE_ROOT), "修改代码函数返回值")
         self.assertIn("rules/core/CONSTRAINTS.md", route.rule_files)
         self.assertIn("rules/software/CONSTRAINTS.md", route.rule_files)
         self.assertIn("rules/core/rules.json", route.rule_files)
@@ -62,7 +62,7 @@ class UnifiedConstraintTests(unittest.TestCase):
 
     def test_software_task_does_not_load_unrelated_professional_text(self):
         from aies.routing import route_task
-        route = route_task(str(PACKAGE_ROOT), "修改 UART DMA 驱动")
+        route = route_task(str(PACKAGE_ROOT), "修改代码函数返回值")
         self.assertNotIn("rules/hardware/CONSTRAINTS.md", route.ai_read_files)
         self.assertNotIn("rules/pcb/CONSTRAINTS.md", route.ai_read_files)
         self.assertNotIn("rules/manufacturing/CONSTRAINTS.md", route.ai_read_files)

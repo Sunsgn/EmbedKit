@@ -92,6 +92,38 @@ class RoutingTests(unittest.TestCase):
         self.assertFalse(result["valid_for_write"])
         self.assertEqual("CONFLICT", result["conflicts"][0]["status"])
 
+    def test_system_architecture_domain(self):
+        route = self.route("新品系统架构与资源预算")
+        self.assertIn("system", route.domains)
+
+    def test_board_bringup_domain(self):
+        route = self.route("新板首次上电，检查时钟复位和 GPIO")
+        self.assertIn("bringup_debug", route.domains)
+
+    def test_build_artifact_domain(self):
+        route = self.route("分析 ELF MAP 和 Intel HEX 构建产物")
+        self.assertIn("build_artifacts", route.domains)
+
+    def test_embedded_linux_domain(self):
+        route = self.route("嵌入式Linux设备树和内核驱动启动失败")
+        self.assertIn("embedded_linux", route.domains)
+
+    def test_communication_domain(self):
+        route = self.route("实现 CAN 和 UDP 通信并处理断线恢复")
+        self.assertIn("communication", route.domains)
+
+    def test_reliability_domain(self):
+        route = self.route("执行 EMC、温湿度和寿命可靠性验证")
+        self.assertIn("reliability", route.domains)
+
+    def test_mechanical_thermal_domain(self):
+        route = self.route("检查外壳公差、散热和装配空间")
+        self.assertIn("mechanical_thermal", route.domains)
+
+    def test_extension_domain(self):
+        route = self.route("新增工具链适配器和解析器插件")
+        self.assertIn("extension", route.domains)
+
 
 if __name__ == "__main__":
     unittest.main()

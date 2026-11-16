@@ -20,11 +20,12 @@
     "nine_domain_detailed_professional_constraints"
     ,"token_efficient_L0_and_on_demand_AI_context_routing"
     ,"fifty_six_atomic_professional_rules_with_deterministic_AI_markdown"
+    ,"seventeen_domains_and_one_hundred_four_atomic_rules"
   ],
   "acceptance_summary": {"PASS": 48, "FAIL": 0, "BLOCKED": 6, "NOT_RUN": 0},
-  "automated_tests": {"passed": 59, "failed": 0},
+  "automated_tests": {"passed": 67, "failed": 0},
   "candidate_zip": "out/AI嵌入式全栈工程统一约束包_V6.0.0_RC.zip",
-  "candidate_sha256": "9a097048535d93bb4313f24f44b556c24467d26384398c20b167c8badc15a49d",
+  "candidate_sha256": "5912bde5d1ac86658c1783ee26eb19062b4b22f32771eccafc9739c7ac727417",
   "blocked": [
     "SW-004: A22 FreeRTOS archive/source input unavailable",
     "HW-002: native schematic and installed EDA unavailable",

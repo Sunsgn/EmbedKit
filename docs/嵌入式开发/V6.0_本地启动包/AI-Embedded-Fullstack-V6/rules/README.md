@@ -13,5 +13,13 @@ AI 只先读取包根 `AGENTS.md`，再由路由器按任务加载下表。每�
 | 制造交付 | `manufacturing/CONSTRAINTS.md` + `manufacturing/RULES.md` | BOM、DFM/DFT、产测、标定、追溯 |
 | 安全发布 | `security_release/CONSTRAINTS.md` + `security_release/RULES.md` | 安全功能、升级、发布、现场维护 |
 | 项目目录 | `directory/CONSTRAINTS.md` + `directory/RULES.md` | NEW、ORGANIZE、EXTEND、AUDIT |
+| 系统工程 | `system/CONSTRAINTS.md` + `system/RULES.md` | 需求、架构、预算、风险、变更 |
+| 板级调试 | `bringup_debug/CONSTRAINTS.md` + `bringup_debug/RULES.md` | 上电、时钟、复位、GPIO、故障定位 |
+| 构建与产物 | `build_artifacts/CONSTRAINTS.md` + `build_artifacts/RULES.md` | 工具链、ELF、MAP、BIN、HEX、符号化 |
+| 嵌入式 Linux | `embedded_linux/CONSTRAINTS.md` + `embedded_linux/RULES.md` | 启动链、设备树、驱动、服务、升级 |
+| 通信与总线 | `communication/CONSTRAINTS.md` + `communication/RULES.md` | UART、I²C、SPI、CAN、TCP/UDP/WebSocket |
+| 可靠性 | `reliability/CONSTRAINTS.md` + `reliability/RULES.md` | 看门狗、EMC、环境、寿命、长期运行 |
+| 结构与热 | `mechanical_thermal/CONSTRAINTS.md` + `mechanical_thermal/RULES.md` | 结构接口、公差、热、密封、装配 |
+| 扩展生态 | `extension/CONSTRAINTS.md` + `extension/RULES.md` | 适配器、插件、解析器、兼容与隔离 |
 
 项目专属事实不能写回这些通用文件；应存放在项目自己的约束或 Profile 中，并由来源、版本和 SHA-256 约束其作用域。

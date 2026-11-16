@@ -15,6 +15,14 @@ DOMAIN_RULES = {
     "manufacturing": ("rules/manufacturing/CONSTRAINTS.md", "rules/manufacturing/RULES.md", "rules/manufacturing/rules.json"),
     "security": ("rules/security_release/CONSTRAINTS.md", "rules/security_release/RULES.md", "rules/security_release/rules.json"),
     "directory": ("rules/directory/CONSTRAINTS.md", "rules/directory/RULES.md", "rules/directory/rules.json"),
+    "system": ("rules/system/CONSTRAINTS.md", "rules/system/RULES.md", "rules/system/rules.json"),
+    "bringup_debug": ("rules/bringup_debug/CONSTRAINTS.md", "rules/bringup_debug/RULES.md", "rules/bringup_debug/rules.json"),
+    "build_artifacts": ("rules/build_artifacts/CONSTRAINTS.md", "rules/build_artifacts/RULES.md", "rules/build_artifacts/rules.json"),
+    "embedded_linux": ("rules/embedded_linux/CONSTRAINTS.md", "rules/embedded_linux/RULES.md", "rules/embedded_linux/rules.json"),
+    "communication": ("rules/communication/CONSTRAINTS.md", "rules/communication/RULES.md", "rules/communication/rules.json"),
+    "reliability": ("rules/reliability/CONSTRAINTS.md", "rules/reliability/RULES.md", "rules/reliability/rules.json"),
+    "mechanical_thermal": ("rules/mechanical_thermal/CONSTRAINTS.md", "rules/mechanical_thermal/RULES.md", "rules/mechanical_thermal/rules.json"),
+    "extension": ("rules/extension/CONSTRAINTS.md", "rules/extension/RULES.md", "rules/extension/rules.json"),
 }
 
 SIGNALS = {
@@ -26,6 +34,14 @@ SIGNALS = {
     "security": ("安全", "阀", "燃气", "认证", "发布", "安全状态机"),
     "integration": ("pinmux", "引脚", "软硬件", "接口映射", "电压域", "硬件版本"),
     "verification": ("测试", "回归", "hil", "故障注入", "验收"),
+    "system": ("需求", "架构", "系统设计", "资源预算", "新品", "eco", "ecn"),
+    "bringup_debug": ("bring-up", "bringup", "上电", "板级调试", "时钟", "复位", "gpio", "中断", "irq", "崩溃"),
+    "build_artifacts": ("elf", "map", "bin", "hex", "构建产物", "链接", "工具链", "keil", "iar", "cmake", "ninja"),
+    "embedded_linux": ("embedded linux", "嵌入式linux", "内核", "kernel", "设备树", "device tree", "dts", "dtb", "rootfs"),
+    "communication": ("串口", "uart", "i2c", "spi", "can", "tcp", "udp", "websocket", "网络", "协议"),
+    "reliability": ("可靠性", "emc", "esd", "eft", "浪涌", "温湿度", "振动", "寿命", "看门狗", "长期运行"),
+    "mechanical_thermal": ("结构", "外壳", "热设计", "散热", "公差", "防护", "装配", "线束"),
+    "extension": ("适配器", "插件", "扩展", "解析器", "adapter", "plugin", "schema"),
 }
 
 

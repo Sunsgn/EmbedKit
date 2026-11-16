@@ -6,6 +6,8 @@ AI agents must read [`AGENTS.md`](AGENTS.md) first. It is the unified entry; [`r
 
 Each domain also contains generated `RULES.md` with atomic rules: stable ID, trigger, applicability, required inputs, ordered actions, evidence, all-pass acceptance conditions, and failure policy. Project-specific numeric values must come from the target project rather than global defaults.
 
+Professional coverage includes system engineering, software, board bring-up/debug, build/firmware artifacts, embedded Linux, communication buses/networks, hardware, PCB, integration, verification, reliability/EMC, mechanical/thermal, manufacturing, security/release, directory governance, and adapter/plugin extensions.
+
 For a new project, copy [`templates/PROJECT_AGENTS.md`](templates/PROJECT_AGENTS.md) to the project root as `AGENTS.md`, place this package at `.ai/AIES-V6`, and put project facts in `.ai/PROJECT_PROFILE.md` instead of editing global rules.
 
 Quick check from this directory:
