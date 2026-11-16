@@ -31,26 +31,29 @@
 
 ## HW-PWR-001 — hardware
 
-- 版本：`1.0`
+- 版本：`1.1`
 - 触发：power, regulator
 - 适用条件：a rail is created changed or reviewed
 - 必需输入：
   - input range
-  - load steady and peak
-  - efficiency dropout ripple thermal and sequencing limits
+  - per-load steady peak dynamic and external current
+  - efficiency/dropout/ripple limits
+  - Ta_max and applicable thermal model
+  - transient step duration and allowed droop
 - 强制动作：
-  1. calculate worst-case current power loss and margin
-  2. verify startup shutdown and fault paths
-  3. verify protection and reverse-current behavior
+  1. calculate I_rail_max as the sum of worst-case loads without treating unknown as zero
+  2. for linear regulation calculate Ploss=(Vin_max-Vout_min)*Iout_max+Piq and Tj=Ta_max+Ploss*theta_effective
+  3. calculate ideal transient capacitance at least Istep*dt/dV then derate for bias temperature tolerance ESR and ESL
+  4. verify startup shutdown fault protection and reverse-current paths
 - 必需证据：
-  - calculation with units
-  - datasheet sources
-  - measurement plan/result
+  - per-load table and calculations with units/source pages
+  - applicability of the thermal model
+  - voltage current ripple and temperature measurement plan/result
 - 通过条件（全部满足）：
-  - worst-case load is within component and source limits with project-approved margin
-  - dropout and transient limits hold over stated range
-  - thermal conclusion is measured or explicitly unverified
-- 失败动作：block design approval when any required limit or source is unknown
+  - worst-case load is within every path component and source limit with project-approved margin
+  - dropout transient and effective capacitance limits hold over the stated range
+  - calculated and measured junction/board temperature remains within project limits or is explicitly NOT_RUN
+- 失败动作：block design approval when any required load limit source or thermal-model applicability is unknown
 - 关联验收：INT-002
 
 ## HW-RESET-001 — hardware
@@ -79,27 +82,28 @@
 
 ## HW-IO-001 — hardware
 
-- 版本：`1.0`
+- 版本：`1.1`
 - 触发：digital_interface, GPIO, bus
 - 适用条件：devices exchange digital signals
 - 必需输入：
   - voltage domains
-  - input/output limits
-  - drive and timing
+  - VIH_min VIL_max VOH_min VOL_max over supply temperature and load
+  - drive/timing
   - powered-off behavior
 - 强制动作：
-  1. check VIH VIL VOH VOL and absolute maxima over conditions
-  2. select pull/termination/level shift/isolation
-  3. check back-power and contention
+  1. calculate NMH=VOH_min-VIH_min and NML=VIL_max-VOL_max for every direction
+  2. separately check recommended and absolute-maximum limits
+  3. select pull termination level shift or isolation
+  4. check back-power and contention
 - 必需证据：
   - interface table
-  - datasheet limits
-  - timing or signal-integrity evidence
+  - noise-margin calculations with datasheet source pages
+  - powered-off and timing or signal-integrity evidence
 - 通过条件（全部满足）：
-  - driver guaranteed output satisfies receiver guaranteed input with stated margin
+  - NMH and NML meet the project-source requirement in every legal direction
   - no state violates absolute maximum or causes uncontrolled back-power
   - direction and default level match software contract
-- 失败动作：mark interface CONFLICT and block connection release
+- 失败动作：mark interface CONFLICT and block connection release on negative/unknown margin or unknown powered-off state
 - 关联验收：INT-001
 
 ## HW-ANALOG-001 — hardware

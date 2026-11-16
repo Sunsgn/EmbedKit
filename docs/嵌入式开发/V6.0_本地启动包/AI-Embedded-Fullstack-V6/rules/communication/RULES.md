@@ -7,53 +7,64 @@
 
 ## COM-UART-001 — communication
 
-- 版本：`1.0`
+- 版本：`1.1`
 - 触发：UART, serial
 - 适用条件：asynchronous serial link is implemented/tested
 - 必需输入：
   - electrical level
-  - format/baud tolerance
-  - framing/max length
+  - peripheral clock and divider equation
+  - both endpoint clock tolerances
+  - framing/max length F_max
+  - peak byte rate R_peak
+  - maximum consumer stall T_block
   - flow/idle policy
 - 强制动作：
-  1. verify pin/electrical/config
-  2. process arbitrary receive chunks
-  3. detect frame/idle/overflow/error
-  4. recover without stale bytes
+  1. calculate actual baud and local error
+  2. combine endpoint tolerances using the documented receiver sampling limit
+  3. calculate receive capacity at least ceil(R_peak*T_block)+F_max
+  4. process arbitrary receive chunks
+  5. inject overflow frame parity and idle errors
+  6. recover without stale bytes
 - 必需证据：
-  - configuration
-  - raw capture
-  - split/coalesced/error tests
+  - baud and capacity calculations with units and sources
+  - receiver-end raw capture
+  - split coalesced full-plus-one and recovery tests
 - 通过条件（全部满足）：
-  - peer format and measured timing are compatible
+  - worst relative baud error is within the endpoint or protocol source limit
+  - receive capacity covers the declared peak/stall window
   - parser handles every chunk boundary
-  - overflow/frame error produces bounded recovery
-- 失败动作：reset affected receive state and preserve raw error count
+  - overflow/frame error invalidates the affected frame and produces bounded resynchronization
+- 失败动作：reset affected receive frame state preserve raw error counters and keep compatibility UNKNOWN when a tolerance source is missing
 - 关联验收：DBG-BUS-001, SW-PROTO-001
 
 ## COM-BUS-001 — communication
 
-- 版本：`1.0`
+- 版本：`1.1`
 - 触发：I2C, SPI
 - 适用条件：synchronous board bus is used
 - 必需输入：
   - mode/rate/address or chip-select
-  - electrical load/timing
+  - VDD VOL_max IOL_max tr_max C_bus for I2C
+  - tCSS tCSH tSU tH and SCK limits for SPI
   - ownership/timeout
 - 强制动作：
-  1. verify electrical and controller mode
-  2. serialize shared access
-  3. bound busy/wait
-  4. inject NACK/arbitration/stuck or mode/timing error as applicable
+  1. calculate I2C R_min=(VDD-VOL_max)/IOL_max and R_max=tr_max/(0.8473*C_bus)
+  2. verify the selected pull-up lies in the nonempty interval
+  3. verify SPI timing at the receiver
+  4. serialize shared access
+  5. bound busy/wait
+  6. inject NACK arbitration stuck-bus or mode/timing error as applicable
 - 必需证据：
-  - waveform
+  - calculation inputs with units and source pages
+  - receiver waveform
   - configuration
   - error/recovery log
 - 通过条件（全部满足）：
-  - measured timing meets both devices
+  - I2C has a nonempty pull-up interval and measured rise time meets the applicable source
+  - SPI measured timing meets both devices
   - transaction lifetime/CS and buffers remain valid
   - bus fault exits within timeout and recovers or reports terminal failure
-- 失败动作：release/restore bus safely and return explicit error
+- 失败动作：release or restore bus safely and return explicit error; no feasible I2C interval blocks the selected topology/rate
 - 关联验收：DBG-BUS-001
 
 ## COM-CAN-001 — communication

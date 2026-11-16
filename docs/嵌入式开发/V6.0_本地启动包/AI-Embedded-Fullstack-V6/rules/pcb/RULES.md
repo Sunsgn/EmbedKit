@@ -32,26 +32,30 @@
 
 ## PCB-RULE-001 — pcb
 
-- 版本：`1.0`
+- 版本：`1.1`
 - 触发：stackup, netclass, design_rule
 - 适用条件：physical constraints are defined or changed
 - 必需输入：
   - fabricator limits
-  - stackup/material/copper
-  - current temperature rise impedance and safety inputs
+  - stackup material dielectric constant copper and finished-hole data
+  - load current voltage-drop temperature-rise edge-rate impedance and safety inputs
 - 强制动作：
-  1. derive widths gaps vias differential and safety classes
-  2. record equation unit source and margin
-  3. map every critical net to a class
+  1. for every numeric rule record object inputs/units source/version equation-or-tool/version worst result margin and EDA value
+  2. derive power-path widths and vias including neckdowns pads connectors and thermal coupling
+  3. derive transmission-line and differential geometry from the current stackup rather than interface name alone
+  4. derive safety classes from the applicable standard conditions
+  5. map every critical net to a class
 - 必需证据：
-  - rule derivation table
-  - fabricator source
-  - class assignment
+  - complete rule derivation table
+  - fabricator capability and impedance confirmation
+  - critical power-path narrowest-point list
+  - class assignment and EDA rule export
 - 通过条件（全部满足）：
   - no critical net uses an unexplained default rule
-  - calculated requirement is no weaker than configured rule
-  - unknown material or safety input blocks corresponding claim
-- 失败动作：remain PLAN_ONLY until inputs are verified
+  - calculated requirement is no weaker than configured rule along the entire path
+  - EDA differential geometry matches the current fabricator-confirmed stackup
+  - unknown material thermal or safety input blocks the corresponding claim
+- 失败动作：remain PLAN_ONLY until inputs are verified; never fill missing values with common trace/spacing defaults
 - 关联验收：PCB-005
 
 ## PCB-PLACE-001 — pcb

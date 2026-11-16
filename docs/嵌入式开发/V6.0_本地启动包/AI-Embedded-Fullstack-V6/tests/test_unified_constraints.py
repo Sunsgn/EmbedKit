@@ -87,9 +87,47 @@ class UnifiedConstraintTests(unittest.TestCase):
         for required in (
             "ISR 中禁止", "volatile", "tick 回绕", "优先级反转", "I²C 要处理 NACK",
             "旧 output", "UNKNOWN/NOT_RUN", "半包、粘包", "任意指令点掉电",
-            "不得用经验值", "只允许报告实际达到",
+            "不得用经验值", "只允许报告实际达到", "U_isr = Σ(f_i × C_i)",
+            "capacity >= ceil(R_peak × T_block) + F_max", "预计总写入次数",
         ):
             self.assertIn(required, content)
+
+    def test_engineering_constraints_include_calculation_and_failure_gates(self):
+        required = {
+            "communication": (
+                "error_local = |baud_actual - baud_target| / baud_target",
+                "R_min = (VDD - VOL_max) / IOL_max",
+                "最多 9 个受控 SCL 脉冲",
+                "峰值到达率 × 最长处理停顿 + 最大消息",
+            ),
+            "hardware": (
+                "I_rail,max = ΣI_load,max + I_dynamic + I_external",
+                "T_j = T_a,max + P_loss × θ_effective",
+                "C_ideal >= I_step × Δt / ΔV_allow",
+                "NMH = VOH_min - VIH_min",
+            ),
+            "pcb": (
+                "对象/网络 → 输入值及单位",
+                "焊盘颈缩",
+                "介质厚度/介电常数",
+                "适用标准版本、工作/瞬态电压",
+            ),
+        }
+        for domain, terms in required.items():
+            content = (PACKAGE_ROOT / "rules" / domain / "CONSTRAINTS.md").read_text(encoding="utf-8")
+            for term in terms:
+                self.assertIn(term, content, domain)
+
+        registries = {
+            "software": ("U_isr=sum(fi*Ci)", "ceil(R_peak*T_block)+F_max", "write-step power-cut matrix"),
+            "communication": ("actual baud", "0.8473*C_bus", "full-plus-one"),
+            "hardware": ("Ploss=(Vin_max-Vout_min)*Iout_max+Piq", "NMH=VOH_min-VIH_min"),
+            "pcb": ("critical power-path narrowest-point list", "current fabricator-confirmed stackup"),
+        }
+        for domain, terms in registries.items():
+            content = (PACKAGE_ROOT / "rules" / domain / "rules.json").read_text(encoding="utf-8")
+            for term in terms:
+                self.assertIn(term, content, domain)
 
     def test_project_profile_template_captures_project_specific_values(self):
         content = (PACKAGE_ROOT / "templates" / "PROJECT_PROFILE.md").read_text(encoding="utf-8")

@@ -33,52 +33,64 @@
 
 ## SW-ISR-001 — software
 
-- 版本：`1.0`
+- 版本：`1.1`
 - 触发：interrupt, ISR
 - 适用条件：code executes in interrupt context
 - 必需输入：
   - interrupt source
   - priority model
-  - deadline
+  - deadline D
+  - maximum arrival rate fi
+  - WCET Ci
+  - blocking B and jitter J
   - shared objects
 - 强制动作：
   1. clear only owned status
   2. capture minimum data
   3. notify task using platform-safe primitive
-  4. measure or bound execution time
+  4. measure or bound Ci under the target build
+  5. calculate U_isr=sum(fi*Ci)
+  6. include B J and higher-priority interference in deadline analysis
 - 必需证据：
   - ISR source location
   - context-safe API proof
-  - timing result or UNKNOWN
+  - fi/Ci/U_isr calculation with units
+  - target timing trace or UNKNOWN
 - 通过条件（全部满足）：
   - no blocking wait sleep heap allocation formatted logging flash access or protocol parsing in ISR
   - all shared data uses documented synchronization
-  - measured or derived WCET is below project deadline
-- 失败动作：reject unsafe ISR change; timing without target data remains UNKNOWN
+  - C+B+J plus interference is within the project deadline
+  - U_isr is within the project CPU budget
+- 失败动作：reject unsafe ISR change; missing event-rate target-build or timing data remains UNKNOWN
 - 关联验收：CORE-003
 
 ## SW-DMA-001 — software
 
-- 版本：`1.0`
+- 版本：`1.1`
 - 触发：DMA, ring_buffer
 - 适用条件：peripheral data is transferred asynchronously
 - 必需输入：
-  - buffer size source
+  - peak byte rate R_peak
+  - maximum consumer stall T_block
+  - maximum frame F_max
   - alignment/cache rules
   - producer and consumer
   - overflow policy
 - 强制动作：
-  1. define ownership and state transitions
-  2. handle half/full/idle events
-  3. perform bounds and wrap checks
-  4. apply cache maintenance when target requires it
+  1. calculate capacity at least ceil(R_peak*T_block)+F_max and apply stricter DMA framing requirements
+  2. define ownership and state transitions
+  3. handle half/full/idle events
+  4. perform bounds and wrap checks
+  5. apply cache maintenance when target requires it
 - 必需证据：
+  - capacity calculation with units
   - buffer contract
-  - overflow and wrap tests
+  - full plus one overflow and wrap tests
   - target cache rule source
 - 通过条件（全部满足）：
   - every read/write index is range-checked
   - producer cannot overwrite unread critical data without declared policy
+  - buffer capacity covers the declared peak and stall window
   - buffer lifetime exceeds active transfer
   - cache behavior is verified or explicitly UNKNOWN
 - 失败动作：stop integration on corruption risk; retain raw failing sequence
@@ -134,29 +146,34 @@
 
 ## SW-NVM-001 — software
 
-- 版本：`1.0`
+- 版本：`1.1`
 - 触发：NVM, Flash, configuration, calibration
 - 适用条件：persistent data is read or written
 - 必需输入：
   - schema version
   - length and checksum
   - write endurance
+  - minimum write interval
+  - worst write amplification
+  - effective wear-level slots
   - migration and defaults
 - 强制动作：
   1. validate version length checksum and ranges before use
-  2. write only changed content
-  3. make update power-loss safe
-  4. test old-to-new migration and rollback
+  2. calculate lifetime writes as lifetime_seconds/minimum_write_interval times worst_write_amplification
+  3. write inactive record then read back verify then commit then switch active record or prove an equivalent atomic sequence
+  4. interrupt every persistent write step
+  5. test old-to-new migration and rollback
 - 必需证据：
   - schema
-  - corruption power-loss migration tests
-  - write-frequency calculation
+  - endurance calculation with units and source
+  - write-step power-cut matrix
+  - corruption migration and rollback tests
 - 通过条件（全部满足）：
   - invalid data reaches a safe default or explicit error
   - old supported version migrates deterministically
-  - no partially written record is accepted
-  - estimated writes remain within project endurance budget
-- 失败动作：preserve recoverable old data and block release on unhandled version
+  - every injected interruption leaves at least one recognizable valid old or new record
+  - estimated writes remain within the project endurance budget
+- 失败动作：preserve recoverable old data and block release on unhandled version or unproven power-loss point
 - 关联验收：MFG-002
 
 ## SW-OTA-001 — software

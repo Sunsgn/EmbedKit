@@ -107,6 +107,18 @@ class RuntimeMarkdownPackageTests(unittest.TestCase):
         combined = "\n".join(path.read_text(encoding="utf-8") for path in detail_root.glob("*.md"))
         for forbidden_default in ("常用 6/6 mil", "常用 3 mm/6 mm"):
             self.assertIn(forbidden_default, combined)
+        for concrete_contract in (
+            "U_isr = Σ(f_i × C_i)",
+            "ceil(R_peak × T_block) + F_max",
+            "R_min=(VDD-VOL_max)/IOL_max",
+            "寿命秒数/最短写间隔×最坏写放大",
+            "I_rail,max=ΣI_load,max+I_dynamic+I_external",
+            "C_ideal>=I_step×Δt/ΔV_allow",
+            "NMH=VOH_min-VIH_min",
+            "输入及单位→来源版本/页码→公式或工具版本",
+            "单孔电阻/损耗/温升",
+        ):
+            self.assertIn(concrete_contract, combined)
 
     def test_every_professional_section_has_a_unique_stable_rule_id(self):
         ids = []
