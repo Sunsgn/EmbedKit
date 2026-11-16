@@ -8,7 +8,7 @@
 
 第一次使用时，要求 AI 执行：
 
-> 按 AGENTS.md 对当前工程进行首次识别，更新 `.ai/PROJECT_PROFILE.md`，保存未知项和冲突，不修改产品代码。
+> 按 AGENTS.md 对当前工程进行首次识别，更新 `.ai/PROJECT_PROFILE.md` 和 `.ai/project_constraints/` 中的项目具体约束，保存未知项和冲突，不修改产品代码。项目约束必须写到目录、资源实例、接口、参数来源、精确命令、产物、失败动作和证据位置，不得只填写宽泛要求。
 
 随后可以直接提出开发任务。AI 应按需加载相关约束和工作流，不得每次读取全部文件。
 
@@ -18,6 +18,8 @@
 - `CLAUDE.md`：Claude Code 的入口适配。
 - `AI-INSTRUCTIONS.md`：其他 AI 工具的通用入口。
 - `.ai/PROJECT_PROFILE.md`：当前工程事实、来源和授权边界。
+- `.ai/PROJECT_CONSTRAINTS.md`：当前项目具体约束的状态和按需路由入口。
+- `.ai/project_constraints/*.md`：当前项目的软件、硬件/PCB、验证/制造、安全/现场和系统/生命周期具体约束；首次识别后由 AI 按工程证据填写。
 - `.ai/constraints/INDEX.md`：任务、文件和影响三级路由。
 - `.ai/constraints/*.md`：25 个专业领域约束。
 - `.ai/workflows/*.md`：常见工程任务的执行闭环。
@@ -26,3 +28,5 @@
 ## 重要边界
 
 约束文件不扩大 AI 工具原有权限。删除、覆盖、烧录、安全位、真实危险执行器、生产、推送和正式发布仍需工具及用户授权。缺少工具、资料、硬件或授权时必须记录 `UNAVAILABLE`、`NOT_RUN`、`BLOCKED` 或 `BLOCKED_BY_AUTH`，不得模拟为真实 PASS。
+
+通用专业规则不能预先包含新项目的具体芯片、引脚、串口、阈值和命令。真正达到类似 BS20 项目约束粒度的内容由首次识别写入 `project_constraints/*.md`；BS20 或其他示例中的专有值绝不能成为新工程默认值。

@@ -12,12 +12,14 @@
 4. 定位启动入口、初始化顺序、任务/事件/ISR、外设、协议、存储、Bootloader/OTA 和构建产物；结论记录文件及位置。
 5. 识别原理图、PCB、Pinmux、接口表、硬件/BOM 版本和软硬件映射；不读取无关大目录。
 6. 识别单元/集成/设备测试、工具版本、日志、下载和设备入口，但不执行烧录或危险动作。
-7. 将事实写入 `.ai/PROJECT_PROFILE.md`，使用 `VERIFIED/USER_PROVIDED/INFERRED/UNKNOWN/CONFLICT/UNAVAILABLE`。
-8. 对多个来源交叉核对；冲突保留全部候选、来源和影响，不自行择一。
-9. 输出工程结构、能力边界、关键未知项、风险、建议加载领域和下一安全动作。
+7. 将事实摘要写入 `.ai/PROJECT_PROFILE.md`，使用 `VERIFIED/USER_PROVIDED/INFERRED/UNKNOWN/CONFLICT/UNAVAILABLE`。
+8. 更新 `.ai/PROJECT_CONSTRAINTS.md`，并按实际工程填写 `.ai/project_constraints/` 中相关文件。至少写到目录、实例、所有者、接口、单位、限值、命令、工作目录、产物、失败动作和证据位置；不得只写宽泛要求。
+9. 对多个来源交叉核对；冲突保留全部候选、来源和影响，不自行择一。BS20 等示例只能提供结构和检查维度，其芯片、RTOS、UART、路径、命令、周期、阈值和协议值不得复制为当前工程事实。
+10. 输出工程结构、能力边界、关键未知项、风险、已初始化的项目约束、建议加载领域和下一安全动作。
 
 ## 完成条件
 
 - Profile 中每个非 UNKNOWN 值都有来源和适用范围。
+- 当前任务涉及的项目约束已写入对应 `project_constraints/*.md`，并达到可直接执行和验收的具体粒度。
 - 未猜测项目参数，未修改产品文件，未执行设备副作用。
 - 已区分可安全继续的任务和被 UNKNOWN/CONFLICT 阻塞的动作。

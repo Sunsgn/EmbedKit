@@ -24,13 +24,36 @@ class RuntimeMarkdownPackageTests(unittest.TestCase):
         self.assertEqual(25, result["domains"])
         self.assertEqual(10, result["workflows"])
         self.assertEqual(6, result["templates"])
+        self.assertEqual(5, result["project_constraints"])
 
     def test_runtime_entry_is_compact_and_routes_on_demand(self):
         entry = (RUNTIME_ROOT / "AGENTS.md").read_text(encoding="utf-8")
         self.assertLessEqual(len(entry.encode("utf-8")), 5 * 1024)
         self.assertIn("不得预读全部专业约束", entry)
         self.assertIn("PROJECT_PROFILE.md", entry)
+        self.assertIn("PROJECT_CONSTRAINTS.md", entry)
+        self.assertIn("project_constraints", entry)
         self.assertIn("constraints/INDEX.md", entry)
+
+    def test_project_constraints_reach_bs20_style_specificity_without_value_leakage(self):
+        index = (RUNTIME_ROOT / ".ai" / "PROJECT_CONSTRAINTS.md").read_text(encoding="utf-8")
+        self.assertIn("实例/路径/命令/接口/单位/上限/失败动作", index)
+        root = RUNTIME_ROOT / ".ai" / "project_constraints"
+        required = {
+            "software.md": ("正式软件根目录", "任务、事件、中断和实时预算", "工作目录", "UART", "烧录命令即使已知也不等于已授权执行"),
+            "hardware_pcb.md": ("软硬件接口矩阵", "规则类", "独立回读", "REAL_EDA_NOT_RUN"),
+            "verification_manufacturing.md": ("可测量验收条件", "设备、仪器、端口和身份", "状态未知时，非幂等写入不得自动重放"),
+            "security_release_field.md": ("危险输出和安全状态", "任意点掉电后结果", "正式发布批准", "RMA"),
+            "system_lifecycle.md": ("明确非目标", "量化系统预算", "完整 MPN", "AI 不得自行决定风险可接受"),
+        }
+        for name, terms in required.items():
+            content = (root / name).read_text(encoding="utf-8")
+            self.assertGreaterEqual(len(content.encode("utf-8")), 5000, name)
+            for term in terms:
+                self.assertIn(term, content, name)
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in root.glob("*.md"))
+        for leaked in ("standard-bs20-n1200", "LiteOS/OSAL", "UART0", "UART1", "MC661"):
+            self.assertNotIn(leaked, combined)
 
     def test_every_professional_section_has_a_unique_stable_rule_id(self):
         ids = []

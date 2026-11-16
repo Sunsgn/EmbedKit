@@ -25,6 +25,10 @@ REQUIRED_WORKFLOWS = {
 REQUIRED_TEMPLATES = {
     "PROJECT_PROFILE", "TASK_PLAN", "STATUS", "HANDOFF", "EVIDENCE", "INPUT_HASHES",
 }
+REQUIRED_PROJECT_CONSTRAINTS = {
+    "software", "hardware_pcb", "verification_manufacturing",
+    "security_release_field", "system_lifecycle",
+}
 FIXED_TIME = (2026, 1, 1, 0, 0, 0)
 
 
@@ -45,9 +49,12 @@ def validate_runtime(root: Path) -> dict:
     if missing_root:
         errors.append(f"missing root entries: {missing_root}")
     profile = root / ".ai" / "PROJECT_PROFILE.md"
+    project_index = root / ".ai" / "PROJECT_CONSTRAINTS.md"
     index = root / ".ai" / "constraints" / "INDEX.md"
     if not profile.is_file():
         errors.append("missing .ai/PROJECT_PROFILE.md")
+    if not project_index.is_file():
+        errors.append("missing .ai/PROJECT_CONSTRAINTS.md")
     if not index.is_file():
         errors.append("missing .ai/constraints/INDEX.md")
     domains = {path.stem for path in (root / ".ai" / "constraints").glob("*.md") if path.stem != "INDEX"}
@@ -59,8 +66,15 @@ def validate_runtime(root: Path) -> dict:
     templates = {path.stem for path in (root / ".ai" / "templates").glob("*.md")}
     if templates != REQUIRED_TEMPLATES:
         errors.append(f"template mismatch: missing={sorted(REQUIRED_TEMPLATES-templates)}, extra={sorted(templates-REQUIRED_TEMPLATES)}")
+    project_constraints = {path.stem for path in (root / ".ai" / "project_constraints").glob("*.md")}
+    if project_constraints != REQUIRED_PROJECT_CONSTRAINTS:
+        errors.append(
+            "project constraint mismatch: "
+            f"missing={sorted(REQUIRED_PROJECT_CONSTRAINTS-project_constraints)}, "
+            f"extra={sorted(project_constraints-REQUIRED_PROJECT_CONSTRAINTS)}"
+        )
     entry_text = (root / "AGENTS.md").read_text(encoding="utf-8") if (root / "AGENTS.md").is_file() else ""
-    for required in ("PROJECT_PROFILE.md", "constraints/INDEX.md", "constraints/core.md", "不得预读全部专业约束", "状态、恢复与证据"):
+    for required in ("PROJECT_PROFILE.md", "PROJECT_CONSTRAINTS.md", "project_constraints", "constraints/INDEX.md", "constraints/core.md", "不得预读全部专业约束", "状态、恢复与证据"):
         if required not in entry_text:
             errors.append(f"AGENTS.md missing required contract: {required}")
     if index.is_file():
@@ -76,6 +90,7 @@ def validate_runtime(root: Path) -> dict:
         "domains": len(domains),
         "workflows": len(workflows),
         "templates": len(templates),
+        "project_constraints": len(project_constraints),
     }
 
 
