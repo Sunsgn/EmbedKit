@@ -99,6 +99,33 @@ class UnifiedConstraintTests(unittest.TestCase):
         ):
             self.assertIn(required, content)
 
+    def test_every_professional_domain_has_detailed_executable_constraints(self):
+        required_terms = {
+            "core": ("符号链接逃逸", "幂等键", "无证据 PASS"),
+            "system": ("资源预算", "双向追踪", "残余风险"),
+            "hardware": ("绝对最大值", "误差预算", "反向供电"),
+            "pcb": ("未布线", "独立查看器", "PLAN_ONLY"),
+            "integration": ("Pinmux", "兼容矩阵", "同一时间基准"),
+            "verification": ("首次失败", "随机", "环境失败"),
+            "manufacturing": ("首次通过率", "序列号", "工装自检"),
+            "security_release": ("防重放", "固定 IV/nonce", "正式发布"),
+            "directory": ("非空目录", "源→目标映射", "净室验证"),
+            "bringup_debug": ("限流电源", "中断风暴", "同哈希"),
+            "build_artifacts": ("VMA/LMA", "旧 output", "测试签名"),
+            "embedded_linux": ("/proc/device-tree", "copy_to/from_user", "Restart=always"),
+            "communication": ("一次 `recv` 不等于一帧", "bus-off", "半包、粘包"),
+            "reliability": ("通用包不提供固定电压", "加速模型", "样本量"),
+            "mechanical_thermal": ("公差链", "θJA", "名义模型无干涉"),
+            "extension": ("默认拒绝", "解析炸弹", "单插件异常"),
+        }
+        for domain, terms in required_terms.items():
+            path = PACKAGE_ROOT / "rules" / domain / "CONSTRAINTS.md"
+            content = path.read_text(encoding="utf-8")
+            self.assertGreaterEqual(len(content.encode("utf-8")), 4200, path)
+            self.assertGreaterEqual(content.count("\n## "), 8, path)
+            for term in terms:
+                self.assertIn(term, content, path)
+
 
 if __name__ == "__main__":
     unittest.main()
