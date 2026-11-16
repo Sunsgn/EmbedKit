@@ -1,0 +1,74 @@
+# 专业约束按需路由索引
+
+## 路由原则
+
+1. `core.md` 对所有任务强制生效。
+2. 根据用户真实意图选择主领域，不只匹配单个关键词。
+3. 根据将读取或修改的文件类型补充领域。
+4. 根据软硬件、安全、制造和现场影响补充关联领域。
+5. 只读取实际命中的文件；不得为了“保险”加载全部约束。
+6. 无法确定任务领域或项目事实时，只执行调查和报告，不授权写入。
+
+## 一级路由：任务对象
+
+| 任务对象或意图 | 必读约束 | 推荐工作流 |
+|---|---|---|
+| 新项目、陌生工程、工程识别 | `core.md`、`system.md`、`directory.md` | `NEW_PROJECT_DISCOVERY.md` |
+| C/C++、驱动、RTOS、ISR、DMA、存储、Bootloader | `core.md`、`software.md` | `SOFTWARE_CHANGE.md` 或 `DRIVER_DEVELOPMENT.md` |
+| UART、I²C、SPI、CAN、TCP、UDP、WebSocket、协议 | `core.md`、`communication.md`、`software.md` | `PROTOCOL_CHANGE.md` 或 `DRIVER_DEVELOPMENT.md` |
+| 编译、链接、Keil、IAR、ELF、MAP、BIN、HEX | `core.md`、`build_artifacts.md`、`software.md` | `SOFTWARE_CHANGE.md` |
+| 首次上电、时钟、复位、调试口、HardFault | `core.md`、`bringup_debug.md`、`integration.md` | `BOARD_BRINGUP.md` |
+| 原理图、器件、电源、模拟、数字接口、ERC | `core.md`、`hardware.md` | `SCHEMATIC_REVIEW.md` |
+| PCB、布局、布线、DRC、Gerber、钻孔、PnP | `core.md`、`pcb.md` | `PCB_CHANGE.md` |
+| Pinmux、电压域、传感换算、版本兼容 | `core.md`、`integration.md` | 匹配的软件、硬件或设备工作流 |
+| 测试、回归、HIL、设备验证、故障注入 | `core.md`、`verification.md` | `DEVICE_TEST.md` |
+| BOM、DFM、工装、烧录、校准、产测、追溯 | `core.md`、`manufacturing.md` | `DEVICE_TEST.md` 或 `PROJECT_DELIVERY.md` |
+| 身份、密钥、危险控制、安全启动、正式发布 | `core.md`、`security_release.md` | 匹配任务工作流 |
+| Embedded Linux、内核、DTS、驱动、rootfs | `core.md`、`embedded_linux.md` | `SOFTWARE_CHANGE.md` |
+| EMC、ESD、温湿度、振动、寿命、长稳 | `core.md`、`reliability.md`、`verification.md` | `DEVICE_TEST.md` |
+| 结构、外壳、公差、散热、装配、线束 | `core.md`、`mechanical_thermal.md` | 匹配评审或测试工作流 |
+| 适配器、插件、解析器、扩展接口 | `core.md`、`extension.md`、`verification.md` | `SOFTWARE_CHANGE.md` |
+| 目录整理、资料归档、迁移和交付 | `core.md`、`directory.md` | `PROJECT_DELIVERY.md` |
+| 需求、架构、预算、风险、ECO/ECN | `core.md`、`system.md` | `NEW_PROJECT_DISCOVERY.md` 或 `PROJECT_DELIVERY.md` |
+| 缺陷、异常、构建或设备失败 | `core.md` 加故障所属领域 | `DEFECT_FIX.md` |
+
+## 二级路由：目标文件
+
+| 文件或对象 | 补充约束 |
+|---|---|
+| `*.c`、`*.h`、`*.cpp`、`*.hpp`、`*.s`、`*.asm` | `software.md` |
+| `*.ld`、`*.icf`、`*.sct`、`*.map`、`*.elf`、`*.axf` | `build_artifacts.md` |
+| `*.uvprojx`、`*.ewp`、`CMakeLists.txt`、`Makefile` | `build_artifacts.md`、`software.md` |
+| `*.dts`、`*.dtsi`、`Kconfig`、内核驱动 | `embedded_linux.md` |
+| `*.kicad_sch`、`*.SchDoc`、原理图 PDF | `hardware.md` |
+| `*.kicad_pcb`、`*.PcbDoc`、Gerber、钻孔 | `pcb.md`；制造输出再加 `manufacturing.md` |
+| BOM、PnP、工艺、校准或产测文件 | `manufacturing.md` |
+| 协议、抓包、串口或网络日志 | `communication.md` |
+| 固件、Bootloader、签名或升级包 | `build_artifacts.md`、`security_release.md` |
+| STEP、机械图、热仿真或装配文件 | `mechanical_thermal.md` |
+
+## 三级路由：影响传播
+
+- 修改 Pinmux、GPIO、复位、时钟或电源控制：增加 `integration.md` 和 `verification.md`；涉及原理图时增加 `hardware.md`。
+- 修改 ADC、传感、校准或阈值：增加 `hardware.md`、`integration.md`、`verification.md`；涉及生产校准时增加 `manufacturing.md`。
+- 修改协议字段、端序、状态或版本：增加 `communication.md`、`integration.md`、`verification.md`。
+- 修改 NVM schema、配置或校准持久化：增加 `integration.md`、`verification.md`；影响生产数据时增加 `manufacturing.md`。
+- 修改 Bootloader、OTA、镜像地址或认证：增加 `build_artifacts.md`、`security_release.md`、`verification.md`。
+- 生成 Gerber、钻孔、BOM 或 PnP：增加 `manufacturing.md`。
+- 修改危险执行器、保护、燃气、高压、加热或运动控制：增加 `security_release.md`、`integration.md`、`verification.md`，风险不足时禁止真实操作。
+- 修改板框、孔、连接器、器件高度或散热：增加 `mechanical_thermal.md`，并检查 PCB/硬件双向影响。
+- 修改生产、现场或发布配置：增加 `manufacturing.md`、`security_release.md` 和 `verification.md`。
+
+## 深度和证据等级
+
+- 只读解释、定位或审查：可使用轻量调查，但结论仍需源码/文件位置。
+- 项目内代码或配置修改：必须有计划、diff、构建/检查和受影响测试。
+- 硬件、PCB、设备或生产修改：必须有对应专业证据，模拟不能替代真实工具。
+- 烧录、安全位、危险设备、生产和发布：除专业证据外还需要明确授权。
+
+## Token 控制
+
+- 首先用文件名、符号、章节标题或精确搜索定位，再读取必要范围。
+- 软件约束较长时只读取与当前任务相关章节以及验收/失败门禁；不要重复读取已加载且未变化的部分。
+- 路由命中超过四个专业领域时，先进行影响分析并按任务阶段分批加载，不得一次全文读取。
+- 完整日志和证据保存到 `.ai/work/evidence/`，对话仅汇报摘要和路径。

@@ -13,3 +13,4 @@
 - Expanded the nine domain registries to 56 atomic, testable constraints and added deterministic human-readable `RULES.md` generation.
 - Added system engineering, board bring-up/debug, build artifacts, embedded Linux, communication, reliability, mechanical/thermal, and extension-ecosystem domains with on-demand routing.
 - Expanded every professional domain from summary guidance into executable constraints with fact sources, ordered engineering actions, explicit prohibitions, tool/authorization boundaries, recovery, evidence, acceptance and failure gates; added regression checks against future summary-only rules.
+- Split out `AI-Embedded-Constraints-V6-Runtime-MD` as the user-facing Markdown-only constraint product: compact multi-tool entries, project Profile, three-stage routing, 17 professional domains with 164 stable section IDs, 10 engineering workflows, six state/evidence templates, deterministic Markdown-only packaging and regression validation.
