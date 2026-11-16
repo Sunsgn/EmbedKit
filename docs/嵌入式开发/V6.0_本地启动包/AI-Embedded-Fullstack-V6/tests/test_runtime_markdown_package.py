@@ -55,6 +55,27 @@ class RuntimeMarkdownPackageTests(unittest.TestCase):
         for leaked in ("standard-bs20-n1200", "LiteOS/OSAL", "UART0", "UART1", "MC661"):
             self.assertNotIn(leaked, combined)
 
+    def test_workflows_and_records_are_enforceable_not_descriptive_only(self):
+        required = ("触发条件：", "必须执行：", "禁止：", "有效条件：", "失败处理：")
+        groups = {
+            "workflows": "## 强制执行合同",
+            "templates": "## 强制记录合同",
+        }
+        for directory, heading in groups.items():
+            paths = sorted((RUNTIME_ROOT / ".ai" / directory).glob("*.md"))
+            self.assertTrue(paths)
+            for path in paths:
+                content = path.read_text(encoding="utf-8")
+                self.assertIn(heading, content, path.name)
+                for term in required:
+                    self.assertIn(term, content, path.name)
+
+        profile = (RUNTIME_ROOT / ".ai" / "PROJECT_PROFILE.md").read_text(encoding="utf-8")
+        self.assertIn("不是专业约束文件", profile)
+        entry = (RUNTIME_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("文件效力分类", entry)
+        self.assertIn("UNKNOWN` 表格本身只是待确认事实", entry)
+
     def test_every_professional_section_has_a_unique_stable_rule_id(self):
         ids = []
         for path in sorted((RUNTIME_ROOT / ".ai" / "constraints").glob("*.md")):

@@ -25,6 +25,14 @@
 - `.ai/workflows/*.md`：常见工程任务的执行闭环。
 - `.ai/templates/*.md`：AI 动态建立计划、状态、交接和证据时使用。
 
+## 哪些文件是真正约束
+
+- `AGENTS.md` 和 `.ai/constraints/*.md` 是正式强制约束。
+- `.ai/project_constraints/*.md` 同时包含强制条款和项目参数；只有带来源、状态和适用版本的已确认参数才可作为项目具体约束，空表和 `UNKNOWN` 不是约束依据。
+- `.ai/workflows/*.md` 是路由命中后不可随意跳过的强制执行协议，每个文件都定义触发条件、必须动作、禁止项、有效条件和失败处理。
+- `.ai/templates/*.md` 是强制记录协议，用来约束 AI 如何证明执行和恢复；它们不是芯片、协议或硬件技术规范。
+- `PROJECT_PROFILE.md` 是事实摘要，README、`CLAUDE.md` 和 `AI-INSTRUCTIONS.md` 是说明或工具入口，不应被误认为专业约束或 PASS 证据。
+
 ## 重要边界
 
 约束文件不扩大 AI 工具原有权限。删除、覆盖、烧录、安全位、真实危险执行器、生产、推送和正式发布仍需工具及用户授权。缺少工具、资料、硬件或授权时必须记录 `UNAVAILABLE`、`NOT_RUN`、`BLOCKED` 或 `BLOCKED_BY_AUTH`，不得模拟为真实 PASS。

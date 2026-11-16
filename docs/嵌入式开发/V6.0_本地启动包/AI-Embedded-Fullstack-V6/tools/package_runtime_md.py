@@ -63,9 +63,21 @@ def validate_runtime(root: Path) -> dict:
     workflows = {path.stem for path in (root / ".ai" / "workflows").glob("*.md")}
     if workflows != REQUIRED_WORKFLOWS:
         errors.append(f"workflow mismatch: missing={sorted(REQUIRED_WORKFLOWS-workflows)}, extra={sorted(workflows-REQUIRED_WORKFLOWS)}")
+    mandatory_contract = ("## 强制执行合同", "触发条件：", "必须执行：", "禁止：", "有效条件：", "失败处理：")
+    for path in sorted((root / ".ai" / "workflows").glob("*.md")):
+        content = path.read_text(encoding="utf-8")
+        missing = [term for term in mandatory_contract if term not in content]
+        if missing:
+            errors.append(f"workflow lacks enforceable contract: {path.name}: {missing}")
     templates = {path.stem for path in (root / ".ai" / "templates").glob("*.md")}
     if templates != REQUIRED_TEMPLATES:
         errors.append(f"template mismatch: missing={sorted(REQUIRED_TEMPLATES-templates)}, extra={sorted(templates-REQUIRED_TEMPLATES)}")
+    record_contract = ("## 强制记录合同", "触发条件：", "必须执行：", "禁止：", "有效条件：", "失败处理：")
+    for path in sorted((root / ".ai" / "templates").glob("*.md")):
+        content = path.read_text(encoding="utf-8")
+        missing = [term for term in record_contract if term not in content]
+        if missing:
+            errors.append(f"template lacks mandatory record contract: {path.name}: {missing}")
     project_constraints = {path.stem for path in (root / ".ai" / "project_constraints").glob("*.md")}
     if project_constraints != REQUIRED_PROJECT_CONSTRAINTS:
         errors.append(

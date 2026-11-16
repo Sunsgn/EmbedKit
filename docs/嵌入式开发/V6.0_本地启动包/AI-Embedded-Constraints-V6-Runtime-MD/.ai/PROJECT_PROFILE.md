@@ -1,6 +1,6 @@
 # 当前项目事实与授权 Profile
 
-> AI 第一次进入工程时按照 `.ai/workflows/NEW_PROJECT_DISCOVERY.md` 更新本文件。这里只保存事实摘要；目录、资源实例、接口、限值、精确命令、失败动作和验收位置写入 `.ai/PROJECT_CONSTRAINTS.md` 路由的项目约束文件。只记录由当前工程、用户或实测支持的事实；未知保持 `UNKNOWN`。
+> 文件类型：项目事实摘要，不是专业约束文件，也不能单独证明 PASS。AI 第一次进入工程时按照 `.ai/workflows/NEW_PROJECT_DISCOVERY.md` 更新本文件。这里只保存事实摘要；目录、资源实例、接口、限值、精确命令、失败动作和验收位置写入 `.ai/PROJECT_CONSTRAINTS.md` 路由的项目约束文件。只记录由当前工程、用户或实测支持的事实；未知保持 `UNKNOWN`。
 
 ## 状态语义
 
