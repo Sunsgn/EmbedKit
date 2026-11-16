@@ -1,45 +1,28 @@
-# AI 嵌入式开发统一约束包 V6.0
+# AI 嵌入式全栈工程研发规范
 
-本目录是一套可直接复制到嵌入式工程根目录的 Markdown-only AI 开发约束。它不提供独立运行程序；Codex、Claude Code 或其他本地 AI 工具负责读取工程、修改文件、调用本地工具、执行测试并保存证据。
+这是一套可直接放入新项目或已有项目的纯 Markdown 工程规范。目标是让 Codex、Claude Code、Gemini CLI、GitHub Copilot及其他AI工具遵循同一套要求，像工程团队一样完成嵌入式软件、原理图、PCB、软硬件协同、真实测试、整改和交付。
 
-## 安装
+## 使用特点
 
-新工程可将本目录中的全部文件复制到工程根目录并保留 `.ai` 结构。既有工程若已经存在 `AGENTS.md`、`CLAUDE.md` 或 `.ai/PROJECT_PROFILE.md`，必须先阅读并增量合并入口和事实，禁止直接覆盖用户原约束与项目事实。Codex 使用 `AGENTS.md`，Claude Code 使用 `CLAUDE.md`，其他工具可从 `AI-INSTRUCTIONS.md` 进入。三个入口只指向同一套权威约束，不重复专业规则。
+- **一个规则真源**：`rules/`和`disciplines/`是强制规则；入口、工作流和模板不复制技术正文。
+- **专业独立启用**：软件、原理图、PCB、测试和协同分析可以单独使用，不强制走完整生命周期。
+- **项目事实分离**：通用规则不写死芯片、RTOS、EDA或工具链；具体值记录在`project/`。
+- **真实证据判定**：无法访问EDA、硬件、仪器或生产环境时明确降级，禁止模拟为PASS。
+- **新旧项目兼容**：新项目可以采用V1.20目录；已有项目使用目录映射，不强制重构。
 
-第一次使用时，要求 AI 执行：
+## 最快开始
 
-> 按 AGENTS.md 对当前工程进行首次识别，更新 `.ai/PROJECT_PROFILE.md` 和 `.ai/project_constraints/` 中的项目具体约束，保存未知项和冲突，不修改产品代码。项目约束必须写到目录、资源实例、接口、参数来源、精确命令、产物、失败动作和证据位置，不得只填写宽泛要求。
+1. 按`installation/新项目安装.md`或`installation/已有项目增量接入.md`接入。
+2. 在`project/ENABLED_DISCIPLINES.md`勾选当前需要的专业。
+3. 只填写当前任务必需的项目事实，不要求一次填完所有Profile。
+4. 向AI提出具体任务；AI从`AGENTS.md`进入并按`RULES_INDEX.md`加载。
 
-随后可以直接提出开发任务。AI 应按需加载相关约束和工作流，不得每次读取全部文件。
+## 文件效力
 
-## 目录说明
+- 正式强制约束：`rules/*.md`、`disciplines/**/*.md`。
+- 项目事实：`project/*.md`中具有来源和状态的已确认内容。
+- 权威目录基线：`project-framework/项目目录框架_V1.20.md`。
+- 执行辅助：`workflows/`、`templates/`、`work/`。
+- 工具入口：`AGENTS.md`、`CLAUDE.md`、`GEMINI.md`、`AI-INSTRUCTIONS.md`、`.github/copilot-instructions.md`。
 
-- `软件开发具体约束.md`：软件、固件、RTOS、驱动、协议、存储、Bootloader和构建约束。
-- `硬件开发具体约束.md`：器件、原理图、电源、模拟、PCB、结构电气边界和制造输出约束。
-- `测试验证具体约束.md`：测试策略、用例、执行、证据、缺陷、设备/HIL、可靠性和验收约束。
-- `项目目录与工程框架具体约束.md`：依据项目目录框架 V1.20 整理的初始化、分类、迁移、归档和交付约束。
-- `AGENTS.md`：Codex 的紧凑强制入口。
-- `CLAUDE.md`：Claude Code 的入口适配。
-- `AI-INSTRUCTIONS.md`：其他 AI 工具的通用入口。
-- `.ai/PROJECT_PROFILE.md`：当前工程事实、来源和授权边界。
-- `.ai/PROJECT_CONSTRAINTS.md`：当前项目具体约束的状态和按需路由入口。
-- `.ai/project_constraints/*.md`：当前项目的软件、硬件/PCB、验证/制造、安全/现场和系统/生命周期具体约束；首次识别后由 AI 按工程证据填写。
-- `.ai/constraints/INDEX.md`：任务、文件和影响三级路由。
-- `.ai/constraints/*.md`：25 个专业领域约束。
-- `.ai/constraints/details/*.md`：按具体工程对象加载的原子规则簇，当前覆盖软件、硬件和 PCB 的 60 条细化规则。
-- `.ai/workflows/*.md`：常见工程任务的执行闭环。
-- `.ai/templates/*.md`：AI 动态建立计划、状态、交接和证据时使用。
-
-## 哪些文件是真正约束
-
-- `AGENTS.md` 和 `.ai/constraints/*.md` 是正式强制约束。
-- `.ai/project_constraints/*.md` 同时包含强制条款和项目参数；只有带来源、状态和适用版本的已确认参数才可作为项目具体约束，空表和 `UNKNOWN` 不是约束依据。
-- `.ai/workflows/*.md` 是路由命中后不可随意跳过的强制执行协议，每个文件都定义触发条件、必须动作、禁止项、有效条件和失败处理。
-- `.ai/templates/*.md` 是强制记录协议，用来约束 AI 如何证明执行和恢复；它们不是芯片、协议或硬件技术规范。
-- `PROJECT_PROFILE.md` 是事实摘要，README、`CLAUDE.md` 和 `AI-INSTRUCTIONS.md` 是说明或工具入口，不应被误认为专业约束或 PASS 证据。
-
-## 重要边界
-
-约束文件不扩大 AI 工具原有权限。删除、覆盖、烧录、安全位、真实危险执行器、生产、推送和正式发布仍需工具及用户授权。缺少工具、资料、硬件或授权时必须记录 `UNAVAILABLE`、`NOT_RUN`、`BLOCKED` 或 `BLOCKED_BY_AUTH`，不得模拟为真实 PASS。
-
-通用专业规则不能预先包含新项目的具体芯片、引脚、串口、阈值和命令。真正达到类似 BS20 项目约束粒度的内容由首次识别写入 `project_constraints/*.md`；BS20 或其他示例中的专有值绝不能成为新工程默认值。
+入口和辅助文件不得产生与权威规则冲突的新要求。详细冲突优先级见`rules/00_规范效力与加载规则.md`。
