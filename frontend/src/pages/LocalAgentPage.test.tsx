@@ -22,7 +22,14 @@ describe('LocalAgentPage', () => {
     render(<LocalAgentPage />);
     expect(await screen.findByText('本地助手未连接')).toBeVisible();
     expect(screen.getByText(/网页工具可独立使用/)).toBeVisible();
-    expect(screen.getByRole('link', { name: '打开发布包页面' })).toHaveAttribute('href', 'https://github.com/sunsgn/EmbedKit/releases/latest');
+    expect(screen.getByRole('heading', { name: '下载 Local Agent 便携版' })).toBeVisible();
+    expect(screen.getByText(/不是 EXE\/MSI 安装器/)).toBeVisible();
+    expect(screen.getByRole('link', { name: '查看版本、文件大小和发布说明' })).toHaveAttribute('href', 'https://github.com/sunsgn/EmbedKit/releases/latest');
+    expect(screen.getAllByRole('link', { name: '下载' })).toHaveLength(4);
+    expect(screen.getAllByRole('link', { name: 'SHA-256' })).toHaveLength(4);
+    expect(screen.getByText('Windows x64').parentElement?.querySelector('a[href$="embedkit-local-agent-windows-x64.zip"]')).not.toBeNull();
+    expect(screen.getByText('Windows x64').parentElement?.querySelector('a[href$="embedkit-local-agent-windows-x64.sha256"]')).not.toBeNull();
+    expect(screen.getByText(/若下载显示 404/)).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '重新检测' }));
     expect(await screen.findByText(/已连接 EmbedKit Local Agent/)).toBeVisible();
     await waitFor(() => expect(getAgentStatus).toHaveBeenCalledTimes(2));
