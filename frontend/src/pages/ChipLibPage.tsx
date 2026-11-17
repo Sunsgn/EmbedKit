@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, Boxes, CheckCircle, Cpu, ExternalLink, FileText, FileUp, Filter, History, Info, Layers, Lightbulb, Loader2, PackageSearch, ReplaceAll, Search, ShoppingCart, Tag, Trash2 } from 'lucide-react';
+import { ArrowLeft, BookOpen, Boxes, CheckCircle, Cpu, ExternalLink, FileText, FileUp, Filter, FolderTree, History, Info, Layers, Lightbulb, Loader2, PackageSearch, ReplaceAll, Search, ShoppingCart, Tag, Trash2 } from 'lucide-react';
 import { chips } from '../data/chips';
 import { components } from '../data/components';
 import { LOCAL_PROXY_BASE } from '../services/aiService';
@@ -14,7 +14,15 @@ import type { FunctionSolution } from '../types';
 const PartDocumentWorkspace = lazy(() => import('../features/resources/PartDocumentWorkspace'));
 const EmbeddedKnowledgeBase = lazy(() => import('../features/resources/EmbeddedKnowledgeBase'));
 
-type ResourceMode = 'catalog' | 'knowledge' | 'solution' | 'records';
+type ResourceMode = 'home' | 'catalog' | 'sources' | 'knowledge' | 'solution' | 'records';
+
+const resourceModeLabels: Record<Exclude<ResourceMode, 'home'>, string> = {
+  catalog: '型号查询与资料包',
+  solution: '功能选型与型号核验',
+  sources: '开发资料目录',
+  knowledge: '知识与工程经验',
+  records: '我的资料与记录',
+};
 
 interface CatalogItem {
   id: string;
@@ -179,7 +187,7 @@ function hasChipDocumentation(item: CatalogItem) {
 export default function ChipLibPage() {
   const [mode, setMode] = useState<ResourceMode>(() => {
     const stored = localStorage.getItem('embedkit.resources-mode');
-    return stored === 'knowledge' || stored === 'solution' || stored === 'records' ? stored : 'catalog';
+    return stored === 'catalog' || stored === 'sources' || stored === 'knowledge' || stored === 'solution' || stored === 'records' ? stored : 'home';
   });
   const [openedSolution, setOpenedSolution] = useState<FunctionSolution>();
   const [search, setSearch] = useState('');
@@ -215,38 +223,11 @@ export default function ChipLibPage() {
           </div>
         </header>
 
-        <nav aria-label="资料中心模式" className="mb-5 grid gap-2 md:grid-cols-3">
-          {[
-            {
-              id: 'catalog' as const,
-              name: '按型号查询器件',
-              detail: '型号、手册、CAD 与来源导航',
-              icon: Search,
-            },
-            {
-              id: 'knowledge' as const,
-              name: '嵌入式开发知识库',
-              detail: '方法、问题复盘、模板与 AI 约束',
-              icon: BookOpen,
-            },
-            {
-              id: 'records' as const,
-              name: '我的资料与选型记录',
-              detail: '恢复、导出与旧记录兼容',
-              icon: History,
-            },
-          ].map((item) => (
-            <button key={item.id} onClick={() => setMode(item.id)} className={`flex items-center gap-3 rounded-xl border p-3 text-left ${mode === item.id ? 'border-blue-500/50 bg-blue-500/10' : 'border-[#30363d] bg-[#161b22] hover:border-[#484f58]'}`}>
-              <item.icon size={18} className={mode === item.id ? 'text-blue-400' : 'text-gray-500'} />
-              <span>
-                <b className="block text-sm text-gray-200">{item.name}</b>
-                <small className="text-[10px] text-gray-600">{item.detail}</small>
-              </span>
-            </button>
-          ))}
-        </nav>
+        {mode === 'home' && <ResourceDirectoryHome onOpen={setMode} />}
+        {mode !== 'home' && <nav aria-label="资料中心位置" className="mb-5 flex flex-wrap items-center gap-2 rounded-lg border border-[#30363d] bg-[#161b22] px-3 py-2 text-xs"><button onClick={() => setMode('home')} className="flex items-center gap-1.5 text-blue-400 hover:text-blue-300"><ArrowLeft size={14} />返回功能目录</button><span className="text-gray-700">/</span><b className="text-gray-300">{resourceModeLabels[mode]}</b></nav>}
 
         {mode === 'solution' && <FunctionalSelectionCenter initialSolution={openedSolution} />}
+        {mode === 'sources' && <KnowledgeSourcePanel />}
         {mode === 'knowledge' && <Suspense fallback={<div className="flex min-h-80 items-center justify-center text-sm text-gray-500"><Loader2 className="mr-2 animate-spin" />正在加载本地知识库…</div>}><EmbeddedKnowledgeBase /></Suspense>}
         {mode === 'records' && (
           <FunctionSolutionRecords
@@ -258,7 +239,6 @@ export default function ChipLibPage() {
         )}
         {mode === 'catalog' && (
           <>
-            <KnowledgeSourcePanel />
             <section className="mb-5 rounded-xl border border-[#30363d] bg-[#161b22] p-4">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div><h2 className="text-sm font-semibold text-gray-200">按完整型号查找</h2><p className="mt-1 text-[10px] text-gray-600">推荐型号可由 AI 提供；这里负责查找资料、核对型号和保留来源。</p></div><button onClick={() => { setOpenedSolution(undefined); setMode('solution'); }} className="flex items-center gap-1.5 rounded border border-purple-500/30 px-3 py-2 text-xs text-purple-300"><Lightbulb size={13} />批量核验 AI 给出的型号</button></div>
               <div className="grid gap-3 md:grid-cols-[minmax(280px,1fr)_220px_220px]">
@@ -343,6 +323,40 @@ export default function ChipLibPage() {
       </div>
     </div>
   );
+}
+
+function ResourceDirectoryHome({ onOpen }: { onOpen: (mode: ResourceMode) => void }) {
+  const groups = [
+    {
+      title: '器件与方案',
+      description: '从已有型号查资料，或从功能需求筛选候选器件。',
+      items: [
+        { id: 'catalog' as const, title: '型号查询与资料包', description: '输入完整型号，查询参数、数据手册、参考手册、CAD、替代料与采购来源。', meta: `${catalog.length} 个本地型号 · ${categories.length} 个器件分类`, icon: Search, color: 'blue' },
+        { id: 'solution' as const, title: '功能选型与型号核验', description: '按功能约束筛选 MCU、通信器件，或批量核验 AI 推荐的完整型号。', meta: '需求约束 · 候选对比 · 证据导出', icon: Lightbulb, color: 'purple' },
+      ],
+    },
+    {
+      title: '开发资料与知识',
+      description: '按平台查找公开开发资料，或使用本地知识与工程经验。',
+      items: [
+        { id: 'sources' as const, title: '开发资料目录', description: '进入后按通用基础、ESP32、RV1106、星闪、STM32、RISC-V 等平台浏览。', meta: '官方文档 · 开源仓库 · 板卡资料', icon: FolderTree, color: 'green' },
+        { id: 'knowledge' as const, title: '知识与工程经验', description: '检索内置方法文档，导入本地资料，并沉淀带证据和复测步骤的工程经验。', meta: '本地处理 · 可导入 · 可追溯', icon: BookOpen, color: 'cyan' },
+      ],
+    },
+    {
+      title: '个人资产',
+      description: '集中恢复、复用和导出已经保存的资料与选型结果。',
+      items: [
+        { id: 'records' as const, title: '我的资料与记录', description: '管理已保存的功能方案、选型证据和历史记录，兼容已有本地数据。', meta: '历史恢复 · 导入导出 · 版本兼容', icon: History, color: 'orange' },
+      ],
+    },
+  ];
+  const styles: Record<string, string> = { blue: 'border-blue-500/20 bg-blue-500/5 text-blue-400', purple: 'border-purple-500/20 bg-purple-500/5 text-purple-400', green: 'border-green-500/20 bg-green-500/5 text-green-400', cyan: 'border-cyan-500/20 bg-cyan-500/5 text-cyan-400', orange: 'border-orange-500/20 bg-orange-500/5 text-orange-400' };
+
+  return <section aria-label="资料中心功能目录" className="space-y-5">
+    <div className="rounded-xl border border-blue-500/20 bg-blue-500/5 p-4"><h2 className="text-base font-semibold text-gray-100">先选择要完成的工作</h2><p className="mt-1 text-xs leading-5 text-gray-500">每次只进入一个工作区。型号查询、功能选型、开发资料和知识库彼此独立，需要时再通过保存记录关联。</p></div>
+    {groups.map(group => <section key={group.title} aria-label={group.title} className="rounded-xl border border-[#30363d] bg-[#161b22] p-4"><header className="mb-3"><h2 className="text-sm font-semibold text-gray-200">{group.title}</h2><p className="mt-1 text-[11px] text-gray-600">{group.description}</p></header><div className={`grid gap-3 ${group.items.length > 1 ? 'md:grid-cols-2' : ''}`}>{group.items.map(item => <button key={item.id} onClick={() => onOpen(item.id)} className="group flex items-start gap-3 rounded-xl border border-[#30363d] bg-[#0d1117] p-4 text-left hover:border-[#484f58] hover:bg-white/[0.02]"><span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border ${styles[item.color]}`}><item.icon size={19} /></span><span className="min-w-0"><b className="text-sm text-gray-200 group-hover:text-white">{item.title}</b><span className="mt-1 block text-[11px] leading-5 text-gray-500">{item.description}</span><span className="mt-2 block text-[9px] text-gray-700">{item.meta}</span></span></button>)}</div></section>)}
+  </section>;
 }
 
 function QueryDetails({ query, localItem }: { query: string; localItem: CatalogItem | null }) {
