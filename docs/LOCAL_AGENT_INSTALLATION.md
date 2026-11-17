@@ -38,11 +38,12 @@ npm start
 
 推送 `v*` 标签会触发 `.github/workflows/release-agent.yml`。也可以在 Actions 手工运行该流程，并输入以 `v` 开头的正式版本号；两种方式都会创建带永久下载地址的 GitHub Release。Windows x64、Linux x64、macOS arm64 和 macOS x64 均由对应 GitHub Runner 执行以下流程：
 
-1. `npm ci --omit=dev` 安装锁定的生产依赖，并运行完整 Agent 测试。
-2. 复制该 Runner 的官方 Node 22 运行时、Agent 文件和当前平台原生依赖到隔离目录。
-3. 用便携包内运行时启动 Agent，通过正式 Pages Origin 和协议头请求 `/api/agent/status`。
-4. 只有健康检查返回 `available: true` 才压缩产物并生成 SHA-256。
-5. 四个平台全部通过后，把包和摘要附加到指定版本的 GitHub Release。若任一平台缺少资产，网页会保留发布页入口以便定位失败任务。
+1. 校验 Runner 的实际操作系统和 CPU 架构，防止发布物名称与原生运行时不一致。
+2. `npm ci --omit=dev` 安装锁定的生产依赖；平台无关的完整 Agent 测试在 Linux 参考环境执行一次。
+3. 复制该 Runner 的官方 Node 22 运行时、Agent 文件和当前平台原生依赖到隔离目录。
+4. 每个平台都用便携包内的原生运行时启动 Agent，通过正式 Pages Origin 和协议头请求 `/api/agent/status`。
+5. 只有健康检查返回 `available: true` 才压缩产物并生成 SHA-256。
+6. 四个平台全部通过后，把包和摘要附加到指定版本的 GitHub Release。若任一平台缺少资产，网页会保留发布页入口以便定位失败任务。
 
 GitHub Pages 本身只能提供下载入口，不能静默安装本机程序。若直接下载返回 404，应先检查仓库是否已有正式 Release，以及 Release 是否包含对应平台资产；Actions 页面中的临时 Artifact 不是网页正式下载源。
 

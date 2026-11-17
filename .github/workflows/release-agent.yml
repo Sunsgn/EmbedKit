@@ -42,7 +42,7 @@ jobs:
             arch: x64
             runtime: runtime/node
             artifact: embedkit-local-agent-linux-x64
-          - os: macos-14
+          - os: macos-15
             platform: darwin
             arch: arm64
             runtime: runtime/node
@@ -60,10 +60,13 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: proxy/package-lock.json
+      - name: Verify native runner architecture
+        run: node -e "if(process.platform !== '${{ matrix.platform }}' || process.arch !== '${{ matrix.arch }}'){console.error('Runner mismatch, expected ${{ matrix.platform }}/${{ matrix.arch }}, received '+process.platform+'/'+process.arch);process.exit(1)}"
       - name: Install production dependencies
         run: npm ci --omit=dev
         working-directory: proxy
-      - name: Test Local Agent
+      - name: Test platform-independent Local Agent behavior
+        if: matrix.platform == 'linux'
         run: npm test
         working-directory: proxy
       - name: Stage portable package

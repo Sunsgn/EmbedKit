@@ -1,6 +1,6 @@
 {
   "name": "embedkit-proxy",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "CORS proxy for EmbedKit local AI provider",
   "main": "proxy.js",
   "type": "module",
