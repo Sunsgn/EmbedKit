@@ -2,6 +2,7 @@ export interface SvdField { name: string; description: string; bitOffset: number
 export interface SvdRegister { id: string; peripheral: string; name: string; description: string; address: number; offset: number; size: number; access: string; resetValue?: number; fields: SvdField[] }
 export interface SvdPeripheral { name: string; description: string; baseAddress: number; registers: SvdRegister[] }
 export interface SvdDevice { name: string; description: string; peripherals: SvdPeripheral[]; registerCount: number; fieldCount: number; warnings: string[] }
+export interface SvdAddressLookup { requestedAddress: number; match: 'register' | 'peripheral' | 'unresolved'; confidence: 'high' | 'medium' | 'none'; peripheral: SvdPeripheral | null; register: SvdRegister | null; offset: number | null; note: string }
 
 const text = (node: Element, selector: string) => node.querySelector(`:scope > ${selector}`)?.textContent?.trim() ?? '';
 function numberValue(value: string, fallback?: number) { if (!value) { if (fallback !== undefined) return fallback; throw new Error('缺少数值字段'); } const normalized = value.replaceAll('_', '').replace(/^#/, '0b'); const parsed = Number(normalized); if (!Number.isFinite(parsed) || parsed < 0 || !Number.isInteger(parsed)) throw new Error(`无效数值 ${value}`); return parsed; }
@@ -43,3 +44,20 @@ export function parseSvd(source: string): SvdDevice {
 }
 
 export function searchSvd(device: SvdDevice, query: string, limit = 200) { const keyword = query.trim().toLowerCase(); const all = device.peripherals.flatMap(item => item.registers); if (!keyword) return all.slice(0, limit); return all.filter(item => [item.peripheral, item.name, item.description, ...item.fields.flatMap(field => [field.name, field.description])].some(value => value.toLowerCase().includes(keyword))).slice(0, limit); }
+
+export function lookupSvdAddress(device: SvdDevice, input: string | number): SvdAddressLookup {
+  const textValue = typeof input === 'number' ? String(input) : input.trim();
+  if (!/^(?:0x[\da-f]+|\d+)$/i.test(textValue)) throw new Error('地址必须是 0x 开头的十六进制或十进制整数');
+  const requestedAddress = Number(textValue);
+  if (!Number.isSafeInteger(requestedAddress) || requestedAddress < 0 || requestedAddress > 0xffffffff) throw new Error('地址超出 32 位无符号范围');
+  for (const peripheral of device.peripherals) {
+    const register = peripheral.registers.filter(item => item.address <= requestedAddress && requestedAddress < item.address + Math.max(1, Math.ceil(item.size / 8))).sort((left, right) => left.size - right.size)[0];
+    if (register) return { requestedAddress, match: 'register', confidence: 'high', peripheral, register, offset: requestedAddress - register.address, note: '地址落在 CMSIS-SVD 声明的寄存器字节范围内；这只证明地址匹配，不证明故障根因。' };
+    if (peripheral.registers.length) {
+      const start = Math.min(peripheral.baseAddress, ...peripheral.registers.map(item => item.address));
+      const end = Math.max(...peripheral.registers.map(item => item.address + Math.max(1, Math.ceil(item.size / 8))));
+      if (start <= requestedAddress && requestedAddress < end) return { requestedAddress, match: 'peripheral', confidence: 'medium', peripheral, register: null, offset: requestedAddress - peripheral.baseAddress, note: '地址位于该外设已声明寄存器的跨度内，但没有命中具体寄存器。' };
+    }
+  }
+  return { requestedAddress, match: 'unresolved', confidence: 'none', peripheral: null, register: null, offset: null, note: 'SVD 中没有覆盖该地址的外设或寄存器。' };
+}

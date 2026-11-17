@@ -11,7 +11,7 @@ function renderToolbox(initial = '/toolbox') {
 describe('ToolboxPage independent tool workspace', () => {
   it('shows the catalog without mounting every tool', () => {
     renderToolbox();
-    expect(screen.getAllByRole('button', { name: /^打开/ })).toHaveLength(19);
+    expect(screen.getAllByRole('button', { name: /^打开/ })).toHaveLength(20);
     expect(screen.getByText('常用转换、校验与密码工具')).toBeVisible();
     expect(screen.getByRole('button', { name: '打开加解密与签名' })).toBeVisible();
     expect(screen.queryByText('Modbus 线序')).not.toBeInTheDocument();
@@ -40,8 +40,9 @@ describe('ToolboxPage independent tool workspace', () => {
   it('filters tools and persists favorites locally', () => {
     renderToolbox();
     fireEvent.change(screen.getByPlaceholderText('搜索 CRC、AES、CAN、HEX、MAP…'), { target: { value: 'MAP' } });
-    expect(screen.getAllByRole('button', { name: /^打开/ })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: /^打开/ })).toHaveLength(2);
     expect(screen.getByRole('button', { name: '打开MAP 快速分析' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '打开故障调查' })).toBeVisible();
     fireEvent.change(screen.getByPlaceholderText('搜索 CRC、AES、CAN、HEX、MAP…'), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: '收藏CRC 与字节序' }));
     expect(screen.getByRole('button', { name: '取消收藏CRC 与字节序' })).toBeVisible();

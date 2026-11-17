@@ -10,7 +10,7 @@ import { appendFile, lstat, mkdir, open, readFile, readdir, realpath, rename, rm
 import { tmpdir } from 'os';
 import { dirname, isAbsolute, join, relative, resolve } from 'path';
 import { URL, pathToFileURL } from 'url';
-import { analyzeElf, lookupElfAddress } from './elf.js';
+import { analyzeElf, lookupElfAddress, parseElfAddress } from './elf.js';
 
 const PORT = process.env.EMBEDKIT_PROXY_PORT || 9999;
 const HOST = process.env.EMBEDKIT_PROXY_HOST || '127.0.0.1';
@@ -423,12 +423,16 @@ async function analyzeSelectedElf(id) {
       if (bytesRead !== length) throw new Error('Selected ELF file was truncated while reading');
       return new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead);
     } });
+    const sha256 = await new Promise((resolveHash, rejectHash) => {
+      const hash = createHash('sha256'), stream = createReadStream(selection.path, { highWaterMark: 256 * 1024 });
+      stream.on('data', chunk => hash.update(chunk)); stream.on('end', () => resolveHash(hash.digest('hex'))); stream.on('error', rejectHash);
+    });
     const now = Date.now(), analysisId = randomUUID();
     for (const [cachedId, cached] of elfAnalyses) if (cached.expiresAt <= now) elfAnalyses.delete(cachedId);
     while (elfAnalyses.size >= MAX_ELF_ANALYSES) elfAnalyses.delete(elfAnalyses.keys().next().value);
-    elfAnalyses.set(analysisId, { analysis, expiresAt: now + ELF_ANALYSIS_TTL_MS });
+    elfAnalyses.set(analysisId, { analysis, path: selection.path, expiresAt: now + ELF_ANALYSIS_TTL_MS });
     const { symbols: _symbols, lineRows: _lineRows, ...publicAnalysis } = analysis;
-    return { ...publicAnalysis, analysisId, expiresAt: new Date(now + ELF_ANALYSIS_TTL_MS).toISOString() };
+    return { ...publicAnalysis, sha256, analysisId, expiresAt: new Date(now + ELF_ANALYSIS_TTL_MS).toISOString() };
   } finally { await handle.close(); }
 }
 
@@ -436,6 +440,39 @@ function lookupAnalyzedElf(id, address) {
   const cached = elfAnalyses.get(id);
   if (!cached || cached.expiresAt <= Date.now()) { elfAnalyses.delete(id); throw new Error('ELF analysis is missing or expired; select the file again'); }
   return lookupElfAddress(cached.analysis, address);
+}
+
+function runDisassembler(executable, args) {
+  return new Promise(resolveRun => {
+    const child = spawn(executable, args, { windowsHide: true, shell: false });
+    let stdout = '', stderr = '', settled = false, timer;
+    const finish = result => { if (settled) return; settled = true; clearTimeout(timer); resolveRun(result); };
+    const append = (current, chunk) => (current + chunk.toString()).slice(0, 256 * 1024);
+    child.stdout.on('data', chunk => { stdout = append(stdout, chunk); });
+    child.stderr.on('data', chunk => { stderr = append(stderr, chunk); });
+    child.on('error', error => finish({ ok: false, error: error.code === 'ENOENT' ? 'not-found' : error.message }));
+    child.on('close', code => finish({ ok: code === 0, stdout, error: code === 0 ? '' : stderr.trim().slice(0, 500) || `exit-${code}` }));
+    timer = setTimeout(() => { child.kill(); finish({ ok: false, error: 'timeout' }); }, 5000);
+  });
+}
+
+async function disassembleAnalyzedElf(id, addressValue, beforeValue, afterValue) {
+  const cached = elfAnalyses.get(id);
+  if (!cached || cached.expiresAt <= Date.now()) { elfAnalyses.delete(id); throw new Error('ELF analysis is missing or expired; select the file again'); }
+  const requested = parseElfAddress(addressValue), normalized = cached.analysis.machineId === 40 ? requested & ~1n : requested;
+  const before = Number(beforeValue ?? 16), after = Number(afterValue ?? 32);
+  if (!Number.isSafeInteger(before) || before < 0 || before > 128 || !Number.isSafeInteger(after) || after < 2 || after > 128) throw new Error('Disassembly byte window is outside the supported range');
+  const start = normalized > BigInt(before) ? normalized - BigInt(before) : 0n, stop = normalized + BigInt(after);
+  const candidates = cached.analysis.machineId === 40 ? ['arm-none-eabi-objdump', 'llvm-objdump', 'objdump'] : cached.analysis.machineId === 243 ? ['riscv-none-elf-objdump', 'riscv64-unknown-elf-objdump', 'llvm-objdump', 'objdump'] : ['llvm-objdump', 'objdump'];
+  const attempts = [];
+  for (const executable of candidates) {
+    const run = await runDisassembler(executable, ['-d', `--start-address=0x${start.toString(16)}`, `--stop-address=0x${stop.toString(16)}`, cached.path]);
+    if (!run.ok) { attempts.push(`${executable}: ${run.error}`); continue; }
+    const instructions = run.stdout.split(/\r?\n/).map(line => line.match(/^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2,8}\s+)+)\s*([^\s]+)\s*(.*)$/i)).filter(Boolean).slice(0, 128).map(match => { const address = BigInt(`0x${match[1]}`); return { address: `0x${address.toString(16).toUpperCase()}`, bytes: match[2].trim().replace(/\s+/g, ' '), mnemonic: match[3], operands: match[4].trim(), isTarget: address === normalized }; });
+    if (!instructions.length) { attempts.push(`${executable}: no-instructions`); continue; }
+    return { available: true, requestedAddress: `0x${requested.toString(16).toUpperCase()}`, normalizedAddress: `0x${normalized.toString(16).toUpperCase()}`, tool: executable, instructions, warnings: instructions.some(item => item.isTarget) ? [] : ['反汇编输出没有精确覆盖目标地址；请核对指令边界和目标架构。'] };
+  }
+  return { available: false, requestedAddress: `0x${requested.toString(16).toUpperCase()}`, normalizedAddress: `0x${normalized.toString(16).toUpperCase()}`, tool: null, instructions: [], warnings: ['本机未找到能够解析该 ELF 架构的 objdump；源码和符号定位仍然可用。', ...attempts.slice(0, 4)] };
 }
 
 function installAgentLogging() {
@@ -1699,6 +1736,13 @@ const server = http.createServer(async (req, res) => {
   const elfLookupMatch = pathname.match(/^\/api\/elf\/analyses\/([0-9a-f-]+)\/lookup$/i);
   if (elfLookupMatch && req.method === 'GET') {
     try { jsonRes(res, 200, lookupAnalyzedElf(elfLookupMatch[1], requestUrl.searchParams.get('address'))); }
+    catch (error) { jsonRes(res, 400, { error: error.message }); }
+    return;
+  }
+
+  const elfDisassemblyMatch = pathname.match(/^\/api\/elf\/analyses\/([0-9a-f-]+)\/disassemble$/i);
+  if (elfDisassemblyMatch && req.method === 'GET') {
+    try { jsonRes(res, 200, await disassembleAnalyzedElf(elfDisassemblyMatch[1], requestUrl.searchParams.get('address'), requestUrl.searchParams.get('before'), requestUrl.searchParams.get('after'))); }
     catch (error) { jsonRes(res, 400, { error: error.message }); }
     return;
   }

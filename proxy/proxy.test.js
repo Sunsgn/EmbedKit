@@ -381,11 +381,14 @@ test('analyzes authorized ELF symbols and resolves a Thumb fault address after r
   try {
     const selected = await (await fetch(`${agentBaseUrl}/api/files/select`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'file' }) })).json();
     const analyzedResponse = await fetch(`${agentBaseUrl}/api/elf/analyze/${selected.selectionId}`), analyzed = await analyzedResponse.json();
-    assert.equal(analyzedResponse.status, 200); assert.equal(analyzed.namedSymbolCount, 1); assert.ok(analyzed.analysisId); assert.equal(analyzed.symbols, undefined);
+    assert.equal(analyzedResponse.status, 200); assert.equal(analyzed.namedSymbolCount, 1); assert.ok(analyzed.analysisId); assert.match(analyzed.sha256, /^[0-9a-f]{64}$/); assert.equal(analyzed.symbols, undefined);
     await fetch(`${agentBaseUrl}/api/files/selections/${selected.selectionId}`, { method: 'DELETE' });
     const lookupResponse = await fetch(`${agentBaseUrl}/api/elf/analyses/${analyzed.analysisId}/lookup?address=0x08000109`), lookup = await lookupResponse.json();
     assert.equal(lookupResponse.status, 200); assert.equal(lookup.match, 'inside-symbol'); assert.equal(lookup.symbol.name, 'main'); assert.equal(lookup.symbol.offset, '0x8'); assert.equal(lookup.thumbBitCleared, true);
     assert.equal((await fetch(`${agentBaseUrl}/api/elf/analyses/${analyzed.analysisId}/lookup?address=main%2B4`)).status, 400);
+    const disassemblyResponse = await fetch(`${agentBaseUrl}/api/elf/analyses/${analyzed.analysisId}/disassemble?address=0x08000109&before=16&after=32`), disassembly = await disassemblyResponse.json();
+    assert.equal(disassemblyResponse.status, 200); assert.equal(typeof disassembly.available, 'boolean'); assert.ok(Array.isArray(disassembly.instructions)); assert.ok(Array.isArray(disassembly.warnings));
+    assert.equal((await fetch(`${agentBaseUrl}/api/elf/analyses/${analyzed.analysisId}/disassemble?address=main%2B4`)).status, 400);
   } finally { configureFilePickerAdapter(null); await rm(directory, { recursive: true, force: true }); }
 });
 
