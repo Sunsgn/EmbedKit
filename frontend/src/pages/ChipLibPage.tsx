@@ -19,7 +19,7 @@ type ResourceMode = 'home' | 'catalog' | 'sources' | 'knowledge' | 'solution' | 
 const resourceModeLabels: Record<Exclude<ResourceMode, 'home'>, string> = {
   catalog: '型号查询与资料包',
   solution: '功能选型与型号核验',
-  sources: '开发资料目录',
+  sources: '开源开发资料',
   knowledge: '知识与工程经验',
   records: '我的资料与记录',
 };
@@ -339,7 +339,7 @@ function ResourceDirectoryHome({ onOpen }: { onOpen: (mode: ResourceMode) => voi
       title: '开发资料与知识',
       description: '按平台查找公开开发资料，或使用本地知识与工程经验。',
       items: [
-        { id: 'sources' as const, title: '开发资料目录', description: '进入后按通用基础、ESP32、RV1106、星闪、STM32、RISC-V 等平台浏览。', meta: '官方文档 · 开源仓库 · 板卡资料', icon: FolderTree, color: 'green' },
+        { id: 'sources' as const, title: '开源开发资料', description: '按通用基础、ESP32、RV1106、星闪、STM32、RISC-V 等平台浏览或在线搜索。', meta: '本地目录 · GitHub · Gitee · Web 搜索', icon: FolderTree, color: 'green' },
         { id: 'knowledge' as const, title: '知识与工程经验', description: '检索内置方法文档，导入本地资料，并沉淀带证据和复测步骤的工程经验。', meta: '本地处理 · 可导入 · 可追溯', icon: BookOpen, color: 'cyan' },
       ],
     },

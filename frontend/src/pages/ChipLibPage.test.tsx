@@ -16,7 +16,7 @@ describe('ChipLibPage layout', () => {
     expect(screen.queryByPlaceholderText(/搜索型号、参数或用途/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /型号查询与资料包/ }));
     expect(screen.getByPlaceholderText(/搜索型号、参数或用途/)).toBeInTheDocument();
-    expect(screen.queryByText('嵌入式开发资料目录')).not.toBeInTheDocument();
+    expect(screen.queryByText('开源开发资料')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /批量核验 AI 给出的型号/ }));
     expect(screen.getByRole('heading', { name: '批量型号核验' })).toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/搜索型号、参数或用途/)).not.toBeInTheDocument();
@@ -29,7 +29,7 @@ describe('ChipLibPage layout', () => {
 
   it('opens development sources as an independent second-level workspace', () => {
     render(<ChipLibPage />);
-    fireEvent.click(screen.getByRole('button', { name: /开发资料目录/ }));
+    fireEvent.click(screen.getByRole('button', { name: /开源开发资料/ }));
     expect(screen.getByRole('region', { name: 'ESP32 资料目录' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'RV1106 资料目录' })).toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/搜索型号、参数或用途/)).not.toBeInTheDocument();
