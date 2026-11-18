@@ -1,7 +1,5 @@
 # AI 工程约束包通用接入与初始化执行指令
 
-> 正式版本：`7.1.1`  
-> 配套 ZIP：`通用ai约束文档_7.1.1.zip`  
 > ZIP SHA-256：`CC49D5F1C4303EDAE777CD6D9D2BBA99C88BA41900E03BC1ADAD47A137732798`  
 > 最低 Python：`3.10`
 
@@ -9,7 +7,7 @@
 
 目标不是简单解压，而是把本约束系统安全安装或升级到用户确认的唯一项目根，并在以后每次开发中用结构化状态回答：做到哪里、完成了什么、失败过什么、依据是什么、下一步是什么。
 
-Markdown、ZIP 文件名、版本和 SHA-256 必须全部一致，否则停止。禁止直接全量解压或覆盖项目，禁止直接编辑 `.ai/state/`、`.ai/run/`、`.ai/views/` 和 `.ai/INSTALL_STATE.json`，禁止绕过会话、锁、修订、证据、完成门禁或 Doctor 只读状态，禁止把未执行结果描述为完成。安装过程不得自动执行 `git add/commit/push`，不得清理用户已有改动。
+必须使用与本文 SHA-256 一致的同目录配套 ZIP，否则停止。禁止直接全量解压或覆盖项目，禁止直接编辑 `.ai/state/`、`.ai/run/`、`.ai/views/` 和 `.ai/INSTALL_STATE.json`，禁止绕过会话、锁、修订、证据、完成门禁或 Doctor 只读状态，禁止把未执行结果描述为完成。安装过程不得自动执行 `git add/commit/push`，不得清理用户已有改动。
 
 ## 2. 确定边界并检查输入
 
@@ -70,7 +68,7 @@ python '<BOOTSTRAP>' apply --plan '<PLAN_PATH>' --json
 python '<PROJECT_ROOT>/.ai/system/aic.py' status --verify --json
 ```
 
-结果必须为 `INSTALL_COMMITTED`、`STATUS_OK`、`PACKAGE_VERIFY_OK`，包版本为 `7.1.1`、结构版本为 `17`。保存返回的事务 JSON。旧受控入口只有在当前块哈希等于旧安装状态时才会升级；人工修改过的受控块必须冲突停止，入口之外的用户正文必须保留。
+结果必须为 `INSTALL_COMMITTED`、`STATUS_OK`、`PACKAGE_VERIFY_OK`，且返回的包身份和哈希必须与检查结果一致。保存返回的事务 JSON。旧受控入口只有在当前块哈希等于旧安装状态时才会升级；人工修改过的受控块必须冲突停止，入口之外的用户正文必须保留。
 
 中断后使用 `resume --transaction '<TRANSACTION_JSON>'`；撤销本次安装或升级使用 `rollback --transaction '<TRANSACTION_JSON>'`。回滚会先预检全部目标和备份；任一文件在安装后发生外部变化时，返回 `INSTALL_ROLLBACK_CONFLICT` 且所有项目文件保持不变，不允许部分卸载。
 
@@ -110,7 +108,7 @@ python '<PROJECT_ROOT>/.ai/system/aic.py' lock acquire --session-id '<SESSION_ID
 python '<PROJECT_ROOT>/.ai/system/aic.py' state migrate --session-id '<SESSION_ID>' --expected-state-revision <REV> --json
 ```
 
-迁移把旧字符串验收条件确定性转换为稳定 `ACPT-*`，默认 `UNVERIFIED`，不会伪造证据；命令可重复执行。迁移前保留安装事务和项目备份，确认 7.1 可用前不得删除。
+迁移把旧字符串验收条件确定性转换为稳定 `ACPT-*`，默认 `UNVERIFIED`，不会伪造证据；命令可重复执行。迁移前保留安装事务和项目备份，确认新运行时可用前不得删除。
 
 ## 6. 每个 AI 会话的标准入口
 
@@ -220,4 +218,4 @@ python '<PROJECT_ROOT>/.ai/system/aic.py' maintenance repack --workspace '<WORKS
 - 持续后台监视由外部调度，本系统在会话与节点边界显式校准；
 - 权威历史损坏不自动重写；
 - Markdown/CSV 和派生视图不是第二权威状态中心；
-- 7.1.1 已在 Windows 中文路径完成实测；平台无关 Python 接入用于 Linux/macOS，发布环境仍应在对应主机或 CI 再执行相同 ZIP 验收，不能把语法兼容宣称为未实际运行的平台实测。
+- 当前配套 ZIP 已在 Windows 中文路径完成实测；平台无关 Python 接入用于 Linux/macOS，发布环境仍应在对应主机或 CI 再执行相同 ZIP 验收，不能把语法兼容宣称为未实际运行的平台实测。
