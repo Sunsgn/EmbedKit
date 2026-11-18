@@ -1,6 +1,6 @@
 # AI 工程约束包通用接入与初始化执行指令
 
-> ZIP SHA-256：`CC49D5F1C4303EDAE777CD6D9D2BBA99C88BA41900E03BC1ADAD47A137732798`  
+> ZIP SHA-256：`780464852563CABF704E7D42FA8BF17B162388115DEC9831D7F920988D28BD38`  
 > 最低 Python：`3.10`
 
 ## 1. 给执行 AI 的最高优先级指令
@@ -57,8 +57,8 @@ python -c "import pathlib,stat,zipfile; z=zipfile.ZipFile(r'<ZIP_PATH>'); i=z.ge
 ## 4. 安装或升级事务
 
 ```text
-python '<BOOTSTRAP>' inspect --zip '<ZIP_PATH>' --target '<PROJECT_ROOT>' --expected-sha256 'CC49D5F1C4303EDAE777CD6D9D2BBA99C88BA41900E03BC1ADAD47A137732798' --json
-python '<BOOTSTRAP>' plan --zip '<ZIP_PATH>' --target '<PROJECT_ROOT>' --output '<PLAN_PATH>' --expected-sha256 'CC49D5F1C4303EDAE777CD6D9D2BBA99C88BA41900E03BC1ADAD47A137732798' --json
+python '<BOOTSTRAP>' inspect --zip '<ZIP_PATH>' --target '<PROJECT_ROOT>' --expected-sha256 '780464852563CABF704E7D42FA8BF17B162388115DEC9831D7F920988D28BD38' --json
+python '<BOOTSTRAP>' plan --zip '<ZIP_PATH>' --target '<PROJECT_ROOT>' --output '<PLAN_PATH>' --expected-sha256 '780464852563CABF704E7D42FA8BF17B162388115DEC9831D7F920988D28BD38' --json
 ```
 
 只有 `INSPECT_OK`、`can_apply=true`、`conflicts=[]`，且目标和操作清单正确时才执行：
@@ -75,7 +75,7 @@ python '<PROJECT_ROOT>/.ai/system/aic.py' status --verify --json
 若 `status --verify` 报告包拥有的运行时文件损坏，普通安装计划必须先拒绝。确认目标、旧安装状态与 ZIP 身份一致后，另建一个此前不存在的计划路径并显式执行受限修复：
 
 ```text
-python '<BOOTSTRAP>' plan --zip '<ZIP_PATH>' --target '<PROJECT_ROOT>' --output '<NEW_PLAN_PATH>' --expected-sha256 'CC49D5F1C4303EDAE777CD6D9D2BBA99C88BA41900E03BC1ADAD47A137732798' --repair-package-owned --json
+python '<BOOTSTRAP>' plan --zip '<ZIP_PATH>' --target '<PROJECT_ROOT>' --output '<NEW_PLAN_PATH>' --expected-sha256 '780464852563CABF704E7D42FA8BF17B162388115DEC9831D7F920988D28BD38' --repair-package-owned --json
 python '<BOOTSTRAP>' apply --plan '<NEW_PLAN_PATH>' --json
 python '<PROJECT_ROOT>/.ai/system/aic.py' status --verify --json
 ```
@@ -116,11 +116,9 @@ python '<PROJECT_ROOT>/.ai/system/aic.py' state migrate --session-id '<SESSION_I
 
 ```text
 python '<PROJECT_ROOT>/.ai/system/aic.py' workflow resume --client '<CLIENT_NAME>' --json
-python '<PROJECT_ROOT>/.ai/system/aic.py' doctor diagnose --json
-python '<PROJECT_ROOT>/.ai/system/aic.py' state capacity --json
 ```
 
-恢复结果必须包含项目身份、状态修订、活动任务、最近完成节点、失败方案、未知项、有效/失效证据、总结、阻断和唯一推荐动作及依据。不得用聊天记忆覆盖它。Doctor 要求只读、权威历史损坏、安装文件损坏或容量告警时，先处理报告，不得继续写入。
+默认恢复结果是有项目身份、状态修订、活动任务、最近完成节点、历史计数、容量告警、截断标记和唯一推荐动作的紧凑快照。只有排查历史细节时才追加 `--full`；具体实体优先用 `task/summary/evidence show` 按需读取。出现健康异常、容量告警、恢复操作或里程碑验收时再运行 `doctor diagnose`、`state capacity` 和 `state verify`，不得在正常会话中重复输出完整诊断。不得用聊天记忆覆盖结构化状态。
 
 若恢复结果已有需要继续的活动任务，按其 `recommended_command` 执行，不再创建新任务。若要在刚恢复得到的同一会话中建立新任务，传入返回的 `SESSION_ID`，避免产生第二个活动会话：
 
@@ -128,7 +126,7 @@ python '<PROJECT_ROOT>/.ai/system/aic.py' state capacity --json
 python '<PROJECT_ROOT>/.ai/system/aic.py' workflow begin --client '<CLIENT_NAME>' --session-id '<SESSION_ID>' --title '<TITLE>' --goal '<GOAL>' --acceptance '<ACCEPTANCE_1>' --acceptance '<ACCEPTANCE_2>' --next-action '<FIRST_CONCRETE_ACTION>' --level STANDARD --json
 ```
 
-若本会话尚未执行 `workflow resume`，可省略 `--session-id`，由 `workflow begin` 创建会话。两种方式二选一。命令会建立任务、任务锁和状态为 `READY` 的具体 `NEXT-*`；省略 `--next-action` 时也会生成与标题关联的分析计划动作。`LIGHT/STANDARD/FULL` 只调整工作量和预算，不关闭安全、证据和完成门禁。
+若本会话尚未执行 `workflow resume`，可省略 `--session-id`，由 `workflow begin` 创建会话。两种方式二选一。命令会建立任务、任务锁和状态为 `READY` 的具体 `NEXT-*`；省略 `--next-action` 时也会生成与标题关联的分析计划动作。高层工作流和证据写入默认返回紧凑回执，需要完整实体时才追加 `--full`。`LIGHT/STANDARD/FULL` 只调整工作量和预算，不关闭安全、证据和完成门禁。
 
 ## 7. 写入、锁和并发规则
 
