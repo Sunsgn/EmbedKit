@@ -1,8 +1,8 @@
 # AI 工程约束包通用接入与初始化执行指令
 
-> 正式版本：`7.1.0`  
-> 配套 ZIP：`通用ai约束文档_7.1.0.zip`  
-> ZIP SHA-256：`1C1103BF47C75356DAE1DFB46AE99B53063C08B2BB210A992E3FD7C2BFFB6BBC`  
+> 正式版本：`7.1.1`  
+> 配套 ZIP：`通用ai约束文档_7.1.1.zip`  
+> ZIP SHA-256：`CC49D5F1C4303EDAE777CD6D9D2BBA99C88BA41900E03BC1ADAD47A137732798`  
 > 最低 Python：`3.10`
 
 ## 1. 给执行 AI 的最高优先级指令
@@ -59,8 +59,8 @@ python -c "import pathlib,stat,zipfile; z=zipfile.ZipFile(r'<ZIP_PATH>'); i=z.ge
 ## 4. 安装或升级事务
 
 ```text
-python '<BOOTSTRAP>' inspect --zip '<ZIP_PATH>' --target '<PROJECT_ROOT>' --expected-sha256 '1C1103BF47C75356DAE1DFB46AE99B53063C08B2BB210A992E3FD7C2BFFB6BBC' --json
-python '<BOOTSTRAP>' plan --zip '<ZIP_PATH>' --target '<PROJECT_ROOT>' --output '<PLAN_PATH>' --expected-sha256 '1C1103BF47C75356DAE1DFB46AE99B53063C08B2BB210A992E3FD7C2BFFB6BBC' --json
+python '<BOOTSTRAP>' inspect --zip '<ZIP_PATH>' --target '<PROJECT_ROOT>' --expected-sha256 'CC49D5F1C4303EDAE777CD6D9D2BBA99C88BA41900E03BC1ADAD47A137732798' --json
+python '<BOOTSTRAP>' plan --zip '<ZIP_PATH>' --target '<PROJECT_ROOT>' --output '<PLAN_PATH>' --expected-sha256 'CC49D5F1C4303EDAE777CD6D9D2BBA99C88BA41900E03BC1ADAD47A137732798' --json
 ```
 
 只有 `INSPECT_OK`、`can_apply=true`、`conflicts=[]`，且目标和操作清单正确时才执行：
@@ -70,9 +70,19 @@ python '<BOOTSTRAP>' apply --plan '<PLAN_PATH>' --json
 python '<PROJECT_ROOT>/.ai/system/aic.py' status --verify --json
 ```
 
-结果必须为 `INSTALL_COMMITTED`、`STATUS_OK`、`PACKAGE_VERIFY_OK`，包版本为 `7.1.0`、结构版本为 `16`。保存返回的事务 JSON。旧受控入口只有在当前块哈希等于旧安装状态时才会升级；人工修改过的受控块必须冲突停止，入口之外的用户正文必须保留。
+结果必须为 `INSTALL_COMMITTED`、`STATUS_OK`、`PACKAGE_VERIFY_OK`，包版本为 `7.1.1`、结构版本为 `17`。保存返回的事务 JSON。旧受控入口只有在当前块哈希等于旧安装状态时才会升级；人工修改过的受控块必须冲突停止，入口之外的用户正文必须保留。
 
-中断后使用 `resume --transaction '<TRANSACTION_JSON>'`；撤销本次安装或升级使用 `rollback --transaction '<TRANSACTION_JSON>'`。回滚遇到安装后外部变化时必须保留现场并报告冲突。
+中断后使用 `resume --transaction '<TRANSACTION_JSON>'`；撤销本次安装或升级使用 `rollback --transaction '<TRANSACTION_JSON>'`。回滚会先预检全部目标和备份；任一文件在安装后发生外部变化时，返回 `INSTALL_ROLLBACK_CONFLICT` 且所有项目文件保持不变，不允许部分卸载。
+
+若 `status --verify` 报告包拥有的运行时文件损坏，普通安装计划必须先拒绝。确认目标、旧安装状态与 ZIP 身份一致后，另建一个此前不存在的计划路径并显式执行受限修复：
+
+```text
+python '<BOOTSTRAP>' plan --zip '<ZIP_PATH>' --target '<PROJECT_ROOT>' --output '<NEW_PLAN_PATH>' --expected-sha256 'CC49D5F1C4303EDAE777CD6D9D2BBA99C88BA41900E03BC1ADAD47A137732798' --repair-package-owned --json
+python '<BOOTSTRAP>' apply --plan '<NEW_PLAN_PATH>' --json
+python '<PROJECT_ROOT>/.ai/system/aic.py' status --verify --json
+```
+
+`--repair-package-owned` 只允许修复旧安装状态已登记且当前可信 ZIP 清单固定的包文件，不得修复用户业务文件，也不得改变 `.ai/state/` 中的项目状态。
 
 ## 5. 初始化或迁移状态
 
@@ -114,13 +124,13 @@ python '<PROJECT_ROOT>/.ai/system/aic.py' state capacity --json
 
 恢复结果必须包含项目身份、状态修订、活动任务、最近完成节点、失败方案、未知项、有效/失效证据、总结、阻断和唯一推荐动作及依据。不得用聊天记忆覆盖它。Doctor 要求只读、权威历史损坏、安装文件损坏或容量告警时，先处理报告，不得继续写入。
 
-新任务优先用组合命令，它会建立会话、任务和任务锁：
+若恢复结果已有需要继续的活动任务，按其 `recommended_command` 执行，不再创建新任务。若要在刚恢复得到的同一会话中建立新任务，传入返回的 `SESSION_ID`，避免产生第二个活动会话：
 
 ```text
-python '<PROJECT_ROOT>/.ai/system/aic.py' workflow begin --client '<CLIENT_NAME>' --title '<TITLE>' --goal '<GOAL>' --acceptance '<ACCEPTANCE_1>' --acceptance '<ACCEPTANCE_2>' --level STANDARD --json
+python '<PROJECT_ROOT>/.ai/system/aic.py' workflow begin --client '<CLIENT_NAME>' --session-id '<SESSION_ID>' --title '<TITLE>' --goal '<GOAL>' --acceptance '<ACCEPTANCE_1>' --acceptance '<ACCEPTANCE_2>' --next-action '<FIRST_CONCRETE_ACTION>' --level STANDARD --json
 ```
 
-`LIGHT/STANDARD/FULL` 只调整工作量和预算，不关闭安全、证据和完成门禁。
+若本会话尚未执行 `workflow resume`，可省略 `--session-id`，由 `workflow begin` 创建会话。两种方式二选一。命令会建立任务、任务锁和状态为 `READY` 的具体 `NEXT-*`；省略 `--next-action` 时也会生成与标题关联的分析计划动作。`LIGHT/STANDARD/FULL` 只调整工作量和预算，不关闭安全、证据和完成门禁。
 
 ## 7. 写入、锁和并发规则
 
@@ -146,13 +156,20 @@ python '<PROJECT_ROOT>/.ai/system/aic.py' evidence add --task-id '<TASK_ID>' --t
 python '<PROJECT_ROOT>/.ai/system/aic.py' workflow checkpoint --session-id '<SESSION_ID>' --label '<NODE>' --json
 ```
 
+日常推进优先使用组合命令，它自动读取最新修订并同步关联的 `NEXT-*`，无需 AI 手工管理状态修订号或实体修订号：
+
+```text
+python '<PROJECT_ROOT>/.ai/system/aic.py' workflow advance --task-id '<TASK_ID>' --to EXECUTING --session-id '<SESSION_ID>' --json
+python '<PROJECT_ROOT>/.ai/system/aic.py' workflow advance --task-id '<TASK_ID>' --to VERIFYING --session-id '<SESSION_ID>' --completed '<COMPLETED_ITEM>' --json
+```
+
 任务进入 `VERIFYING` 且每条验收已有当前有效证据、无剩余项/阻断/活动下一步后，执行：
 
 ```text
 python '<PROJECT_ROOT>/.ai/system/aic.py' workflow finish --task-id '<TASK_ID>' --session-id '<SESSION_ID>' --trigger '<TRIGGER>' --json
 ```
 
-该命令生成并实时核验研发节点总结，再执行完成门禁。总结必须能说明已完成、未完成、失败方案、未知项、风险、恢复条件、证据依据和下一步理由。任意文本加 `PASS` 不能作为充分证据。
+该命令先生成并实时核验门禁所需研发节点总结，完成任务后再生成并核验 `COMPLETION` 总结。最终总结中的任务状态必须为 `COMPLETED`；重复执行会幂等返回已有的已验证完成总结。总结必须能说明已完成、未完成、失败方案、未知项、风险、恢复条件、证据依据和下一步理由。任意文本加 `PASS` 不能作为充分证据。门禁拒绝时按返回的 `recommended_command` 恢复，不靠猜测拼接修订号。
 
 完成任务仍可用 `task list/show/search`、`evidence list/show`、`summary list/show`、`history timeline` 查询，不得要求 AI 直接遍历内部状态文件。
 
@@ -203,4 +220,4 @@ python '<PROJECT_ROOT>/.ai/system/aic.py' maintenance repack --workspace '<WORKS
 - 持续后台监视由外部调度，本系统在会话与节点边界显式校准；
 - 权威历史损坏不自动重写；
 - Markdown/CSV 和派生视图不是第二权威状态中心；
-- 7.1.0 已在 Windows 中文路径完成实测；平台无关 Python 接入用于 Linux/macOS，发布环境仍应在对应主机或 CI 再执行相同 ZIP 验收，不能把语法兼容宣称为未实际运行的平台实测。
+- 7.1.1 已在 Windows 中文路径完成实测；平台无关 Python 接入用于 Linux/macOS，发布环境仍应在对应主机或 CI 再执行相同 ZIP 验收，不能把语法兼容宣称为未实际运行的平台实测。
