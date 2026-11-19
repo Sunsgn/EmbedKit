@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import EngineeringProjectsPage from './EngineeringProjectsPage';
 import { listEngineeringProjects, saveEngineeringProject } from '../services/productStorage';
@@ -13,6 +13,7 @@ vi.mock('../services/localFiles', () => ({ selectLocalDirectory: vi.fn(), revoke
 vi.mock('../services/projectScan', () => ({ scanSelectedProject: vi.fn() }));
 
 const renderPage = () => render(<MemoryRouter><EngineeringProjectsPage /></MemoryRouter>);
+const LocationProbe = () => <span data-testid="location">{useLocation().pathname}{useLocation().search}</span>;
 const project = { schemaVersion: 4 as const, id: 'project-1', name: '控制器工程', productModel: 'EK-1', chipModel: 'Generic MCU', description: '', tags: [], features: [], environmentRequirements: [], resourceLinks: [], source: { kind: 'manual' as const, displayName: '' }, createdAt: '', updatedAt: '2026-10-15T00:00:00.000Z' };
 
 describe('EngineeringProjectsPage', () => {
@@ -34,6 +35,15 @@ describe('EngineeringProjectsPage', () => {
     expect(screen.getByText('可选环境备注')).toBeVisible();
     expect(screen.queryByText('测试设备')).not.toBeInTheDocument();
     expect(screen.queryByText('通道配置')).not.toBeInTheDocument();
+  });
+
+  it('opens project analysis with a refresh-safe project id in the URL', async () => {
+    render(<MemoryRouter initialEntries={['/engineering']}><Routes><Route path="*" element={<><EngineeringProjectsPage /><LocationProbe /></>} /></Routes></MemoryRouter>);
+    await screen.findAllByText('控制器工程');
+
+    fireEvent.click(screen.getByRole('button', { name: /工程分析/ }));
+
+    expect(screen.getByTestId('location')).toHaveTextContent('/projects?projectId=project-1');
   });
 
   it('does not create a fake default project when storage is empty', async () => {

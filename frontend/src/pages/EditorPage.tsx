@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import CodeEditor, { type CodeEditorHandle } from "../components/CodeEditor";
 import {
   FolderOpen,
@@ -27,8 +27,13 @@ import {
 } from "../services/aiService";
 import { AI_PROVIDERS, type AiConfig } from "../types/ai";
 import {
+  copyLegacyWorkspaceToProject,
+  createProjectRevisionId,
+  createWorkspaceFingerprint,
   loadCurrentWorkspace,
+  loadProjectWorkspace,
   saveCurrentWorkspace,
+  saveProjectWorkspace,
 } from "../services/workspaceStorage";
 import ProjectBuildPanel from "../features/project/ProjectBuildPanel";
 import MapAnalysisPanel from "../features/project/MapAnalysisPanel";
@@ -38,6 +43,9 @@ import { analyzeProjectArchitecture } from "../utils/projectArchitecture";
 import { analyzeProgramBehavior } from "../utils/programBehavior";
 import type { RuntimeTraceAnalysis } from "../utils/runtimeTrace";
 import { clearRuntimeTrace, loadRuntimeTrace, saveRuntimeTrace } from "../services/runtimeTraceStorage";
+import { listEngineeringProjects, saveProjectRevision } from "../services/productStorage";
+import { PROJECT_REVISION_SCHEMA_VERSION } from "../types/lifecycle";
+import type { EngineeringProject } from "../types/product";
 
 const defaultFiles: FileNode[] = [
   {
@@ -965,7 +973,8 @@ function ProjectLanding({
 }
 
 export default function EditorPage() {
-  const navigate = useNavigate();
+  const navigate = useNavigate(), location = useLocation();
+  const requestedProjectId = useMemo(() => new URLSearchParams(location.search).get('projectId')?.trim() ?? '', [location.search]);
   const [files, setFiles] = useState<FileNode[]>(() =>
     defaultFiles.length
       ? createProjectFiles(
@@ -990,6 +999,12 @@ export default function EditorPage() {
   const [aiReport, setAiReport] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
   const [workspaceReady, setWorkspaceReady] = useState(false);
+  const [engineeringProject, setEngineeringProject] = useState<EngineeringProject | null>(null);
+  const [revisionId, setRevisionId] = useState('');
+  const [sourceFingerprint, setSourceFingerprint] = useState('');
+  const [importedAt, setImportedAt] = useState('');
+  const [legacyWorkspaceAvailable, setLegacyWorkspaceAvailable] = useState(false);
+  const [workspaceMessage, setWorkspaceMessage] = useState('');
   const editorRef = useRef<CodeEditorHandle | null>(null);
   const projectSummary = useMemo(
     () => (projectLoaded ? summarizeProject(files) : null),
@@ -1009,35 +1024,41 @@ export default function EditorPage() {
     return () => window.removeEventListener('keydown', closeOnEscape);
   }, [activeToolPanel]);
 
+  const traceStorageId = requestedProjectId ? `${requestedProjectId}:${revisionId || 'unversioned'}` : projectName;
   useEffect(() => {
     if (!projectLoaded) return;
     let cancelled = false;
-    void loadRuntimeTrace(projectName).then(trace => { if (!cancelled) setRuntimeTrace(trace); }).catch(() => { /* IndexedDB may be unavailable. */ });
+    void loadRuntimeTrace(traceStorageId).then(trace => { if (!cancelled) setRuntimeTrace(trace); }).catch(() => { /* IndexedDB may be unavailable. */ });
     return () => { cancelled = true; };
-  }, [projectLoaded, projectName]);
+  }, [projectLoaded, traceStorageId]);
 
   const handleRuntimeTraceChange = useCallback((trace: RuntimeTraceAnalysis | null) => {
     setRuntimeTrace(trace);
-    if (trace) void saveRuntimeTrace(projectName, trace).catch(() => { /* Keep the in-memory trace when persistence is unavailable. */ });
-    else void clearRuntimeTrace(projectName).catch(() => { /* The visible state is already cleared. */ });
-  }, [projectName]);
+    if (trace) void saveRuntimeTrace(traceStorageId, trace).catch(() => { /* Keep the in-memory trace when persistence is unavailable. */ });
+    else void clearRuntimeTrace(traceStorageId).catch(() => { /* The visible state is already cleared. */ });
+  }, [traceStorageId]);
 
   useEffect(() => {
     let cancelled = false;
-    void loadCurrentWorkspace()
-      .then((workspace) => {
-        if (cancelled || !workspace?.files.length) return;
-        setFiles(workspace.files);
-        setActiveFile(
-          workspace.files.some((file) => file.path === workspace.activeFile)
-            ? workspace.activeFile
-            : workspace.files[0].path,
-        );
-        setProjectName(workspace.name);
-        setProjectLoaded(true);
-      })
-      .catch(() => {
-        /* IndexedDB may be disabled in a private browser context. */
+    void (async () => {
+      setWorkspaceReady(false); setProjectLoaded(false); setRuntimeTrace(null); setEngineeringProject(null); setRevisionId(''); setSourceFingerprint(''); setImportedAt(''); setLegacyWorkspaceAvailable(false); setWorkspaceMessage('');
+      if (requestedProjectId) {
+        if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(requestedProjectId)) throw new Error('工程链接包含无效 ID，请返回工程中心重新进入');
+        const projects = await listEngineeringProjects(), project = projects.find(item => item.id === requestedProjectId);
+        if (!project) throw new Error('工程档案不存在或已删除，请返回工程中心重新选择');
+        const [workspace, legacy] = await Promise.all([loadProjectWorkspace(requestedProjectId), loadCurrentWorkspace()]);
+        if (cancelled) return;
+        setEngineeringProject(project); setProjectName(project.name); setLegacyWorkspaceAvailable(Boolean(legacy?.files.length));
+        if (!workspace?.files.length) { setFiles([]); setActiveFile(''); setWorkspaceMessage('当前工程尚未关联源码工作区，请导入工程目录；不会自动加载其他工程的源码。'); return; }
+        setFiles(workspace.files); setActiveFile(workspace.files.some(file => file.path === workspace.activeFile) ? workspace.activeFile : workspace.files[0].path); setRevisionId(workspace.revisionId); setSourceFingerprint(workspace.sourceFingerprint); setImportedAt(workspace.importedAt); setProjectLoaded(true);
+        return;
+      }
+      const workspace = await loadCurrentWorkspace();
+      if (cancelled || !workspace?.files.length) return;
+      setFiles(workspace.files); setActiveFile(workspace.files.some(file => file.path === workspace.activeFile) ? workspace.activeFile : workspace.files[0].path); setProjectName(workspace.name); setProjectLoaded(true);
+    })()
+      .catch((reason) => {
+        if (!cancelled) setWorkspaceMessage(reason instanceof Error ? reason.message : '工作区加载失败。工程档案未受影响，可返回工程中心或重新导入源码。');
       })
       .finally(() => {
         if (!cancelled) setWorkspaceReady(true);
@@ -1045,15 +1066,18 @@ export default function EditorPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [requestedProjectId]);
 
   useEffect(() => {
     if (!workspaceReady || !projectSummary) return;
     const timer = window.setTimeout(() => {
-      void saveCurrentWorkspace({ name: projectName, files, activeFile });
+      const save = requestedProjectId && engineeringProject && revisionId && sourceFingerprint && importedAt
+        ? saveProjectWorkspace({ schemaVersion: 1, projectId: requestedProjectId, revisionId, name: engineeringProject.name, files, activeFile, importedAt, sourceFingerprint })
+        : requestedProjectId ? Promise.resolve() : saveCurrentWorkspace({ name: projectName, files, activeFile });
+      void save.catch(reason => setWorkspaceMessage(`工作区保存失败：${reason instanceof Error ? reason.message : String(reason)}`));
     }, 500);
     return () => window.clearTimeout(timer);
-  }, [activeFile, files, projectName, projectSummary, workspaceReady]);
+  }, [activeFile, engineeringProject, files, importedAt, projectName, projectSummary, requestedProjectId, revisionId, sourceFingerprint, workspaceReady]);
 
   const activeContent = files.find((f) => f.path === activeFile)?.content || "";
   const handleFindingSelect = useCallback((finding: ProjectFinding) => {
@@ -1114,6 +1138,22 @@ export default function EditorPage() {
       setFiles((prev) => [...prev, newFile]);
       setActiveFile(newFile.path);
     }
+  };
+
+  const recordProjectRevision = async (project: EngineeringProject, nextRevisionId: string, fingerprint: string, capturedAt: string) => {
+    const source = project.source?.kind === 'local-directory' ? 'directory' : project.source?.kind === 'archive' ? 'archive' : 'manual';
+    await saveProjectRevision({ schemaVersion: PROJECT_REVISION_SCHEMA_VERSION, id: nextRevisionId, projectId: project.id, source, capturedAt, label: `${project.name} 源码导入`, sourceSha256: fingerprint, dirty: false });
+  };
+
+  const associateLegacyWorkspace = async () => {
+    if (!requestedProjectId || !engineeringProject) return;
+    setWorkspaceMessage('正在复制旧工作区，不会删除原数据…');
+    try {
+      const workspace = await copyLegacyWorkspaceToProject(requestedProjectId, engineeringProject.name);
+      if (!workspace) { setLegacyWorkspaceAvailable(false); setWorkspaceMessage('没有可关联的旧工作区'); return; }
+      await recordProjectRevision(engineeringProject, workspace.revisionId, workspace.sourceFingerprint, workspace.importedAt);
+      setFiles(workspace.files); setActiveFile(workspace.activeFile); setProjectName(engineeringProject.name); setRevisionId(workspace.revisionId); setSourceFingerprint(workspace.sourceFingerprint); setImportedAt(workspace.importedAt); setProjectLoaded(true); setLegacyWorkspaceAvailable(false); setWorkspaceMessage('旧工作区已复制并关联；原工作区仍保留，可安全回退。');
+    } catch (reason) { setWorkspaceMessage(`关联失败：${reason instanceof Error ? reason.message : String(reason)}`); }
   };
 
   const handleImportFiles = async (
@@ -1179,14 +1219,22 @@ export default function EditorPage() {
         };
       }),
     );
+    const nextActiveFile = imported.find((file) => /\.(c|cpp)$/i.test(file.name))?.path || imported[0].path;
+    const nextProjectName = engineeringProject?.name ?? selected[0].webkitRelativePath?.split("/")[0] ?? "imported_project";
+    if (requestedProjectId && engineeringProject) {
+      try {
+        const fingerprint = await createWorkspaceFingerprint(imported), nextImportedAt = new Date().toISOString();
+        const nextRevisionId = await createProjectRevisionId(requestedProjectId, fingerprint);
+        await saveProjectWorkspace({ schemaVersion: 1, projectId: requestedProjectId, revisionId: nextRevisionId, name: engineeringProject.name, files: imported, activeFile: nextActiveFile, importedAt: nextImportedAt, sourceFingerprint: fingerprint });
+        await recordProjectRevision(engineeringProject, nextRevisionId, fingerprint, nextImportedAt);
+        setRevisionId(nextRevisionId); setSourceFingerprint(fingerprint); setImportedAt(nextImportedAt); setWorkspaceMessage('源码已关联到当前工程，并创建可追溯修订。'); setLegacyWorkspaceAvailable(false);
+      } catch (reason) {
+        setImportError(`工程工作区保存失败：${reason instanceof Error ? reason.message : String(reason)}`); event.target.value = ""; return;
+      }
+    }
     setFiles(imported);
-    setActiveFile(
-      imported.find((file) => /\.(c|cpp)$/i.test(file.name))?.path ||
-        imported[0].path,
-    );
-    setProjectName(
-      selected[0].webkitRelativePath?.split("/")[0] || "imported_project",
-    );
+    setActiveFile(nextActiveFile);
+    setProjectName(nextProjectName);
     const summary = summarizeProject(imported);
     setProjectLoaded(true);
     const detectedChip = chips.find((chip) => chip.name.toUpperCase() === summary.chip || summary.chip.includes(chip.name.toUpperCase()));
@@ -1416,6 +1464,18 @@ export default function EditorPage() {
             </button>
           </div>
         </div>
+
+        {requestedProjectId && (
+          <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[#30363d] bg-cyan-500/5 px-4 py-2 text-[10px]">
+            <span className="text-cyan-300">当前工程：{engineeringProject?.name ?? requestedProjectId}</span>
+            {revisionId && <span className="text-gray-600">修订 {revisionId.replace('revision:', '').slice(0, 12)}</span>}
+            {workspaceMessage && <span role="status" className="text-yellow-300">{workspaceMessage}</span>}
+            <div className="ml-auto flex gap-2">
+              {legacyWorkspaceAvailable && !projectLoaded && <button onClick={() => void associateLegacyWorkspace()} className="rounded border border-cyan-500/30 px-2 py-1 text-cyan-300">复制并关联旧工作区</button>}
+              <button onClick={() => navigate('/engineering')} className="rounded border border-[#30363d] px-2 py-1 text-gray-400">返回工程中心</button>
+            </div>
+          </div>
+        )}
 
         {/* Editor + Output */}
         <div className="flex-1 flex min-h-0">
