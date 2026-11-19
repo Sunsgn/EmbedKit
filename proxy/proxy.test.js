@@ -498,10 +498,11 @@ test('runs a real TCP loopback debugging session', async () => {
     const createdResponse = await fetch(`${agentBaseUrl}/api/network/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ type: 'tcp', host: '127.0.0.1', port: echoAddress.port }),
+      body: JSON.stringify({ type: 'tcp', host: '127.0.0.1', port: echoAddress.port, connectTimeoutMs: 250 }),
     });
     assert.equal(createdResponse.status, 201);
     const created = await createdResponse.json();
+    assert.equal(created.connectTimeoutMs, 1000);
 
     let current;
     for (let attempt = 0; attempt < 30; attempt += 1) {
@@ -544,11 +545,20 @@ test('runs a TCP server debugging session', async () => {
   let current;
   for (let attempt = 0; attempt < 30; attempt += 1) { current = await (await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}`)).json(); if (current.state === 'connected') break; await new Promise(resolve => setTimeout(resolve, 20)); }
   assert.equal(current.mode, 'server'); assert.equal(current.state, 'connected');
-  const client = net.createConnection({ host: '127.0.0.1', port: listenPort }); await once(client, 'connect'); client.write('from-client');
-  for (let attempt = 0; attempt < 30; attempt += 1) { current = await (await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}`)).json(); if (current.events.some(event => event.direction === 'rx')) break; await new Promise(resolve => setTimeout(resolve, 20)); }
-  assert.ok(current.events.some(event => event.direction === 'rx' && event.text === 'from-client'));
-  const reply = once(client, 'data'); const sent = await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ encoding: 'text', data: 'from-server' }) }); assert.equal(sent.status, 200); const [replyData] = await reply; assert.equal(replyData.toString(), 'from-server');
-  client.destroy(); await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}`, { method: 'DELETE' });
+  const first = net.createConnection({ host: '127.0.0.1', port: listenPort }), second = net.createConnection({ host: '127.0.0.1', port: listenPort });
+  await Promise.all([once(first, 'connect'), once(second, 'connect')]);
+  first.write('from-first'); second.write('from-second');
+  for (let attempt = 0; attempt < 30; attempt += 1) { current = await (await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}`)).json(); if (current.peers?.length === 2 && current.events.filter(event => event.direction === 'rx').length >= 2) break; await new Promise(resolve => setTimeout(resolve, 20)); }
+  assert.equal(current.peers.length, 2); assert.ok(current.peers.every(peer => peer.connected && peer.rxBytes > 0));
+  const selectedPeer = current.peers.find(peer => peer.port === second.localPort); assert.ok(selectedPeer);
+  let unexpected = ''; first.on('data', data => { unexpected += data.toString(); });
+  const reply = once(second, 'data');
+  const sent = await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ encoding: 'text', data: 'from-server', peer: selectedPeer.id }) });
+  assert.equal(sent.status, 200); assert.deepEqual((await sent.json()).targets, [selectedPeer.id]);
+  const [replyData] = await reply; assert.equal(replyData.toString(), 'from-server');
+  await new Promise(resolve => setTimeout(resolve, 20)); assert.equal(unexpected, '');
+  current = await (await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}`)).json(); assert.equal(current.peers.find(peer => peer.id === selectedPeer.id).txBytes, 11);
+  first.destroy(); second.destroy(); await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}`, { method: 'DELETE' });
 });
 
 test('runs a real UDP loopback debugging session', async () => {
@@ -598,16 +608,19 @@ test('runs a real UDP loopback debugging session', async () => {
   }
 });
 
-test('runs a UDP server debugging session and replies to the latest peer', async () => {
+test('runs a UDP server debugging session and sends to a selected peer', async () => {
   const reservation = dgram.createSocket('udp4'); reservation.bind(0, '127.0.0.1'); await once(reservation, 'listening'); const listenPort = reservation.address().port; reservation.close(); await once(reservation, 'close');
   const createdResponse = await fetch(`${agentBaseUrl}/api/network/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'udp', mode: 'server', host: '127.0.0.1', port: listenPort }) });
   assert.equal(createdResponse.status, 201); const created = await createdResponse.json();
   let current;
   for (let attempt = 0; attempt < 30; attempt += 1) { current = await (await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}`)).json(); if (current.state === 'connected') break; await new Promise(resolve => setTimeout(resolve, 20)); }
   assert.equal(current.mode, 'server'); assert.equal(current.state, 'connected');
-  const client = dgram.createSocket('udp4'); client.send(Buffer.from('udp-client'), listenPort, '127.0.0.1');
-  for (let attempt = 0; attempt < 30; attempt += 1) { current = await (await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}`)).json(); if (current.events.some(event => event.direction === 'rx')) break; await new Promise(resolve => setTimeout(resolve, 20)); }
-  assert.ok(current.events.some(event => event.direction === 'rx' && event.text === 'udp-client'));
-  const reply = once(client, 'message'); const sent = await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ encoding: 'text', data: 'udp-server' }) }); assert.equal(sent.status, 200); const [replyData] = await reply; assert.equal(replyData.toString(), 'udp-server');
-  client.close(); await once(client, 'close'); await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}`, { method: 'DELETE' });
+  const first = dgram.createSocket('udp4'), second = dgram.createSocket('udp4'); first.bind(0, '127.0.0.1'); second.bind(0, '127.0.0.1'); await Promise.all([once(first, 'listening'), once(second, 'listening')]);
+  first.send(Buffer.from('udp-first'), listenPort, '127.0.0.1'); second.send(Buffer.from('udp-second'), listenPort, '127.0.0.1');
+  for (let attempt = 0; attempt < 30; attempt += 1) { current = await (await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}`)).json(); if (current.peers?.length === 2) break; await new Promise(resolve => setTimeout(resolve, 20)); }
+  assert.equal(current.peers.length, 2); const selectedPeer = current.peers.find(peer => peer.port === second.address().port); assert.ok(selectedPeer);
+  let unexpected = ''; first.on('message', data => { unexpected += data.toString(); });
+  const reply = once(second, 'message'); const sent = await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}/send`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ encoding: 'text', data: 'udp-server', peer: selectedPeer.id }) }); assert.equal(sent.status, 200); assert.deepEqual((await sent.json()).targets, [selectedPeer.id]); const [replyData] = await reply; assert.equal(replyData.toString(), 'udp-server');
+  await new Promise(resolve => setTimeout(resolve, 20)); assert.equal(unexpected, '');
+  first.close(); second.close(); await Promise.all([once(first, 'close'), once(second, 'close')]); await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}`, { method: 'DELETE' });
 });

@@ -49,7 +49,7 @@ describe('AgentNetworkDebugger independent workflow', () => {
     vi.mocked(networkAgent.closeNetworkSession).mockResolvedValue({
       closed: true,
     });
-    vi.mocked(networkAgent.sendNetworkData).mockResolvedValue({ sent: 4 });
+    vi.mocked(networkAgent.sendNetworkData).mockResolvedValue({ sent: 4, targets: [] });
   });
 
   it('keeps the network workspace available when Local Agent is offline', async () => {
@@ -149,6 +149,7 @@ describe('AgentNetworkDebugger independent workflow', () => {
         host: '127.0.0.1',
         port: 9000,
         localPort: 0,
+        connectTimeoutMs: 10000,
       }),
     );
     fireEvent.click(screen.getByRole('button', { name: '停止' }));
@@ -165,5 +166,43 @@ describe('AgentNetworkDebugger independent workflow', () => {
     await waitFor(() => expect(screen.getByText('目标拒绝连接 (NETWORK_CONNECT_FAILED)')).toBeVisible());
     expect(screen.getByDisplayValue('127.0.0.1')).toBeVisible();
     expect(screen.getByDisplayValue('9000')).toBeVisible();
+  });
+
+  it('selects a TCP server peer for an isolated send and reports rotated evidence', async () => {
+    const serverSession = {
+      ...connectedSession,
+      mode: 'server' as const,
+      host: '0.0.0.0',
+      clientCount: 2,
+      droppedEvents: 7,
+      peers: [
+        { id: '127.0.0.1:41001', address: '127.0.0.1', port: 41001, connected: true, connectedAt: '2026-10-10T08:48:00.000Z', lastSeenAt: '2026-10-10T08:48:07.000Z', rxBytes: 4, txBytes: 0 },
+        { id: '127.0.0.1:41002', address: '127.0.0.1', port: 41002, connected: true, connectedAt: '2026-10-10T08:48:01.000Z', lastSeenAt: '2026-10-10T08:48:08.000Z', rxBytes: 8, txBytes: 2 },
+      ],
+    };
+    vi.mocked(networkAgent.listNetworkSessions).mockResolvedValue([serverSession]);
+    render(<AgentNetworkDebugger />);
+
+    expect(await screen.findByText('已轮转 7 条旧事件')).toBeVisible();
+    fireEvent.change(screen.getByLabelText('发送目标对端'), { target: { value: '127.0.0.1:41002' } });
+    fireEvent.change(screen.getByPlaceholderText('输入文本，Enter 发送'), { target: { value: 'PING' } });
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
+
+    await waitFor(() => expect(networkAgent.sendNetworkData).toHaveBeenCalledWith('network-1', 'PING', 'text', '127.0.0.1:41002'));
+    expect(screen.getByText(/监听全部网卡/)).toBeVisible();
+  });
+
+  it('recreates a disconnected client session with its previous endpoint', async () => {
+    const disconnected = { ...connectedSession, state: 'closed' as const, connectTimeoutMs: 6000 };
+    const reconnected = { ...connectedSession, id: 'network-2', connectTimeoutMs: 6000 };
+    vi.mocked(networkAgent.listNetworkSessions).mockResolvedValue([disconnected]);
+    vi.mocked(networkAgent.openNetworkSession).mockResolvedValue(reconnected);
+    render(<AgentNetworkDebugger />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '重连' }));
+
+    await waitFor(() => expect(networkAgent.closeNetworkSession).toHaveBeenCalledWith('network-1'));
+    expect(networkAgent.openNetworkSession).toHaveBeenCalledWith({ type: 'tcp', mode: 'client', host: '127.0.0.1', port: 9000, localPort: undefined, connectTimeoutMs: 6000 });
+    expect(await screen.findByText(/TCP Client · 127\.0\.0\.1:9000/)).toBeVisible();
   });
 });

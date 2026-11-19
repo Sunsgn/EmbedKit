@@ -42,13 +42,18 @@ const appendNetworkLogs = (existing: ViewEvent[], incoming: EventItem[], protoco
   next[lastRxIndex] = { ...event, id: last.id, timestamp: last.timestamp, receivedThrough: event.timestamp, text: new TextDecoder().decode(new Uint8Array(bytes)), hex, byteLength: bytes.length };
   return next;
 }, existing);
+const toViewSession = (data: AgentSession): Session => {
+  const { events, ...session } = data;
+  return { ...session, logs: appendNetworkLogs([], events, data.type), rawEvents: events.slice(-MAX_RAW_EVENTS) };
+};
 
 export default function AgentNetworkDebugger() {
   const [initialDisplay] = useState(() => { try { return JSON.parse(localStorage.getItem(DISPLAY_SETTINGS_KEY) || '{}') as Record<string, unknown>; } catch { return {}; } });
   const [role, setRole] = useState<Role>('tcp-client');
   const [host, setHost] = useState('127.0.0.1'),
     [port, setPort] = useState('9000'),
-    [localPort, setLocalPort] = useState('0');
+    [localPort, setLocalPort] = useState('0'),
+    [connectTimeoutMs, setConnectTimeoutMs] = useState('10000');
   const [sessions, setSessions] = useState<Session[]>([]),
     [activeId, setActiveId] = useState<string | null>(null);
   const [split, setSplit] = useState(false),
@@ -66,7 +71,8 @@ export default function AgentNetworkDebugger() {
   const [shortcuts, setShortcuts] = useState<CommunicationShortcut[]>(loadCommunicationShortcuts),
     [shortcutName, setShortcutName] = useState(''),
     [shortcutLimit] = useState(loadCommunicationShortcutLimit),
-    [cyclingBySession, setCyclingBySession] = useState<Record<string, number[]>>({});
+    [cyclingBySession, setCyclingBySession] = useState<Record<string, number[]>>({}),
+    [targetPeers, setTargetPeers] = useState<Record<string, string>>({});
   const [available, setAvailable] = useState<boolean | null>(null),
     [error, setError] = useState(''),
     [filter, setFilter] = useState('');
@@ -182,22 +188,10 @@ export default function AgentNetworkDebugger() {
         host,
         port: Number(port),
         localPort: Number(localPort),
+        connectTimeoutMs: Number(connectTimeoutMs),
       });
       if (data.events.length) lastIds.current.set(data.id, data.events[data.events.length - 1].id);
-      const created: Session = {
-        id: data.id,
-        type: data.type,
-        mode: data.mode,
-        host: data.host,
-        port: data.port,
-        localAddress: data.localAddress,
-        state: data.state,
-        rxBytes: data.rxBytes,
-        txBytes: data.txBytes,
-        clientCount: data.clientCount,
-        logs: appendNetworkLogs([], data.events, data.type),
-        rawEvents: data.events.slice(-MAX_RAW_EVENTS),
-      };
+      const created = toViewSession(data);
       setCycle(false);
       setSessions((all) => [...all, created]);
       setActiveId(data.id);
@@ -219,13 +213,25 @@ export default function AgentNetworkDebugger() {
       return remaining;
     });
   }, []);
+  const reconnect = async (item: Session) => {
+    setError('');
+    try {
+      await close(item.id);
+      const data = await openNetworkSession({ type: item.type, mode: item.mode ?? 'client', host: item.host, port: item.port, localPort: item.localPort, connectTimeoutMs: item.connectTimeoutMs });
+      if (data.events.length) lastIds.current.set(data.id, data.events[data.events.length - 1].id);
+      setSessions(all => [...all, toViewSession(data)]); setActiveId(data.id);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+  };
   const sendTo = useCallback(
     async (sessionId: string, data: string, encoding: 'text' | 'hex', clear: boolean) => {
       const target = sessionRef.current.find((item) => item.id === sessionId);
-      const targetCanSend = target?.state === 'connected' && (target.mode === 'client' || (target.type === 'tcp' && (target.clientCount || 0) > 0) || (target.type === 'udp' && target.rxBytes > 0));
+      const targetCanSend = target?.state === 'connected' && (target.mode === 'client' || (target.peers?.some(peer => peer.connected) ?? false));
       if (!target || !targetCanSend || !data) return;
       try {
-        await sendNetworkData(target.id, encoding === 'text' ? appendTerminalLineEnding(data, lineEnding) : data, encoding);
+        const peer = target.mode === 'server' ? targetPeers[target.id] || (target.type === 'tcp' ? '*' : target.peers?.filter(item => item.connected).at(-1)?.id) : undefined;
+        const payload = encoding === 'text' ? appendTerminalLineEnding(data, lineEnding) : data;
+        if (peer) await sendNetworkData(target.id, payload, encoding, peer);
+        else await sendNetworkData(target.id, payload, encoding);
         setHistory((all) => [{ data, hex: encoding === 'hex' }, ...all.filter((item) => item.data !== data || item.hex !== (encoding === 'hex'))].slice(0, 30));
         if (clear) setInput('');
       } catch (reason) {
@@ -234,7 +240,7 @@ export default function AgentNetworkDebugger() {
         setCyclingBySession(all => ({ ...all, [sessionId]: [] }));
       }
     },
-    [lineEnding],
+    [lineEnding, targetPeers],
   );
   const send = useCallback(async (data: string, encoding: 'text' | 'hex', clear: boolean) => { if (activeId) await sendTo(activeId, data, encoding, clear); }, [activeId, sendTo]);
   const toggleShortcutCycle = (shortcutId: number) => { if (!activeId) return; setCyclingBySession(all => { const ids = all[activeId] ?? [], enabled = ids.includes(shortcutId); return { ...all, [activeId]: enabled ? ids.filter(id => id !== shortcutId) : [...ids, shortcutId] }; }); };
@@ -242,7 +248,7 @@ export default function AgentNetworkDebugger() {
   const deleteShortcut = (shortcutId: number) => { setShortcuts(all => all.filter(item => item.id !== shortcutId)); setCyclingBySession(all => Object.fromEntries(Object.entries(all).map(([id, ids]) => [id, ids.filter(value => value !== shortcutId)]))); };
 
   const online = active?.state === 'connected';
-  const canSend = Boolean(online && (active?.mode === 'client' || (active?.type === 'tcp' && (active.clientCount || 0) > 0) || (active?.type === 'udp' && active.rxBytes > 0)));
+  const canSend = Boolean(online && (active?.mode === 'client' || active?.peers?.some(peer => peer.connected)));
   const visible = useCallback(
     (session: Session | null) => {
       const query = filter.trim().toLowerCase();
@@ -380,6 +386,7 @@ export default function AgentNetworkDebugger() {
               {active?.type === 'tcp' && active.mode === 'server' && <span className="text-gray-500">客户端 {active.clientCount || 0}</span>}
               <span className="text-gray-500">RX {active?.rxBytes || 0} B</span>
               <span className="text-gray-500">TX {active?.txBytes || 0} B</span>
+              {(active?.droppedEvents ?? 0) > 0 && <span className="rounded border border-yellow-500/20 bg-yellow-500/5 px-2 py-0.5 text-yellow-300" title="Local Agent 已按资源上限轮转旧事件">已轮转 {active?.droppedEvents} 条旧事件</span>}
               <div className="ml-auto flex flex-wrap items-center gap-2 text-gray-400">
                 <label>
                   <input type="checkbox" checked={showRx} onChange={(event) => setShowRx(event.target.checked)} /> RX
@@ -468,20 +475,23 @@ export default function AgentNetworkDebugger() {
                       <input value={localPort} onChange={(event) => setLocalPort(event.target.value)} type="number" className="field h-[36px]" />
                     </label>
                   )}
+                  {mode === 'client' && <label className="w-[92px] text-[10px] text-gray-500">连接超时 ms<input aria-label="连接超时" value={connectTimeoutMs} onChange={(event) => setConnectTimeoutMs(event.target.value)} type="number" min="1000" max="120000" className="field h-[36px]" /></label>}
                   <button onClick={() => void create()} disabled={!available} className="flex h-[36px] items-center justify-center gap-1 rounded bg-blue-600 px-3 text-xs text-white disabled:opacity-40">
                     <Plus size={13} />
                     {mode === 'server' ? '添加监听' : '添加连接'}
                   </button>
-                  {active && (
+                  {active && active.state === 'connected' && (
                     <button onClick={() => void close(active.id)} className="flex h-[36px] items-center gap-1 rounded border border-red-500/30 px-2 text-xs text-red-400">
                       <Unplug size={12} />
                       停止
                     </button>
                   )}
+                  {active && active.state !== 'connected' && <button onClick={() => void reconnect(active)} className="flex h-[36px] items-center gap-1 rounded border border-green-500/30 px-2 text-xs text-green-400"><RefreshCw size={12} />重连</button>}
                   <button onClick={toggleSplit} disabled={sessions.length < 2} className={`h-[36px] rounded border px-2.5 text-xs disabled:opacity-35 ${split ? 'border-blue-500/40 bg-blue-500/10 text-blue-300' : 'border-[#30363d] text-gray-400'}`}>
                     {split ? '单窗口' : '双窗口'}
                   </button>
                 </div>
+                {((mode === 'server' && host === '0.0.0.0') || (active?.mode === 'server' && active.host === '0.0.0.0')) && <div className="mt-2 rounded border border-yellow-500/20 bg-yellow-500/5 px-2 py-1.5 text-[10px] text-yellow-300">监听全部网卡，将向同一网络中的设备开放端口；仅本机调试请改为 127.0.0.1。</div>}
               </div>
               <div>
                 <div className="mb-2 flex max-h-20 flex-wrap gap-1 overflow-y-auto rounded border border-[#30363d] bg-[#090d12] p-2 scrollbar-thin">
@@ -494,6 +504,7 @@ export default function AgentNetworkDebugger() {
                     发送到：
                     {!online ? '未连接' : active?.mode === 'client' ? `${active.host}:${active.port}` : active?.type === 'tcp' ? `${active.clientCount || 0} 个客户端` : '最近一个 UDP 来源'}
                   </span>
+                  {active?.mode === 'server' && (active.peers?.length ?? 0) > 0 && <select aria-label="发送目标对端" value={targetPeers[active.id] || (active.type === 'tcp' ? '*' : active.peers?.filter(peer => peer.connected).at(-1)?.id || '')} onChange={event => setTargetPeers(all => ({ ...all, [active.id]: event.target.value }))} className="max-w-52 rounded border border-[#30363d] bg-[#161b22] px-2 py-1 text-gray-300">{active.type === 'tcp' && <option value="*">全部 TCP 客户端</option>}{(active.peers ?? []).filter(peer => peer.connected).map(peer => <option key={peer.id} value={peer.id}>{peer.id} · RX {peer.rxBytes} / TX {peer.txBytes}</option>)}</select>}
                   <label>
                     <input type="checkbox" checked={hexMode} onChange={(event) => setHexMode(event.target.checked)} /> 发送 HEX
                   </label>

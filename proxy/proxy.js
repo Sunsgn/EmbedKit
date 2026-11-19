@@ -19,6 +19,8 @@ const AGENT_PROTOCOL_VERSION = 1;
 const MAX_REQUEST_BYTES = Number(process.env.EMBEDKIT_MAX_REQUEST_BYTES || 2 * 1024 * 1024);
 const MAX_NETWORK_SESSIONS = 16;
 const MAX_NETWORK_EVENTS = 2000;
+const MAX_NETWORK_PEERS = 64;
+const DEFAULT_NETWORK_CONNECT_TIMEOUT_MS = 10_000;
 const MAX_SERIAL_SESSIONS = 16;
 const MAX_BUILD_JOBS = 8;
 const MAX_BUILD_EVENTS = 5000;
@@ -715,7 +717,7 @@ async function restoreSerialSessions() {
 }
 
 async function persistNetworkSessions() {
-  const sessions = [...networkSessions.values()].filter(session => session.state !== 'closed').map(({ type, mode, host, port, localPort }) => ({ type, mode, host, port, localPort }));
+  const sessions = [...networkSessions.values()].filter(session => session.state !== 'closed').map(({ type, mode, host, port, localPort, connectTimeoutMs }) => ({ type, mode, host, port, localPort, connectTimeoutMs }));
   try { await mkdir(dirname(NETWORK_STATE_FILE), { recursive: true }); await writeFile(NETWORK_STATE_FILE, JSON.stringify({ version: 1, sessions }, null, 2), 'utf8'); }
   catch (error) { console.warn(`Unable to save network sessions: ${error.message}`); }
 }
@@ -726,7 +728,7 @@ async function restoreNetworkSessions() {
   catch (error) { if (error.code !== 'ENOENT') console.warn(`Unable to read saved network sessions: ${error.message}`); return; }
   if (!Array.isArray(saved?.sessions)) return;
   for (const options of saved.sessions.slice(0, MAX_NETWORK_SESSIONS)) {
-    try { const session = createNetworkSession(options.type, options.host, options.port, options.localPort, options.mode); pushNetworkEvent(session, 'system', '已自动恢复上次网络会话'); }
+    try { const session = createNetworkSession(options.type, options.host, options.port, options.localPort, options.mode, options.connectTimeoutMs); pushNetworkEvent(session, 'system', '已自动恢复上次网络会话'); }
     catch (error) { console.warn(`Unable to restore network session ${options?.type || ''} ${options?.host || ''}:${options?.port || ''}: ${error.message}`); }
   }
   await persistNetworkSessions();
@@ -843,7 +845,11 @@ function pushNetworkEvent(session, direction, bufferOrText) {
     hex: buffer ? buffer.toString('hex').match(/.{1,2}/g)?.join(' ').toUpperCase() || '' : '',
     byteLength: buffer?.length || Buffer.byteLength(String(bufferOrText)),
   });
-  if (session.events.length > MAX_NETWORK_EVENTS) session.events.splice(0, session.events.length - MAX_NETWORK_EVENTS);
+  if (session.events.length > MAX_NETWORK_EVENTS) {
+    const removed = session.events.length - MAX_NETWORK_EVENTS;
+    session.events.splice(0, removed);
+    session.droppedEvents += removed;
+  }
   if (direction === 'rx' && buffer) session.rxBytes += buffer.length;
   if (direction === 'tx' && buffer) session.txBytes += buffer.length;
 }
@@ -855,11 +861,16 @@ function publicNetworkSession(session, after = 0) {
     mode: session.mode,
     host: session.host,
     port: session.port,
+    localPort: session.localPort,
     localAddress: session.localAddress,
     state: session.state,
     rxBytes: session.rxBytes,
     txBytes: session.txBytes,
     clientCount: session.clients?.size || 0,
+    peers: [...session.peers.values()].map(peer => ({ ...peer })).slice(-MAX_NETWORK_PEERS),
+    droppedEvents: session.droppedEvents,
+    firstEventId: session.events[0]?.id ?? session.lastEventId + 1,
+    connectTimeoutMs: session.connectTimeoutMs,
     events: session.events.filter(event => event.id > after),
   };
 }
@@ -867,21 +878,44 @@ function publicNetworkSession(session, after = 0) {
 function closeNetworkSession(session, reason = '会话已关闭') {
   if (!session || session.state === 'closed') return;
   session.state = 'closed';
-  if (session.type === 'tcp' && session.mode === 'server') { for (const client of session.clients) client.destroy(); try { session.socket.close(); } catch { /* not listening */ } }
+  if (session.type === 'tcp' && session.mode === 'server') { for (const client of session.clients.values()) client.destroy(); try { session.socket.close(); } catch { /* not listening */ } }
   else if (session.type === 'tcp') session.socket.destroy();
   else { try { session.socket.close(); } catch { /* already closed */ } }
   pushNetworkEvent(session, 'system', reason);
 }
 
-function createNetworkSession(type, host, port, localPort, mode = 'client') {
+function writeTcpPayload(socket, payload) {
+  return new Promise((resolveWrite, reject) => {
+    if (!socket?.writable) { reject(new Error('TCP target is not writable')); return; }
+    socket.write(payload, error => error ? reject(error) : resolveWrite());
+  });
+}
+
+function sendUdpPayload(socket, payload, peer) {
+  return new Promise((resolveSend, reject) => {
+    const callback = error => error ? reject(error) : resolveSend();
+    if (peer) socket.send(payload, peer.port, peer.address, callback);
+    else socket.send(payload, callback);
+  });
+}
+
+function trimNetworkPeers(session) {
+  while (session.peers.size > MAX_NETWORK_PEERS) {
+    const removable = [...session.peers.entries()].find(([, peer]) => !peer.connected)?.[0] ?? session.peers.keys().next().value;
+    session.peers.delete(removable);
+  }
+}
+
+function createNetworkSession(type, host, port, localPort, mode = 'client', connectTimeoutMs = DEFAULT_NETWORK_CONNECT_TIMEOUT_MS) {
   if (!['tcp', 'udp'].includes(type)) throw new Error('Only TCP and UDP sessions are supported');
   if (!['client', 'server'].includes(mode)) throw new Error('Mode must be client or server');
   if (networkSessions.size >= MAX_NETWORK_SESSIONS) throw new Error(`At most ${MAX_NETWORK_SESSIONS} network sessions may be open`);
   const target = validateHostAndPort(host, port);
   const bindPort = type === 'udp' && mode === 'client' ? Number(localPort || 0) : 0;
   if (!Number.isInteger(bindPort) || bindPort < 0 || bindPort > 65535) throw new Error('Local port must be between 0 and 65535');
+  const boundedConnectTimeoutMs = Math.max(1000, Math.min(120_000, Number(connectTimeoutMs) || DEFAULT_NETWORK_CONNECT_TIMEOUT_MS));
   const id = randomUUID();
-  const session = { id, type, mode, ...target, localPort: bindPort, localAddress: '', state: 'connecting', events: [], lastEventId: 0, rxBytes: 0, txBytes: 0, socket: null, clients: new Set(), lastPeer: null };
+  const session = { id, type, mode, ...target, localPort: bindPort, connectTimeoutMs: boundedConnectTimeoutMs, localAddress: '', state: 'connecting', events: [], droppedEvents: 0, lastEventId: 0, rxBytes: 0, txBytes: 0, socket: null, clients: new Map(), peers: new Map(), lastPeer: null };
   networkSessions.set(id, session);
   pushNetworkEvent(session, 'system', mode === 'server' ? `正在监听 ${type.toUpperCase()} ${target.host}:${target.port}` : `正在连接 ${type.toUpperCase()} ${target.host}:${target.port}`);
 
@@ -889,17 +923,21 @@ function createNetworkSession(type, host, port, localPort, mode = 'client') {
     const socket = net.createConnection({ host: target.host, port: target.port });
     session.socket = socket;
     socket.setNoDelay(true);
-    socket.on('connect', () => { session.state = 'connected'; session.localAddress = `${socket.localAddress}:${socket.localPort}`; pushNetworkEvent(session, 'system', `已连接 ${target.host}:${target.port}`); });
+    const connectTimer = setTimeout(() => socket.destroy(new Error(`TCP connection timed out after ${boundedConnectTimeoutMs}ms`)), boundedConnectTimeoutMs);
+    socket.on('connect', () => { clearTimeout(connectTimer); session.state = 'connected'; session.localAddress = `${socket.localAddress}:${socket.localPort}`; pushNetworkEvent(session, 'system', `已连接 ${target.host}:${target.port}`); });
     socket.on('data', data => pushNetworkEvent(session, 'rx', data));
-    socket.on('error', error => { session.state = 'error'; pushNetworkEvent(session, 'system', `TCP 错误：${error.message}`); });
-    socket.on('close', () => { if (session.state !== 'closed') { session.state = 'closed'; pushNetworkEvent(session, 'system', 'TCP 连接已断开'); } });
+    socket.on('error', error => { clearTimeout(connectTimer); session.state = 'error'; pushNetworkEvent(session, 'system', `TCP 错误：${error.message}`); });
+    socket.on('close', () => { clearTimeout(connectTimer); if (session.state !== 'closed') { session.state = 'closed'; pushNetworkEvent(session, 'system', 'TCP 连接已断开'); } });
   } else if (type === 'tcp') {
     const server = net.createServer(socket => {
-      session.clients.add(socket); const peer = `${socket.remoteAddress}:${socket.remotePort}`;
+      if (session.clients.size >= MAX_NETWORK_PEERS) { pushNetworkEvent(session, 'system', `已拒绝客户端：最多允许 ${MAX_NETWORK_PEERS} 个连接`); socket.destroy(); return; }
+      const peer = `${socket.remoteAddress}:${socket.remotePort}`, connectedAt = new Date().toISOString();
+      session.clients.set(peer, socket); session.peers.set(peer, { id: peer, address: socket.remoteAddress, port: socket.remotePort, connected: true, connectedAt, lastSeenAt: connectedAt, rxBytes: 0, txBytes: 0 }); trimNetworkPeers(session);
       pushNetworkEvent(session, 'system', `客户端已连接 ${peer}`);
-      socket.on('data', data => { pushNetworkEvent(session, 'rx', data); session.events[session.events.length - 1].peer = peer; });
+      socket.setNoDelay(true);
+      socket.on('data', data => { const evidence = session.peers.get(peer); if (evidence) { evidence.rxBytes += data.length; evidence.lastSeenAt = new Date().toISOString(); } pushNetworkEvent(session, 'rx', data); session.events[session.events.length - 1].peer = peer; });
       socket.on('error', error => pushNetworkEvent(session, 'system', `客户端 ${peer} 错误：${error.message}`));
-      socket.on('close', () => { session.clients.delete(socket); pushNetworkEvent(session, 'system', `客户端已断开 ${peer}`); });
+      socket.on('close', () => { session.clients.delete(peer); const evidence = session.peers.get(peer); if (evidence) { evidence.connected = false; evidence.lastSeenAt = new Date().toISOString(); } pushNetworkEvent(session, 'system', `客户端已断开 ${peer}`); });
     });
     session.socket = server;
     server.on('error', error => { session.state = 'error'; pushNetworkEvent(session, 'system', `TCP 监听错误：${error.message}`); });
@@ -908,7 +946,7 @@ function createNetworkSession(type, host, port, localPort, mode = 'client') {
   } else if (mode === 'client') {
     const socket = dgram.createSocket('udp4');
     session.socket = socket;
-    socket.on('message', (data, info) => { pushNetworkEvent(session, 'rx', data); session.events[session.events.length - 1].peer = `${info.address}:${info.port}`; });
+    socket.on('message', (data, info) => { const peer = `${info.address}:${info.port}`, now = new Date().toISOString(), evidence = session.peers.get(peer) ?? { id: peer, address: info.address, port: info.port, connected: true, connectedAt: now, lastSeenAt: now, rxBytes: 0, txBytes: 0 }; evidence.rxBytes += data.length; evidence.lastSeenAt = now; session.peers.set(peer, evidence); trimNetworkPeers(session); pushNetworkEvent(session, 'rx', data); session.events[session.events.length - 1].peer = peer; });
     socket.on('error', error => { session.state = 'error'; pushNetworkEvent(session, 'system', `UDP 错误：${error.message}`); });
     socket.on('close', () => { session.state = 'closed'; });
     socket.bind(bindPort, '0.0.0.0', () => {
@@ -917,7 +955,7 @@ function createNetworkSession(type, host, port, localPort, mode = 'client') {
   } else {
     const socket = dgram.createSocket('udp4');
     session.socket = socket;
-    socket.on('message', (data, info) => { session.lastPeer = info; pushNetworkEvent(session, 'rx', data); session.events[session.events.length - 1].peer = `${info.address}:${info.port}`; });
+    socket.on('message', (data, info) => { session.lastPeer = info; const peer = `${info.address}:${info.port}`, now = new Date().toISOString(), evidence = session.peers.get(peer) ?? { id: peer, address: info.address, port: info.port, connected: true, connectedAt: now, lastSeenAt: now, rxBytes: 0, txBytes: 0 }; evidence.rxBytes += data.length; evidence.lastSeenAt = now; session.peers.set(peer, evidence); trimNetworkPeers(session); pushNetworkEvent(session, 'rx', data); session.events[session.events.length - 1].peer = peer; });
     socket.on('error', error => { session.state = 'error'; pushNetworkEvent(session, 'system', `UDP 监听错误：${error.message}`); });
     socket.on('close', () => { session.state = 'closed'; });
     socket.bind(target.port, target.host, () => { const address = socket.address(); session.state = 'connected'; session.localAddress = `${address.address}:${address.port}`; pushNetworkEvent(session, 'system', `UDP 服务端正在监听 ${session.localAddress}`); });
@@ -1959,7 +1997,7 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/network/sessions' && req.method === 'POST') {
     try {
       const body = await readJSONBody(req);
-      const session = createNetworkSession(body.type, body.host, body.port, body.localPort, body.mode);
+      const session = createNetworkSession(body.type, body.host, body.port, body.localPort, body.mode, body.connectTimeoutMs);
       await persistNetworkSessions();
       jsonRes(res, 201, publicNetworkSession(session));
     } catch (error) {
@@ -1977,18 +2015,28 @@ const server = http.createServer(async (req, res) => {
         if (session.state !== 'connected') throw new Error('Network session is not connected');
         const body = await readJSONBody(req);
         const payload = decodeNetworkPayload(body.data, body.encoding);
-        if (session.type === 'tcp' && session.mode === 'client') session.socket.write(payload);
+        let targets = [];
+        if (session.type === 'tcp' && session.mode === 'client') {
+          await writeTcpPayload(session.socket, payload); targets = [`${session.host}:${session.port}`];
+        }
         else if (session.type === 'tcp') {
           if (!session.clients.size) throw new Error('No TCP client is connected');
-          for (const client of session.clients) client.write(payload);
-        } else if (session.mode === 'client') session.socket.send(payload);
+          const requestedPeer = String(body.peer || '*');
+          const selected = requestedPeer === '*' ? [...session.clients.entries()] : [[requestedPeer, session.clients.get(requestedPeer)]];
+          if (selected.some(([, client]) => !client)) throw new Error('Selected TCP client is no longer connected');
+          await Promise.all(selected.map(([, client]) => writeTcpPayload(client, payload)));
+          targets = selected.map(([peer]) => peer);
+          for (const peer of targets) { const evidence = session.peers.get(peer); if (evidence) { evidence.txBytes += payload.length; evidence.lastSeenAt = new Date().toISOString(); } }
+        } else if (session.mode === 'client') { await sendUdpPayload(session.socket, payload); targets = [`${session.host}:${session.port}`]; }
         else {
           if (!session.lastPeer) throw new Error('No UDP peer has sent data yet');
-          session.socket.send(payload, session.lastPeer.port, session.lastPeer.address);
+          const requestedPeer = String(body.peer || `${session.lastPeer.address}:${session.lastPeer.port}`), evidence = session.peers.get(requestedPeer);
+          if (!evidence) throw new Error('Selected UDP peer is unavailable');
+          await sendUdpPayload(session.socket, payload, evidence); targets = [requestedPeer]; evidence.txBytes += payload.length; evidence.lastSeenAt = new Date().toISOString();
         }
         pushNetworkEvent(session, 'tx', payload);
-        if (session.mode === 'server' && session.type === 'udp' && session.lastPeer) session.events[session.events.length - 1].peer = `${session.lastPeer.address}:${session.lastPeer.port}`;
-        jsonRes(res, 200, { sent: payload.length });
+        if (session.mode === 'server') session.events[session.events.length - 1].peer = targets.length === 1 ? targets[0] : `${targets.length} peers`;
+        jsonRes(res, 200, { sent: payload.length, targets });
       } catch (error) {
         jsonRes(res, 400, { error: error.message });
       }
