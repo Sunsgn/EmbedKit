@@ -20,7 +20,9 @@ const MAX_REQUEST_BYTES = Number(process.env.EMBEDKIT_MAX_REQUEST_BYTES || 2 * 1
 const MAX_NETWORK_SESSIONS = 16;
 const MAX_NETWORK_EVENTS = 2000;
 const MAX_NETWORK_PEERS = 64;
+const MAX_NETWORK_FRAME_BYTES = 64 * 1024;
 const DEFAULT_NETWORK_CONNECT_TIMEOUT_MS = 10_000;
+const DEFAULT_NETWORK_FRAME_GAP_MS = 30;
 const MAX_SERIAL_SESSIONS = 16;
 const MAX_BUILD_JOBS = 8;
 const MAX_BUILD_EVENTS = 5000;
@@ -717,7 +719,7 @@ async function restoreSerialSessions() {
 }
 
 async function persistNetworkSessions() {
-  const sessions = [...networkSessions.values()].filter(session => session.state !== 'closed').map(({ type, mode, host, port, localPort, connectTimeoutMs }) => ({ type, mode, host, port, localPort, connectTimeoutMs }));
+  const sessions = [...networkSessions.values()].filter(session => session.state !== 'closed').map(({ type, mode, host, port, localPort, connectTimeoutMs, frameMode, frameGapMs }) => ({ type, mode, host, port, localPort, connectTimeoutMs, frameMode, frameGapMs }));
   try { await mkdir(dirname(NETWORK_STATE_FILE), { recursive: true }); await writeFile(NETWORK_STATE_FILE, JSON.stringify({ version: 1, sessions }, null, 2), 'utf8'); }
   catch (error) { console.warn(`Unable to save network sessions: ${error.message}`); }
 }
@@ -728,7 +730,7 @@ async function restoreNetworkSessions() {
   catch (error) { if (error.code !== 'ENOENT') console.warn(`Unable to read saved network sessions: ${error.message}`); return; }
   if (!Array.isArray(saved?.sessions)) return;
   for (const options of saved.sessions.slice(0, MAX_NETWORK_SESSIONS)) {
-    try { const session = createNetworkSession(options.type, options.host, options.port, options.localPort, options.mode, options.connectTimeoutMs); pushNetworkEvent(session, 'system', '已自动恢复上次网络会话'); }
+    try { const session = createNetworkSession(options.type, options.host, options.port, options.localPort, options.mode, options.connectTimeoutMs, options.frameMode, options.frameGapMs); pushNetworkEvent(session, 'system', '已自动恢复上次网络会话'); }
     catch (error) { console.warn(`Unable to restore network session ${options?.type || ''} ${options?.host || ''}:${options?.port || ''}: ${error.message}`); }
   }
   await persistNetworkSessions();
@@ -850,7 +852,6 @@ function pushNetworkEvent(session, direction, bufferOrText) {
     session.events.splice(0, removed);
     session.droppedEvents += removed;
   }
-  if (direction === 'rx' && buffer) session.rxBytes += buffer.length;
   if (direction === 'tx' && buffer) session.txBytes += buffer.length;
 }
 
@@ -871,6 +872,8 @@ function publicNetworkSession(session, after = 0) {
     droppedEvents: session.droppedEvents,
     firstEventId: session.events[0]?.id ?? session.lastEventId + 1,
     connectTimeoutMs: session.connectTimeoutMs,
+    frameMode: session.frameMode,
+    frameGapMs: session.frameGapMs,
     events: session.events.filter(event => event.id > after),
   };
 }
@@ -878,6 +881,7 @@ function publicNetworkSession(session, after = 0) {
 function closeNetworkSession(session, reason = '会话已关闭') {
   if (!session || session.state === 'closed') return;
   session.state = 'closed';
+  flushAllNetworkReceive(session);
   if (session.type === 'tcp' && session.mode === 'server') { for (const client of session.clients.values()) client.destroy(); try { session.socket.close(); } catch { /* not listening */ } }
   else if (session.type === 'tcp') session.socket.destroy();
   else { try { session.socket.close(); } catch { /* already closed */ } }
@@ -906,7 +910,63 @@ function trimNetworkPeers(session) {
   }
 }
 
-function createNetworkSession(type, host, port, localPort, mode = 'client', connectTimeoutMs = DEFAULT_NETWORK_CONNECT_TIMEOUT_MS) {
+function pushNetworkReceiveFrame(session, buffer, peer) {
+  if (!buffer.length) return;
+  pushNetworkEvent(session, 'rx', buffer);
+  if (peer) session.events[session.events.length - 1].peer = peer;
+}
+
+function flushNetworkReceive(session, peer = '') {
+  const frame = session.rxBuffers.get(peer);
+  if (!frame?.length) return;
+  session.rxBuffers.delete(peer);
+  pushNetworkReceiveFrame(session, frame, peer || undefined);
+}
+
+function clearNetworkReceiveTimer(session, peer) {
+  const timer = session.rxTimers.get(peer);
+  if (timer) clearTimeout(timer);
+  session.rxTimers.delete(peer);
+}
+
+function flushAllNetworkReceive(session) {
+  for (const peer of [...session.rxTimers.keys()]) clearNetworkReceiveTimer(session, peer);
+  for (const peer of [...session.rxBuffers.keys()]) flushNetworkReceive(session, peer);
+}
+
+function receiveNetworkData(session, data, peer = '') {
+  session.rxBytes += data.length;
+  if (session.type === 'udp' || session.frameMode === 'raw' || session.frameMode === 'chunk') { pushNetworkReceiveFrame(session, data, peer || undefined); return; }
+  const existing = session.rxBuffers.get(peer) ?? Buffer.alloc(0);
+  session.rxBuffers.set(peer, Buffer.concat([existing, data]));
+  if (session.frameMode === 'auto' || session.frameMode === 'line') {
+    for (;;) {
+      const buffered = session.rxBuffers.get(peer) ?? Buffer.alloc(0), cr = buffered.indexOf(13), lf = buffered.indexOf(10);
+      const at = cr < 0 ? lf : lf < 0 ? cr : Math.min(cr, lf);
+      if (at < 0) break;
+      let end = at + 1;
+      if (buffered[at] === 13 && buffered[end] === 10) end += 1;
+      if (end > MAX_NETWORK_FRAME_BYTES) {
+        session.rxBuffers.set(peer, buffered.subarray(MAX_NETWORK_FRAME_BYTES));
+        pushNetworkReceiveFrame(session, buffered.subarray(0, MAX_NETWORK_FRAME_BYTES), peer || undefined);
+        pushNetworkEvent(session, 'system', `接收缓存达到 ${MAX_NETWORK_FRAME_BYTES} 字节，已强制分帧`);
+        continue;
+      }
+      session.rxBuffers.set(peer, buffered.subarray(end));
+      pushNetworkReceiveFrame(session, buffered.subarray(0, end), peer || undefined);
+    }
+  }
+  let buffered = session.rxBuffers.get(peer) ?? Buffer.alloc(0);
+  while (buffered.length >= MAX_NETWORK_FRAME_BYTES) {
+    pushNetworkReceiveFrame(session, buffered.subarray(0, MAX_NETWORK_FRAME_BYTES), peer || undefined);
+    buffered = buffered.subarray(MAX_NETWORK_FRAME_BYTES); session.rxBuffers.set(peer, buffered);
+    pushNetworkEvent(session, 'system', `接收缓存达到 ${MAX_NETWORK_FRAME_BYTES} 字节，已强制分帧`);
+  }
+  clearNetworkReceiveTimer(session, peer);
+  if ((session.frameMode === 'auto' || session.frameMode === 'idle') && buffered.length) session.rxTimers.set(peer, setTimeout(() => { session.rxTimers.delete(peer); flushNetworkReceive(session, peer); }, session.frameGapMs));
+}
+
+function createNetworkSession(type, host, port, localPort, mode = 'client', connectTimeoutMs = DEFAULT_NETWORK_CONNECT_TIMEOUT_MS, frameMode = 'raw', frameGapMs = DEFAULT_NETWORK_FRAME_GAP_MS) {
   if (!['tcp', 'udp'].includes(type)) throw new Error('Only TCP and UDP sessions are supported');
   if (!['client', 'server'].includes(mode)) throw new Error('Mode must be client or server');
   if (networkSessions.size >= MAX_NETWORK_SESSIONS) throw new Error(`At most ${MAX_NETWORK_SESSIONS} network sessions may be open`);
@@ -914,8 +974,11 @@ function createNetworkSession(type, host, port, localPort, mode = 'client', conn
   const bindPort = type === 'udp' && mode === 'client' ? Number(localPort || 0) : 0;
   if (!Number.isInteger(bindPort) || bindPort < 0 || bindPort > 65535) throw new Error('Local port must be between 0 and 65535');
   const boundedConnectTimeoutMs = Math.max(1000, Math.min(120_000, Number(connectTimeoutMs) || DEFAULT_NETWORK_CONNECT_TIMEOUT_MS));
+  const selectedFrameMode = String(frameMode || 'raw'), boundedFrameGapMs = Number(frameGapMs ?? DEFAULT_NETWORK_FRAME_GAP_MS);
+  if (!['raw', 'chunk', 'auto', 'line', 'idle'].includes(selectedFrameMode)) throw new Error('Invalid network frame mode');
+  if (!Number.isFinite(boundedFrameGapMs) || boundedFrameGapMs < 5 || boundedFrameGapMs > 2000) throw new Error('Network frame gap must be between 5 and 2000 ms');
   const id = randomUUID();
-  const session = { id, type, mode, ...target, localPort: bindPort, connectTimeoutMs: boundedConnectTimeoutMs, localAddress: '', state: 'connecting', events: [], droppedEvents: 0, lastEventId: 0, rxBytes: 0, txBytes: 0, socket: null, clients: new Map(), peers: new Map(), lastPeer: null };
+  const session = { id, type, mode, ...target, localPort: bindPort, connectTimeoutMs: boundedConnectTimeoutMs, frameMode: type === 'udp' ? 'chunk' : selectedFrameMode, frameGapMs: boundedFrameGapMs, localAddress: '', state: 'connecting', events: [], droppedEvents: 0, lastEventId: 0, rxBytes: 0, txBytes: 0, socket: null, clients: new Map(), peers: new Map(), lastPeer: null, rxBuffers: new Map(), rxTimers: new Map() };
   networkSessions.set(id, session);
   pushNetworkEvent(session, 'system', mode === 'server' ? `正在监听 ${type.toUpperCase()} ${target.host}:${target.port}` : `正在连接 ${type.toUpperCase()} ${target.host}:${target.port}`);
 
@@ -925,9 +988,9 @@ function createNetworkSession(type, host, port, localPort, mode = 'client', conn
     socket.setNoDelay(true);
     const connectTimer = setTimeout(() => socket.destroy(new Error(`TCP connection timed out after ${boundedConnectTimeoutMs}ms`)), boundedConnectTimeoutMs);
     socket.on('connect', () => { clearTimeout(connectTimer); session.state = 'connected'; session.localAddress = `${socket.localAddress}:${socket.localPort}`; pushNetworkEvent(session, 'system', `已连接 ${target.host}:${target.port}`); });
-    socket.on('data', data => pushNetworkEvent(session, 'rx', data));
+    socket.on('data', data => receiveNetworkData(session, data));
     socket.on('error', error => { clearTimeout(connectTimer); session.state = 'error'; pushNetworkEvent(session, 'system', `TCP 错误：${error.message}`); });
-    socket.on('close', () => { clearTimeout(connectTimer); if (session.state !== 'closed') { session.state = 'closed'; pushNetworkEvent(session, 'system', 'TCP 连接已断开'); } });
+    socket.on('close', () => { clearTimeout(connectTimer); clearNetworkReceiveTimer(session, ''); flushNetworkReceive(session); if (session.state !== 'closed') { session.state = 'closed'; pushNetworkEvent(session, 'system', 'TCP 连接已断开'); } });
   } else if (type === 'tcp') {
     const server = net.createServer(socket => {
       if (session.clients.size >= MAX_NETWORK_PEERS) { pushNetworkEvent(session, 'system', `已拒绝客户端：最多允许 ${MAX_NETWORK_PEERS} 个连接`); socket.destroy(); return; }
@@ -935,9 +998,9 @@ function createNetworkSession(type, host, port, localPort, mode = 'client', conn
       session.clients.set(peer, socket); session.peers.set(peer, { id: peer, address: socket.remoteAddress, port: socket.remotePort, connected: true, connectedAt, lastSeenAt: connectedAt, rxBytes: 0, txBytes: 0 }); trimNetworkPeers(session);
       pushNetworkEvent(session, 'system', `客户端已连接 ${peer}`);
       socket.setNoDelay(true);
-      socket.on('data', data => { const evidence = session.peers.get(peer); if (evidence) { evidence.rxBytes += data.length; evidence.lastSeenAt = new Date().toISOString(); } pushNetworkEvent(session, 'rx', data); session.events[session.events.length - 1].peer = peer; });
+      socket.on('data', data => { const evidence = session.peers.get(peer); if (evidence) { evidence.rxBytes += data.length; evidence.lastSeenAt = new Date().toISOString(); } receiveNetworkData(session, data, peer); });
       socket.on('error', error => pushNetworkEvent(session, 'system', `客户端 ${peer} 错误：${error.message}`));
-      socket.on('close', () => { session.clients.delete(peer); const evidence = session.peers.get(peer); if (evidence) { evidence.connected = false; evidence.lastSeenAt = new Date().toISOString(); } pushNetworkEvent(session, 'system', `客户端已断开 ${peer}`); });
+      socket.on('close', () => { clearNetworkReceiveTimer(session, peer); flushNetworkReceive(session, peer); session.clients.delete(peer); const evidence = session.peers.get(peer); if (evidence) { evidence.connected = false; evidence.lastSeenAt = new Date().toISOString(); } pushNetworkEvent(session, 'system', `客户端已断开 ${peer}`); });
     });
     session.socket = server;
     server.on('error', error => { session.state = 'error'; pushNetworkEvent(session, 'system', `TCP 监听错误：${error.message}`); });
@@ -946,7 +1009,7 @@ function createNetworkSession(type, host, port, localPort, mode = 'client', conn
   } else if (mode === 'client') {
     const socket = dgram.createSocket('udp4');
     session.socket = socket;
-    socket.on('message', (data, info) => { const peer = `${info.address}:${info.port}`, now = new Date().toISOString(), evidence = session.peers.get(peer) ?? { id: peer, address: info.address, port: info.port, connected: true, connectedAt: now, lastSeenAt: now, rxBytes: 0, txBytes: 0 }; evidence.rxBytes += data.length; evidence.lastSeenAt = now; session.peers.set(peer, evidence); trimNetworkPeers(session); pushNetworkEvent(session, 'rx', data); session.events[session.events.length - 1].peer = peer; });
+    socket.on('message', (data, info) => { const peer = `${info.address}:${info.port}`, now = new Date().toISOString(), evidence = session.peers.get(peer) ?? { id: peer, address: info.address, port: info.port, connected: true, connectedAt: now, lastSeenAt: now, rxBytes: 0, txBytes: 0 }; evidence.rxBytes += data.length; evidence.lastSeenAt = now; session.peers.set(peer, evidence); trimNetworkPeers(session); receiveNetworkData(session, data, peer); });
     socket.on('error', error => { session.state = 'error'; pushNetworkEvent(session, 'system', `UDP 错误：${error.message}`); });
     socket.on('close', () => { session.state = 'closed'; });
     socket.bind(bindPort, '0.0.0.0', () => {
@@ -955,7 +1018,7 @@ function createNetworkSession(type, host, port, localPort, mode = 'client', conn
   } else {
     const socket = dgram.createSocket('udp4');
     session.socket = socket;
-    socket.on('message', (data, info) => { session.lastPeer = info; const peer = `${info.address}:${info.port}`, now = new Date().toISOString(), evidence = session.peers.get(peer) ?? { id: peer, address: info.address, port: info.port, connected: true, connectedAt: now, lastSeenAt: now, rxBytes: 0, txBytes: 0 }; evidence.rxBytes += data.length; evidence.lastSeenAt = now; session.peers.set(peer, evidence); trimNetworkPeers(session); pushNetworkEvent(session, 'rx', data); session.events[session.events.length - 1].peer = peer; });
+    socket.on('message', (data, info) => { session.lastPeer = info; const peer = `${info.address}:${info.port}`, now = new Date().toISOString(), evidence = session.peers.get(peer) ?? { id: peer, address: info.address, port: info.port, connected: true, connectedAt: now, lastSeenAt: now, rxBytes: 0, txBytes: 0 }; evidence.rxBytes += data.length; evidence.lastSeenAt = now; session.peers.set(peer, evidence); trimNetworkPeers(session); receiveNetworkData(session, data, peer); });
     socket.on('error', error => { session.state = 'error'; pushNetworkEvent(session, 'system', `UDP 监听错误：${error.message}`); });
     socket.on('close', () => { session.state = 'closed'; });
     socket.bind(target.port, target.host, () => { const address = socket.address(); session.state = 'connected'; session.localAddress = `${address.address}:${address.port}`; pushNetworkEvent(session, 'system', `UDP 服务端正在监听 ${session.localAddress}`); });
@@ -1794,7 +1857,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === '/api/agent/status' && req.method === 'GET') {
-    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: ['serial', 'serial-driver-diagnostics', ...(process.platform === 'win32' ? ['serial-driver-installation'] : []), 'tcp-client', 'tcp-server', 'udp-client', 'udp-server', 'session-restore', 'network-session-restore', 'structured-errors', 'project-build', 'project-scan', 'local-picker', 'local-file-read', 'elf-analysis', 'software-environment', 'software-installation', 'part-source-status', 'part-details-online', 'part-document-discovery', 'part-document-read'] });
+    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: ['serial', 'serial-driver-diagnostics', ...(process.platform === 'win32' ? ['serial-driver-installation'] : []), 'tcp-client', 'tcp-server', 'udp-client', 'udp-server', 'network-framing', 'session-restore', 'network-session-restore', 'structured-errors', 'project-build', 'project-scan', 'local-picker', 'local-file-read', 'elf-analysis', 'software-environment', 'software-installation', 'part-source-status', 'part-details-online', 'part-document-discovery', 'part-document-read'] });
     return;
   }
 
@@ -1997,7 +2060,7 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/network/sessions' && req.method === 'POST') {
     try {
       const body = await readJSONBody(req);
-      const session = createNetworkSession(body.type, body.host, body.port, body.localPort, body.mode, body.connectTimeoutMs);
+      const session = createNetworkSession(body.type, body.host, body.port, body.localPort, body.mode, body.connectTimeoutMs, body.frameMode, body.frameGapMs);
       await persistNetworkSessions();
       jsonRes(res, 201, publicNetworkSession(session));
     } catch (error) {

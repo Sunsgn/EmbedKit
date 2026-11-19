@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Braces, Clock3, Download, Plus, RefreshCw, Search, Send, Trash2, Unplug, X } from 'lucide-react';
-import { closeNetworkSession, getNetworkStatus, listNetworkSessions, openNetworkSession, readNetworkSession, sendNetworkData, type NetworkAgentEvent as EventItem, type NetworkAgentSession as AgentSession, type NetworkMode as Mode, type NetworkProtocol as Protocol } from '../../services/networkAgent';
+import { closeNetworkSession, getNetworkStatus, listNetworkSessions, openNetworkSession, readNetworkSession, sendNetworkData, type NetworkAgentEvent as EventItem, type NetworkAgentSession as AgentSession, type NetworkFrameMode, type NetworkMode as Mode, type NetworkProtocol as Protocol } from '../../services/networkAgent';
 import { createCommunicationCapture, writePendingCommunicationCapture } from '../../services/communicationCapture';
 import { appendTerminalLineEnding, downloadTerminalLog, downloadTerminalRaw, formatTerminalTime, MAX_TERMINAL_LOGS, terminalDirectionLabel, type TerminalLineEnding } from './terminalFormat';
 import { COMMUNICATION_SHORTCUTS_KEY, loadCommunicationShortcutLimit, loadCommunicationShortcuts, type CommunicationShortcut } from './communicationShortcuts';
@@ -32,8 +32,8 @@ const roleName = (type: Protocol, mode: Mode = 'client') => `${type.toUpperCase(
 const title = (session: Session) => `${roleName(session.type, session.mode)} · ${session.host}:${session.port}`;
 const hexBytes = (value: string) => (value.match(/[\dA-F]{2}/gi) ?? []).map(byte => Number.parseInt(byte, 16));
 const bytesHex = (bytes: number[]) => bytes.map(byte => byte.toString(16).padStart(2, '0').toUpperCase()).join(' ');
-const appendNetworkLogs = (existing: ViewEvent[], incoming: EventItem[], protocol: Protocol) => incoming.reduce<ViewEvent[]>((logs, event) => {
-  if (protocol !== 'tcp' || event.direction !== 'rx') return [...logs, event].slice(-MAX_TERMINAL_LOGS);
+const appendNetworkLogs = (existing: ViewEvent[], incoming: EventItem[], protocol: Protocol, frameMode: NetworkFrameMode = 'raw') => incoming.reduce<ViewEvent[]>((logs, event) => {
+  if (protocol !== 'tcp' || frameMode !== 'raw' || event.direction !== 'rx') return [...logs, event].slice(-MAX_TERMINAL_LOGS);
   let lastRxIndex = logs.length - 1;
   while (lastRxIndex >= 0 && logs[lastRxIndex].direction !== 'rx') lastRxIndex -= 1;
   const last = logs[lastRxIndex], previousAt = Date.parse(last?.receivedThrough ?? last?.timestamp ?? ''), receivedAt = Date.parse(event.timestamp);
@@ -44,7 +44,7 @@ const appendNetworkLogs = (existing: ViewEvent[], incoming: EventItem[], protoco
 }, existing);
 const toViewSession = (data: AgentSession): Session => {
   const { events, ...session } = data;
-  return { ...session, logs: appendNetworkLogs([], events, data.type), rawEvents: events.slice(-MAX_RAW_EVENTS) };
+  return { ...session, frameMode: data.frameMode ?? (data.type === 'udp' ? 'chunk' : 'raw'), frameGapMs: data.frameGapMs ?? 30, logs: appendNetworkLogs([], events, data.type, data.frameMode), rawEvents: events.slice(-MAX_RAW_EVENTS) };
 };
 
 export default function AgentNetworkDebugger() {
@@ -53,7 +53,9 @@ export default function AgentNetworkDebugger() {
   const [host, setHost] = useState('127.0.0.1'),
     [port, setPort] = useState('9000'),
     [localPort, setLocalPort] = useState('0'),
-    [connectTimeoutMs, setConnectTimeoutMs] = useState('10000');
+    [connectTimeoutMs, setConnectTimeoutMs] = useState('10000'),
+    [frameMode, setFrameMode] = useState<NetworkFrameMode>('raw'),
+    [frameGapMs, setFrameGapMs] = useState('30');
   const [sessions, setSessions] = useState<Session[]>([]),
     [activeId, setActiveId] = useState<string | null>(null);
   const [split, setSplit] = useState(false),
@@ -124,7 +126,7 @@ export default function AgentNetworkDebugger() {
       try {
         const result = await listNetworkSessions();
         if (stopped) return;
-        const restored = result.map((item) => ({ ...item, logs: appendNetworkLogs([], item.events, item.type), rawEvents: item.events.slice(-MAX_RAW_EVENTS) }));
+        const restored = result.map(toViewSession);
         restored.forEach((item) => {
           const latest = item.logs[item.logs.length - 1]?.id ?? 0;
           lastIds.current.set(item.id, latest);
@@ -159,7 +161,7 @@ export default function AgentNetworkDebugger() {
                 old.id === item.id
                   ? {
                       ...current,
-                      logs: appendNetworkLogs(old.logs, current.events, current.type),
+                      logs: appendNetworkLogs(old.logs, current.events, current.type, current.frameMode),
                       rawEvents: [...old.rawEvents, ...current.events].slice(-MAX_RAW_EVENTS),
                     }
                   : old,
@@ -189,6 +191,8 @@ export default function AgentNetworkDebugger() {
         port: Number(port),
         localPort: Number(localPort),
         connectTimeoutMs: Number(connectTimeoutMs),
+        frameMode: protocol === 'udp' ? 'chunk' : frameMode,
+        frameGapMs: Number(frameGapMs),
       });
       if (data.events.length) lastIds.current.set(data.id, data.events[data.events.length - 1].id);
       const created = toViewSession(data);
@@ -217,7 +221,7 @@ export default function AgentNetworkDebugger() {
     setError('');
     try {
       await close(item.id);
-      const data = await openNetworkSession({ type: item.type, mode: item.mode ?? 'client', host: item.host, port: item.port, localPort: item.localPort, connectTimeoutMs: item.connectTimeoutMs });
+      const data = await openNetworkSession({ type: item.type, mode: item.mode ?? 'client', host: item.host, port: item.port, localPort: item.localPort, connectTimeoutMs: item.connectTimeoutMs, frameMode: item.frameMode, frameGapMs: item.frameGapMs });
       if (data.events.length) lastIds.current.set(data.id, data.events[data.events.length - 1].id);
       setSessions(all => [...all, toViewSession(data)]); setActiveId(data.id);
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
@@ -400,6 +404,7 @@ export default function AgentNetworkDebugger() {
               <b className="text-gray-300">{active ? title(active) : '未选择网络会话'}</b>
               <span className={online ? 'text-green-400' : 'text-gray-500'}>{online ? (active?.mode === 'server' ? '● 监听中' : '● 在线') : '● 离线'}</span>
               {active?.type === 'tcp' && active.mode === 'server' && <span className="text-gray-500">客户端 {active.clientCount || 0}</span>}
+              {active && <span className="text-gray-500">接收 {active.type === 'udp' ? '数据报' : active.frameMode === 'chunk' ? '系统分块' : active.frameMode === 'line' ? '换行分帧' : active.frameMode === 'idle' ? `空闲 ${active.frameGapMs ?? 30}ms` : active.frameMode === 'auto' ? `换行/空闲 ${active.frameGapMs ?? 30}ms` : '连续显示'}</span>}
               <span className="text-gray-500">RX {active?.rxBytes || 0} B</span>
               <span className="text-gray-500">TX {active?.txBytes || 0} B</span>
               {(active?.droppedEvents ?? 0) > 0 && <span className="rounded border border-yellow-500/20 bg-yellow-500/5 px-2 py-0.5 text-yellow-300" title="Local Agent 已按资源上限轮转旧事件">已轮转 {active?.droppedEvents} 条旧事件</span>}
@@ -492,6 +497,9 @@ export default function AgentNetworkDebugger() {
                     </label>
                   )}
                   {mode === 'client' && <label className="w-[92px] text-[10px] text-gray-500">连接超时 ms<input aria-label="连接超时" value={connectTimeoutMs} onChange={(event) => setConnectTimeoutMs(event.target.value)} type="number" min="1000" max="120000" className="field h-[36px]" /></label>}
+                  {protocol === 'tcp' && <label className="w-[138px] text-[10px] text-gray-500">接收分帧<select aria-label="TCP 接收分帧" title="原始接收证据保留；换行/空闲模式单帧最多 64 KiB，超限会强制分帧" value={frameMode} onChange={event => setFrameMode(event.target.value as NetworkFrameMode)} className="field h-[36px]"><option value="raw">连续显示（推荐）</option><option value="chunk">保留系统分块</option><option value="auto">换行或空闲</option><option value="line">按换行符</option><option value="idle">按空闲间隔</option></select></label>}
+                  {protocol === 'tcp' && (frameMode === 'auto' || frameMode === 'idle') && <label className="w-[88px] text-[10px] text-gray-500">空闲间隔 ms<input aria-label="TCP 接收空闲间隔" value={frameGapMs} onChange={event => setFrameGapMs(event.target.value)} type="number" min="5" max="2000" className="field h-[36px]" /></label>}
+                  {protocol === 'udp' && <span className="pb-2 text-[10px] text-gray-600">UDP 始终按独立数据报显示，不合并边界。</span>}
                   <button onClick={() => void create()} disabled={!available} className="flex h-[36px] items-center justify-center gap-1 rounded bg-blue-600 px-3 text-xs text-white disabled:opacity-40">
                     <Plus size={13} />
                     {mode === 'server' ? '添加监听' : '添加连接'}

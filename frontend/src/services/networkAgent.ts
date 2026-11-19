@@ -2,10 +2,11 @@ import { agentRequest } from './agentClient';
 
 export type NetworkProtocol = 'tcp' | 'udp';
 export type NetworkMode = 'client' | 'server';
+export type NetworkFrameMode = 'raw' | 'chunk' | 'auto' | 'line' | 'idle';
 export interface NetworkAgentEvent { id: number; timestamp: string; direction: 'rx' | 'tx' | 'system'; text: string; hex: string; byteLength: number; peer?: string }
 export interface NetworkAgentPeer { id: string; address: string; port: number; connected: boolean; connectedAt: string; lastSeenAt: string; rxBytes: number; txBytes: number }
-export interface NetworkAgentSession { id: string; type: NetworkProtocol; mode?: NetworkMode; host: string; port: number; localPort?: number; localAddress: string; state: 'connecting' | 'connected' | 'error' | 'closed'; rxBytes: number; txBytes: number; clientCount?: number; peers?: NetworkAgentPeer[]; droppedEvents?: number; firstEventId?: number; connectTimeoutMs?: number; events: NetworkAgentEvent[] }
-export interface OpenNetworkOptions { type: NetworkProtocol; mode: NetworkMode; host: string; port: number; localPort?: number; connectTimeoutMs?: number }
+export interface NetworkAgentSession { id: string; type: NetworkProtocol; mode?: NetworkMode; host: string; port: number; localPort?: number; localAddress: string; state: 'connecting' | 'connected' | 'error' | 'closed'; rxBytes: number; txBytes: number; clientCount?: number; peers?: NetworkAgentPeer[]; droppedEvents?: number; firstEventId?: number; connectTimeoutMs?: number; frameMode?: NetworkFrameMode; frameGapMs?: number; events: NetworkAgentEvent[] }
+export interface OpenNetworkOptions { type: NetworkProtocol; mode: NetworkMode; host: string; port: number; localPort?: number; connectTimeoutMs?: number; frameMode?: NetworkFrameMode; frameGapMs?: number }
 
 export async function getNetworkStatus() { return await agentRequest<{ available: boolean; activeSessions: number; maxSessions: number }>('/api/network/status'); }
 export async function listNetworkSessions() { return (await agentRequest<{ sessions: NetworkAgentSession[] }>('/api/network/sessions')).sessions; }

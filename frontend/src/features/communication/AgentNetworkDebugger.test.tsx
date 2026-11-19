@@ -162,6 +162,8 @@ describe('AgentNetworkDebugger independent workflow', () => {
         port: 9000,
         localPort: 0,
         connectTimeoutMs: 10000,
+        frameMode: 'raw',
+        frameGapMs: 30,
       }),
     );
     fireEvent.click(screen.getByRole('button', { name: '停止' }));
@@ -214,7 +216,22 @@ describe('AgentNetworkDebugger independent workflow', () => {
     fireEvent.click(await screen.findByRole('button', { name: '重连' }));
 
     await waitFor(() => expect(networkAgent.closeNetworkSession).toHaveBeenCalledWith('network-1'));
-    expect(networkAgent.openNetworkSession).toHaveBeenCalledWith({ type: 'tcp', mode: 'client', host: '127.0.0.1', port: 9000, localPort: undefined, connectTimeoutMs: 6000 });
+    expect(networkAgent.openNetworkSession).toHaveBeenCalledWith({ type: 'tcp', mode: 'client', host: '127.0.0.1', port: 9000, localPort: undefined, connectTimeoutMs: 6000, frameMode: 'raw', frameGapMs: 30 });
     expect(await screen.findByText(/TCP Client · 127\.0\.0\.1:9000/)).toBeVisible();
+  });
+
+  it('configures TCP line or idle framing while keeping UDP datagram boundaries explicit', async () => {
+    vi.mocked(networkAgent.openNetworkSession).mockResolvedValue({ ...connectedSession, frameMode: 'idle', frameGapMs: 80 });
+    render(<AgentNetworkDebugger />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '添加连接' })).toBeEnabled());
+    fireEvent.change(screen.getByLabelText('TCP 接收分帧'), { target: { value: 'idle' } });
+    fireEvent.change(screen.getByLabelText('TCP 接收空闲间隔'), { target: { value: '80' } });
+    fireEvent.click(screen.getByRole('button', { name: '添加连接' }));
+    await waitFor(() => expect(networkAgent.openNetworkSession).toHaveBeenCalledWith(expect.objectContaining({ frameMode: 'idle', frameGapMs: 80 })));
+    expect(await screen.findByText('接收 空闲 80ms')).toBeVisible();
+
+    fireEvent.change(screen.getByLabelText('协议角色'), { target: { value: 'udp-client' } });
+    expect(screen.queryByLabelText('TCP 接收分帧')).not.toBeInTheDocument();
+    expect(screen.getByText(/UDP 始终按独立数据报显示/)).toBeVisible();
   });
 });

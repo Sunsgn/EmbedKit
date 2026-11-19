@@ -503,6 +503,8 @@ test('runs a real TCP loopback debugging session', async () => {
     assert.equal(createdResponse.status, 201);
     const created = await createdResponse.json();
     assert.equal(created.connectTimeoutMs, 1000);
+    assert.equal(created.frameMode, 'raw');
+    assert.equal(created.frameGapMs, 30);
 
     let current;
     for (let attempt = 0; attempt < 30; attempt += 1) {
@@ -536,20 +538,75 @@ test('runs a real TCP loopback debugging session', async () => {
   }
 });
 
+test('reassembles TCP line frames across reads and flushes trailing evidence on close', async () => {
+  let sourceSocket;
+  const sourceServer = net.createServer(socket => { sourceSocket = socket; });
+  sourceServer.listen(0, '127.0.0.1'); await once(sourceServer, 'listening');
+  const sourceAddress = sourceServer.address(); assert.equal(typeof sourceAddress, 'object');
+  try {
+    const createdResponse = await fetch(`${agentBaseUrl}/api/network/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'tcp', mode: 'client', host: '127.0.0.1', port: sourceAddress.port, frameMode: 'line', frameGapMs: 30 }) });
+    assert.equal(createdResponse.status, 201); const created = await createdResponse.json(); assert.equal(created.frameMode, 'line');
+    for (let attempt = 0; attempt < 30 && !sourceSocket; attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.ok(sourceSocket); sourceSocket.write('HEAD'); await new Promise(resolve => setTimeout(resolve, 10)); sourceSocket.write('BODY\nTAIL');
+    let current;
+    for (let attempt = 0; attempt < 30; attempt += 1) { current = await (await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}`)).json(); if (current.events.some(event => event.direction === 'rx')) break; await new Promise(resolve => setTimeout(resolve, 20)); }
+    assert.deepEqual(current.events.filter(event => event.direction === 'rx').map(event => event.text), ['HEADBODY\n']); assert.equal(current.rxBytes, 13);
+    sourceSocket.end(); await once(sourceSocket, 'close');
+    for (let attempt = 0; attempt < 30; attempt += 1) { current = await (await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}`)).json(); if (current.state === 'closed') break; await new Promise(resolve => setTimeout(resolve, 20)); }
+    assert.deepEqual(current.events.filter(event => event.direction === 'rx').map(event => event.text), ['HEADBODY\n', 'TAIL']);
+    await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}`, { method: 'DELETE' });
+  } finally { if (sourceSocket && !sourceSocket.destroyed) sourceSocket.destroy(); await new Promise(resolve => sourceServer.close(resolve)); }
+});
+
+test('groups TCP receive bursts by a bounded idle interval', async () => {
+  let sourceSocket;
+  const sourceServer = net.createServer(socket => { sourceSocket = socket; });
+  sourceServer.listen(0, '127.0.0.1'); await once(sourceServer, 'listening');
+  const sourceAddress = sourceServer.address(); assert.equal(typeof sourceAddress, 'object');
+  try {
+    const createdResponse = await fetch(`${agentBaseUrl}/api/network/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'tcp', mode: 'client', host: '127.0.0.1', port: sourceAddress.port, frameMode: 'idle', frameGapMs: 40 }) });
+    const created = await createdResponse.json(); assert.equal(created.frameGapMs, 40);
+    for (let attempt = 0; attempt < 30 && !sourceSocket; attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
+    sourceSocket.write('ONE'); await new Promise(resolve => setTimeout(resolve, 10)); sourceSocket.write('TWO');
+    let current;
+    for (let attempt = 0; attempt < 30; attempt += 1) { current = await (await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}`)).json(); if (current.events.some(event => event.direction === 'rx')) break; await new Promise(resolve => setTimeout(resolve, 20)); }
+    assert.deepEqual(current.events.filter(event => event.direction === 'rx').map(event => event.text), ['ONETWO']); assert.equal(current.rxBytes, 6);
+    await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}`, { method: 'DELETE' });
+  } finally { if (sourceSocket && !sourceSocket.destroyed) sourceSocket.destroy(); await new Promise(resolve => sourceServer.close(resolve)); }
+});
+
+test('bounds an unterminated TCP frame and records forced framing evidence', async () => {
+  let sourceSocket;
+  const sourceServer = net.createServer(socket => { sourceSocket = socket; });
+  sourceServer.listen(0, '127.0.0.1'); await once(sourceServer, 'listening');
+  const sourceAddress = sourceServer.address(); assert.equal(typeof sourceAddress, 'object');
+  try {
+    const created = await (await fetch(`${agentBaseUrl}/api/network/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'tcp', mode: 'client', host: '127.0.0.1', port: sourceAddress.port, frameMode: 'line' }) })).json();
+    for (let attempt = 0; attempt < 30 && !sourceSocket; attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
+    sourceSocket.write(Buffer.concat([Buffer.alloc(65_537, 0x41), Buffer.from('\n')]));
+    let current;
+    for (let attempt = 0; attempt < 50; attempt += 1) { current = await (await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}`)).json(); if (current.events.some(event => event.direction === 'system' && /65536/.test(event.text)) && current.events.filter(event => event.direction === 'rx').length === 2) break; await new Promise(resolve => setTimeout(resolve, 20)); }
+    assert.deepEqual(current.events.filter(event => event.direction === 'rx').map(event => event.byteLength), [65_536, 2]); assert.equal(current.rxBytes, 65_538); assert.ok(current.events.some(event => event.direction === 'system' && /强制分帧/.test(event.text)));
+    await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}`, { method: 'DELETE' });
+  } finally { if (sourceSocket && !sourceSocket.destroyed) sourceSocket.destroy(); await new Promise(resolve => sourceServer.close(resolve)); }
+});
+
 test('runs a TCP server debugging session', async () => {
   const reservation = net.createServer(); reservation.listen(0, '127.0.0.1'); await once(reservation, 'listening');
   const reservedAddress = reservation.address(); assert.equal(typeof reservedAddress, 'object'); const listenPort = reservedAddress.port;
   await new Promise(resolve => reservation.close(resolve));
-  const createdResponse = await fetch(`${agentBaseUrl}/api/network/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'tcp', mode: 'server', host: '127.0.0.1', port: listenPort }) });
+  const createdResponse = await fetch(`${agentBaseUrl}/api/network/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'tcp', mode: 'server', host: '127.0.0.1', port: listenPort, frameMode: 'line' }) });
   assert.equal(createdResponse.status, 201); const created = await createdResponse.json();
   let current;
   for (let attempt = 0; attempt < 30; attempt += 1) { current = await (await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}`)).json(); if (current.state === 'connected') break; await new Promise(resolve => setTimeout(resolve, 20)); }
   assert.equal(current.mode, 'server'); assert.equal(current.state, 'connected');
   const first = net.createConnection({ host: '127.0.0.1', port: listenPort }), second = net.createConnection({ host: '127.0.0.1', port: listenPort });
   await Promise.all([once(first, 'connect'), once(second, 'connect')]);
-  first.write('from-first'); second.write('from-second');
+  first.write('from-'); second.write('from-'); await new Promise(resolve => setTimeout(resolve, 10)); first.write('first\n'); second.write('second\n');
   for (let attempt = 0; attempt < 30; attempt += 1) { current = await (await fetch(`${agentBaseUrl}/api/network/sessions/${created.id}`)).json(); if (current.peers?.length === 2 && current.events.filter(event => event.direction === 'rx').length >= 2) break; await new Promise(resolve => setTimeout(resolve, 20)); }
   assert.equal(current.peers.length, 2); assert.ok(current.peers.every(peer => peer.connected && peer.rxBytes > 0));
+  const receivedByPeer = new Map(current.events.filter(event => event.direction === 'rx').map(event => [event.peer, event.text]));
+  assert.equal(receivedByPeer.get(current.peers.find(peer => peer.port === first.localPort).id), 'from-first\n'); assert.equal(receivedByPeer.get(current.peers.find(peer => peer.port === second.localPort).id), 'from-second\n');
   const selectedPeer = current.peers.find(peer => peer.port === second.localPort); assert.ok(selectedPeer);
   let unexpected = ''; first.on('data', data => { unexpected += data.toString(); });
   const reply = once(second, 'data');
