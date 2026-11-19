@@ -41,11 +41,13 @@ import { analyzeMap } from "../utils/mapAnalyzer";
 import ProjectArchitecturePanel from "../features/project/ProjectArchitecturePanel";
 import { analyzeProjectArchitecture } from "../utils/projectArchitecture";
 import { analyzeProgramBehavior } from "../utils/programBehavior";
-import type { RuntimeTraceAnalysis } from "../utils/runtimeTrace";
+import { staticCoverage, type RuntimeTraceAnalysis } from "../utils/runtimeTrace";
 import { clearRuntimeTrace, loadRuntimeTrace, saveRuntimeTrace } from "../services/runtimeTraceStorage";
-import { listEngineeringProjects, saveProjectRevision } from "../services/productStorage";
+import { listEngineeringProjects, listProjectAnalysisRuns, saveProjectAnalysisRun, saveProjectRevision } from "../services/productStorage";
 import { PROJECT_REVISION_SCHEMA_VERSION } from "../types/lifecycle";
 import type { EngineeringProject } from "../types/product";
+import type { ProjectAnalysisRun } from "../types/projectAnalysis";
+import { createCompletedProjectAnalysisRun, exportProjectAnalysisRun } from "../services/projectAnalysisSnapshot";
 
 const defaultFiles: FileNode[] = [
   {
@@ -1005,6 +1007,9 @@ export default function EditorPage() {
   const [importedAt, setImportedAt] = useState('');
   const [legacyWorkspaceAvailable, setLegacyWorkspaceAvailable] = useState(false);
   const [workspaceMessage, setWorkspaceMessage] = useState('');
+  const [analysisRuns, setAnalysisRuns] = useState<ProjectAnalysisRun[]>([]);
+  const [selectedAnalysisId, setSelectedAnalysisId] = useState('');
+  const [savingAnalysis, setSavingAnalysis] = useState(false);
   const editorRef = useRef<CodeEditorHandle | null>(null);
   const projectSummary = useMemo(
     () => (projectLoaded ? summarizeProject(files) : null),
@@ -1041,14 +1046,15 @@ export default function EditorPage() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      setWorkspaceReady(false); setProjectLoaded(false); setRuntimeTrace(null); setEngineeringProject(null); setRevisionId(''); setSourceFingerprint(''); setImportedAt(''); setLegacyWorkspaceAvailable(false); setWorkspaceMessage('');
+      setWorkspaceReady(false); setProjectLoaded(false); setRuntimeTrace(null); setEngineeringProject(null); setRevisionId(''); setSourceFingerprint(''); setImportedAt(''); setLegacyWorkspaceAvailable(false); setWorkspaceMessage(''); setAnalysisRuns([]); setSelectedAnalysisId('');
       if (requestedProjectId) {
         if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(requestedProjectId)) throw new Error('工程链接包含无效 ID，请返回工程中心重新进入');
         const projects = await listEngineeringProjects(), project = projects.find(item => item.id === requestedProjectId);
         if (!project) throw new Error('工程档案不存在或已删除，请返回工程中心重新选择');
-        const [workspace, legacy] = await Promise.all([loadProjectWorkspace(requestedProjectId), loadCurrentWorkspace()]);
+        const [workspace, legacy, storedAnalysisRuns] = await Promise.all([loadProjectWorkspace(requestedProjectId), loadCurrentWorkspace(), listProjectAnalysisRuns()]);
         if (cancelled) return;
-        setEngineeringProject(project); setProjectName(project.name); setLegacyWorkspaceAvailable(Boolean(legacy?.files.length));
+        const projectRuns = storedAnalysisRuns.filter(run => run.projectId === requestedProjectId);
+        setEngineeringProject(project); setProjectName(project.name); setLegacyWorkspaceAvailable(Boolean(legacy?.files.length)); setAnalysisRuns(projectRuns); setSelectedAnalysisId(projectRuns[0]?.id ?? '');
         if (!workspace?.files.length) { setFiles([]); setActiveFile(''); setWorkspaceMessage('当前工程尚未关联源码工作区，请导入工程目录；不会自动加载其他工程的源码。'); return; }
         setFiles(workspace.files); setActiveFile(workspace.files.some(file => file.path === workspace.activeFile) ? workspace.activeFile : workspace.files[0].path); setRevisionId(workspace.revisionId); setSourceFingerprint(workspace.sourceFingerprint); setImportedAt(workspace.importedAt); setProjectLoaded(true);
         return;
@@ -1154,6 +1160,22 @@ export default function EditorPage() {
       await recordProjectRevision(engineeringProject, workspace.revisionId, workspace.sourceFingerprint, workspace.importedAt);
       setFiles(workspace.files); setActiveFile(workspace.activeFile); setProjectName(engineeringProject.name); setRevisionId(workspace.revisionId); setSourceFingerprint(workspace.sourceFingerprint); setImportedAt(workspace.importedAt); setProjectLoaded(true); setLegacyWorkspaceAvailable(false); setWorkspaceMessage('旧工作区已复制并关联；原工作区仍保留，可安全回退。');
     } catch (reason) { setWorkspaceMessage(`关联失败：${reason instanceof Error ? reason.message : String(reason)}`); }
+  };
+
+  const selectedAnalysis = analysisRuns.find(run => run.id === selectedAnalysisId) ?? analysisRuns[0] ?? null;
+  const saveAnalysisSnapshot = async () => {
+    if (!requestedProjectId || !revisionId || !sourceFingerprint || !projectArchitecture || !programBehavior || !projectSummary || savingAnalysis) return;
+    setSavingAnalysis(true); setWorkspaceMessage('正在生成确定性分析证据…');
+    try {
+      const inputFingerprint = await createWorkspaceFingerprint(files);
+      const runtimeCoverage = runtimeTrace ? staticCoverage(projectArchitecture.flows.flatMap(flow => flow.steps.filter(step => step.internal).map(step => step.name)), runtimeTrace) : null;
+      const run = createCompletedProjectAnalysisRun({ projectId: requestedProjectId, projectRevisionId: revisionId, sourceFingerprint, inputFingerprint, architecture: projectArchitecture, behavior: programBehavior, findings: projectSummary.findings, runtimeEvents: runtimeTrace?.events.length ?? 0, runtimeRate: runtimeCoverage?.rate });
+      await saveProjectAnalysisRun(run);
+      setAnalysisRuns(current => [run, ...current.filter(item => item.id !== run.id)].slice(0, 1000)); setSelectedAnalysisId(run.id);
+      setWorkspaceMessage(`分析证据已保存：${run.findings.length} 项结论，调用解析率 ${(run.coverage.resolvedRate * 100).toFixed(0)}%。`);
+    } catch (reason) {
+      setWorkspaceMessage(`分析证据保存失败：${reason instanceof Error ? reason.message : String(reason)}`);
+    } finally { setSavingAnalysis(false); }
   };
 
   const handleImportFiles = async (
@@ -1471,6 +1493,9 @@ export default function EditorPage() {
             {revisionId && <span className="text-gray-600">修订 {revisionId.replace('revision:', '').slice(0, 12)}</span>}
             {workspaceMessage && <span role="status" className="text-yellow-300">{workspaceMessage}</span>}
             <div className="ml-auto flex gap-2">
+              {analysisRuns.length > 0 && <select aria-label="分析历史" value={selectedAnalysis?.id ?? ''} onChange={event => setSelectedAnalysisId(event.target.value)} className="max-w-44 rounded border border-[#30363d] bg-[#0d1117] px-2 py-1 text-gray-400">{analysisRuns.map(run => <option key={run.id} value={run.id}>{new Date(run.finishedAt).toLocaleString()} · {run.framework.confidence} · {(run.coverage.resolvedRate * 100).toFixed(0)}%</option>)}</select>}
+              <button disabled={!projectLoaded || savingAnalysis} onClick={() => void saveAnalysisSnapshot()} className="rounded border border-purple-500/30 px-2 py-1 text-purple-300 disabled:opacity-40">{savingAnalysis ? '保存中…' : '保存分析证据'}</button>
+              {selectedAnalysis && <button onClick={() => exportProjectAnalysisRun(selectedAnalysis)} className="rounded border border-green-500/30 px-2 py-1 text-green-300">导出分析报告</button>}
               {legacyWorkspaceAvailable && !projectLoaded && <button onClick={() => void associateLegacyWorkspace()} className="rounded border border-cyan-500/30 px-2 py-1 text-cyan-300">复制并关联旧工作区</button>}
               <button onClick={() => navigate('/engineering')} className="rounded border border-[#30363d] px-2 py-1 text-gray-400">返回工程中心</button>
             </div>

@@ -90,6 +90,7 @@ describe('workspace backup', () => {
   it('imports versioned lifecycle links while old backups remain compatible', () => {
     const legacy = parseWorkspaceBackup(JSON.stringify(backup()));
     expect(legacy.product.projectRevisions).toEqual([]);
+    expect(legacy.product.projectAnalysisRuns).toEqual([]);
 
     const value = backup();
     value.product.projectRevisions = [{ schemaVersion: 1, id: 'revision-1', projectId: 'project-1', source: 'git', capturedAt: '2026-10-13T00:00:00.000Z', label: 'main', revision: 'abc123' }];
@@ -101,6 +102,16 @@ describe('workspace backup', () => {
     expect(parsed.product.projectRevisions?.[0].id).toBe('revision-1');
     expect(parsed.product.communicationSessions?.[0]).toMatchObject({ firmwareId: 'firmware-1' });
     expect(parsed.product.communicationSessions?.[0]).not.toHaveProperty('deviceId');
+  });
+
+  it('validates and restores portable project analysis evidence', () => {
+    const value = backup();
+    value.product.projectAnalysisRuns = [{ schemaVersion: 1, id: 'analysis-1', projectId: 'project-1', projectRevisionId: 'revision-1', sourceFingerprint: 'a'.repeat(64), inputFingerprint: 'a'.repeat(64), dirty: false, status: 'completed', startedAt: '2026-10-13T00:00:00.000Z', finishedAt: '2026-10-13T00:00:01.000Z', analyzer: { name: 'embedkit-deterministic-project-analysis', version: '1.0.0' }, framework: { name: 'unknown', confidence: 'low', evidenceIds: ['evidence-1'] }, coverage: { sourceFiles: 1, parsedFunctions: 0, callSites: 0, resolvedCallSites: 0, resolvedRate: 0, runtimeEvents: 0 }, findings: [], unknowns: ['数据不足'], evidence: [{ id: 'evidence-1', kind: 'calculation', message: '未解析到函数', confidence: 'low' }] }];
+    const parsed = parseWorkspaceBackup(JSON.stringify(value));
+
+    expect(parsed.product.projectAnalysisRuns?.[0]).toMatchObject({ id: 'analysis-1', projectRevisionId: 'revision-1' });
+    const preview = previewWorkspaceBackup(parsed, { projects: [], runs: [], projectAnalysisRuns: value.product.projectAnalysisRuns });
+    expect(preview).toMatchObject({ analysisRuns: 1, analysisRunConflicts: 1 });
   });
 
   it('does not include an active hardware session in a portable backup', () => {
@@ -121,6 +132,10 @@ describe('workspace backup', () => {
     const wrongShape = backup() as unknown as { product: Record<string, unknown> };
     wrongShape.product.projectRevisions = {};
     expect(() => parseWorkspaceBackup(JSON.stringify(wrongShape))).toThrow(/工程修订数据无效/);
+
+    const malformedAnalysis = backup() as unknown as { product: Record<string, unknown> };
+    malformedAnalysis.product.projectAnalysisRuns = [{ schemaVersion: 1 }];
+    expect(() => parseWorkspaceBackup(JSON.stringify(malformedAnalysis))).toThrow(/工程分析记录无效/);
   });
 
   it('rolls back local settings when the database merge fails', async () => {

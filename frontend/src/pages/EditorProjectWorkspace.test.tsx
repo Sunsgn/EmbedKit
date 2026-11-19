@@ -1,9 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import EditorPage from './EditorPage';
-import { loadCurrentWorkspace, loadProjectWorkspace } from '../services/workspaceStorage';
-import { listEngineeringProjects } from '../services/productStorage';
+import { createWorkspaceFingerprint, loadCurrentWorkspace, loadProjectWorkspace } from '../services/workspaceStorage';
+import { listEngineeringProjects, listProjectAnalysisRuns, saveProjectAnalysisRun } from '../services/productStorage';
 
 vi.mock('../components/CodeEditor', () => ({ default: () => <div data-testid="code-editor" /> }));
 vi.mock('../features/project/ProjectBuildPanel', () => ({ default: () => null }));
@@ -19,7 +19,7 @@ vi.mock('../services/workspaceStorage', () => ({
   saveCurrentWorkspace: vi.fn(),
   saveProjectWorkspace: vi.fn(),
 }));
-vi.mock('../services/productStorage', () => ({ listEngineeringProjects: vi.fn(), saveProjectRevision: vi.fn() }));
+vi.mock('../services/productStorage', () => ({ listEngineeringProjects: vi.fn(), listProjectAnalysisRuns: vi.fn().mockResolvedValue([]), saveProjectAnalysisRun: vi.fn(), saveProjectRevision: vi.fn() }));
 
 const project = {
   schemaVersion: 4 as const,
@@ -53,6 +53,8 @@ describe('EditorPage project workspace routing', () => {
     vi.mocked(listEngineeringProjects).mockResolvedValue([project]);
     vi.mocked(loadCurrentWorkspace).mockResolvedValue(legacyWorkspace);
     vi.mocked(loadProjectWorkspace).mockResolvedValue(null);
+    vi.mocked(listProjectAnalysisRuns).mockResolvedValue([]);
+    vi.mocked(createWorkspaceFingerprint).mockResolvedValue('1'.repeat(64));
   });
 
   it('loads only the workspace belonging to the project id and requires explicit legacy association', async () => {
@@ -89,5 +91,21 @@ describe('EditorPage project workspace routing', () => {
 
     expect(await screen.findByText('当前工程：通用控制器')).toBeVisible();
     expect(await screen.findByText('修订 0123456789ab')).toBeVisible();
+  });
+
+  it('saves deterministic analysis evidence against the active project revision', async () => {
+    vi.mocked(loadProjectWorkspace).mockResolvedValue({
+      schemaVersion: 1, id: 'project:project-1', projectId: 'project-1', revisionId: 'revision:0123456789abcdef', name: project.name,
+      files: [{ name: 'main.c', path: '/main.c', content: 'int main(void) { return 0; }', language: 'c' }], activeFile: '/main.c',
+      importedAt: '2026-11-19T00:00:00.000Z', sourceFingerprint: '0'.repeat(64), updatedAt: '2026-11-19T00:00:00.000Z',
+    });
+    renderProject();
+    const button = await screen.findByRole('button', { name: '保存分析证据' });
+    await waitFor(() => expect(button).toBeEnabled());
+
+    fireEvent.click(button);
+
+    await waitFor(() => expect(saveProjectAnalysisRun).toHaveBeenCalledWith(expect.objectContaining({ projectId: 'project-1', projectRevisionId: 'revision:0123456789abcdef', sourceFingerprint: '0'.repeat(64), inputFingerprint: '1'.repeat(64), dirty: true, status: 'completed' })));
+    expect(await screen.findByRole('button', { name: '导出分析报告' })).toBeVisible();
   });
 });

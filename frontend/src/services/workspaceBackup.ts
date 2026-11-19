@@ -3,6 +3,7 @@ import { LIFECYCLE_RECORD_LIMIT, normalizeLifecycleRecords, parseBuildArtifact, 
 import { exportProductData, mergeProductData, type ProductDataSnapshot } from './productStorage';
 import { normalizeEngineeringProject } from './projectModel';
 import { KNOWLEDGE_EXPERIENCE_STORAGE_KEY, parseKnowledgeExperienceLibrary } from './knowledgeExperience';
+import { PROJECT_ANALYSIS_RUN_LIMIT, normalizeProjectAnalysisRuns, parseProjectAnalysisRun } from './projectAnalysisModel';
 
 const SCHEMA = 'embedkit.workspace-backup';
 const VERSION = 1;
@@ -43,6 +44,8 @@ export interface WorkspaceBackupPreview {
   runConflicts: number;
   lifecycleRecords: number;
   lifecycleConflicts: number;
+  analysisRuns: number;
+  analysisRunConflicts: number;
   localSettings: number;
   localConflicts: number;
 }
@@ -78,6 +81,12 @@ function parseLifecycleCollection<T>(value: unknown, parser: (item: unknown) => 
   return normalizeLifecycleRecords(value, parser);
 }
 
+function parseAnalysisRuns(value: unknown) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > PROJECT_ANALYSIS_RUN_LIMIT || value.some(item => parseProjectAnalysisRun(item) === null)) throw new Error(`工程分析记录无效或超过 ${PROJECT_ANALYSIS_RUN_LIMIT} 项`);
+  return normalizeProjectAnalysisRuns(value);
+}
+
 export function parseWorkspaceBackup(text: string): WorkspaceBackup {
   if (encodedSize(text) > WORKSPACE_BACKUP_MAX_BYTES) throw new Error('备份文件超过 16 MiB 上限');
   let value: unknown;
@@ -91,7 +100,7 @@ export function parseWorkspaceBackup(text: string): WorkspaceBackup {
   const local = Object.fromEntries(Object.entries(value.local).filter(([key]) => (PORTABLE_LOCAL_KEYS as readonly string[]).includes(key)).map(([key, item]) => [key, sanitize(item)])) as WorkspaceBackup['local'];
   if (Object.values(local).some(item => encodedSize(JSON.stringify(item)) > MAX_LOCAL_VALUE_BYTES)) throw new Error('单项本地配置超过 4 MiB 上限');
   if (local[KNOWLEDGE_EXPERIENCE_STORAGE_KEY] !== undefined) local[KNOWLEDGE_EXPERIENCE_STORAGE_KEY] = sanitize(parseKnowledgeExperienceLibrary(JSON.stringify(local[KNOWLEDGE_EXPERIENCE_STORAGE_KEY])));
-  return { schema: SCHEMA, version: VERSION, createdAt: typeof value.createdAt === 'string' ? value.createdAt : '', local, product: { projects: normalizedProjects as EngineeringProject[], runs, projectRevisions: parseLifecycleCollection(product.projectRevisions, parseProjectRevision, '工程修订'), buildArtifacts: parseLifecycleCollection(product.buildArtifacts, parseBuildArtifact, '构建产物'), firmwareIdentities: parseLifecycleCollection(product.firmwareIdentities, parseFirmwareIdentity, '固件身份'), communicationSessions: parseLifecycleCollection(product.communicationSessions, parseCommunicationSession, '通信会话') }, privacy: { excluded: Array.isArray((value.privacy as Record<string, unknown> | undefined)?.excluded) ? (value.privacy as { excluded: string[] }).excluded : [], note: '导入前已重新执行字段白名单和秘密值清理。' } };
+  return { schema: SCHEMA, version: VERSION, createdAt: typeof value.createdAt === 'string' ? value.createdAt : '', local, product: { projects: normalizedProjects as EngineeringProject[], runs, projectRevisions: parseLifecycleCollection(product.projectRevisions, parseProjectRevision, '工程修订'), buildArtifacts: parseLifecycleCollection(product.buildArtifacts, parseBuildArtifact, '构建产物'), firmwareIdentities: parseLifecycleCollection(product.firmwareIdentities, parseFirmwareIdentity, '固件身份'), communicationSessions: parseLifecycleCollection(product.communicationSessions, parseCommunicationSession, '通信会话'), projectAnalysisRuns: parseAnalysisRuns(product.projectAnalysisRuns) }, privacy: { excluded: Array.isArray((value.privacy as Record<string, unknown> | undefined)?.excluded) ? (value.privacy as { excluded: string[] }).excluded : [], note: '导入前已重新执行字段白名单和秘密值清理。' } };
 }
 
 export async function createWorkspaceBackup(storage: Storage = localStorage): Promise<WorkspaceBackup> {
@@ -112,7 +121,8 @@ export function previewWorkspaceBackup(backup: WorkspaceBackup, current: Product
   const projectIds = new Set(current.projects.map(item => item.id)), runIds = new Set(current.runs.map(item => item.id)), localKeys = Object.keys(backup.local);
   const lifecycleGroups = [backup.product.projectRevisions ?? [], backup.product.buildArtifacts ?? [], backup.product.firmwareIdentities ?? [], backup.product.communicationSessions ?? []];
   const currentLifecycleIds = [current.projectRevisions ?? [], current.buildArtifacts ?? [], current.firmwareIdentities ?? [], current.communicationSessions ?? []].map(items => new Set(items.map(item => item.id)));
-  return { projects: backup.product.projects.length, projectConflicts: backup.product.projects.filter(item => projectIds.has(item.id)).length, runs: backup.product.runs.length, runConflicts: backup.product.runs.filter(item => runIds.has(item.id)).length, lifecycleRecords: lifecycleGroups.reduce((total, items) => total + items.length, 0), lifecycleConflicts: lifecycleGroups.reduce((total, items, index) => total + items.filter(item => currentLifecycleIds[index].has(item.id)).length, 0), localSettings: localKeys.length, localConflicts: localKeys.filter(key => storage.getItem(key) !== null).length };
+  const analysisIds = new Set((current.projectAnalysisRuns ?? []).map(item => item.id));
+  return { projects: backup.product.projects.length, projectConflicts: backup.product.projects.filter(item => projectIds.has(item.id)).length, runs: backup.product.runs.length, runConflicts: backup.product.runs.filter(item => runIds.has(item.id)).length, lifecycleRecords: lifecycleGroups.reduce((total, items) => total + items.length, 0), lifecycleConflicts: lifecycleGroups.reduce((total, items, index) => total + items.filter(item => currentLifecycleIds[index].has(item.id)).length, 0), analysisRuns: backup.product.projectAnalysisRuns?.length ?? 0, analysisRunConflicts: (backup.product.projectAnalysisRuns ?? []).filter(item => analysisIds.has(item.id)).length, localSettings: localKeys.length, localConflicts: localKeys.filter(key => storage.getItem(key) !== null).length };
 }
 
 export async function applyWorkspaceBackup(backup: WorkspaceBackup, storage: Storage = localStorage, merge: (snapshot: ProductDataSnapshot) => Promise<void> = mergeProductData) {

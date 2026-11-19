@@ -1,11 +1,13 @@
 import type { EngineeringProject, TestRunRecord } from '../types/product';
 import type { BuildArtifact, CommunicationSession, FirmwareIdentity, ProjectRevision } from '../types/lifecycle';
+import type { ProjectAnalysisRun } from '../types/projectAnalysis';
 import { normalizeLifecycleRecords, parseBuildArtifact, parseCommunicationSession, parseFirmwareIdentity, parseProjectRevision } from './lifecycleModel';
+import { PROJECT_ANALYSIS_RUN_LIMIT, normalizeProjectAnalysisRuns, parseProjectAnalysisRun } from './projectAnalysisModel';
 import { normalizeTestRunRecord } from './testRunEvidence';
 import { normalizeEngineeringProject } from './projectModel';
 
 const DATABASE = 'embedkit-product';
-const VERSION = 4;
+const VERSION = 5;
 const PROJECTS = 'projects';
 const RUNS = 'test-runs';
 const LEGACY_SETTINGS = 'settings';
@@ -13,6 +15,7 @@ const PROJECT_REVISIONS = 'project-revisions';
 const BUILD_ARTIFACTS = 'build-artifacts';
 const FIRMWARE_IDENTITIES = 'firmware-identities';
 const COMMUNICATION_SESSIONS = 'communication-sessions';
+const PROJECT_ANALYSIS_RUNS = 'project-analysis-runs';
 
 export interface ProductDataSnapshot {
   projects: EngineeringProject[];
@@ -21,6 +24,7 @@ export interface ProductDataSnapshot {
   buildArtifacts?: BuildArtifact[];
   firmwareIdentities?: FirmwareIdentity[];
   communicationSessions?: CommunicationSession[];
+  projectAnalysisRuns?: ProjectAnalysisRun[];
 }
 
 export function createPortableProductData(snapshot: ProductDataSnapshot): ProductDataSnapshot {
@@ -39,6 +43,7 @@ export function createPortableProductData(snapshot: ProductDataSnapshot): Produc
     buildArtifacts: normalizeLifecycleRecords(snapshot.buildArtifacts, parseBuildArtifact),
     firmwareIdentities: normalizeLifecycleRecords(snapshot.firmwareIdentities, parseFirmwareIdentity),
     communicationSessions: normalizeLifecycleRecords(snapshot.communicationSessions, parseCommunicationSession).filter(session => session.status !== 'active'),
+    projectAnalysisRuns: normalizeProjectAnalysisRuns(snapshot.projectAnalysisRuns),
   };
 }
 
@@ -53,6 +58,7 @@ function openDatabase(): Promise<IDBDatabase> {
       if (!database.objectStoreNames.contains(BUILD_ARTIFACTS)) { const store = database.createObjectStore(BUILD_ARTIFACTS, { keyPath: 'id' }); store.createIndex('buildId', 'buildId'); store.createIndex('projectRevisionId', 'projectRevisionId'); }
       if (!database.objectStoreNames.contains(FIRMWARE_IDENTITIES)) { const store = database.createObjectStore(FIRMWARE_IDENTITIES, { keyPath: 'id' }); store.createIndex('buildArtifactId', 'buildArtifactId'); store.createIndex('sha256', 'sha256'); }
       if (!database.objectStoreNames.contains(COMMUNICATION_SESSIONS)) { const store = database.createObjectStore(COMMUNICATION_SESSIONS, { keyPath: 'id' }); store.createIndex('startedAt', 'startedAt'); store.createIndex('firmwareId', 'firmwareId'); }
+      if (!database.objectStoreNames.contains(PROJECT_ANALYSIS_RUNS)) { const store = database.createObjectStore(PROJECT_ANALYSIS_RUNS, { keyPath: 'id' }); store.createIndex('projectId', 'projectId'); store.createIndex('projectRevisionId', 'projectRevisionId'); store.createIndex('finishedAt', 'finishedAt'); }
       if (database.objectStoreNames.contains(LEGACY_SETTINGS)) database.deleteObjectStore(LEGACY_SETTINGS);
       if (database.objectStoreNames.contains(RUNS)) { const store = request.transaction!.objectStore(RUNS); if (store.indexNames.contains('projectId')) store.deleteIndex('projectId'); }
       if (database.objectStoreNames.contains(COMMUNICATION_SESSIONS)) { const store = request.transaction!.objectStore(COMMUNICATION_SESSIONS); if (store.indexNames.contains('deviceId')) store.deleteIndex('deviceId'); }
@@ -124,6 +130,23 @@ export async function saveTestRun(run: TestRunRecord) { await put(RUNS, run); }
 export async function deleteTestRun(id: string) { await remove(RUNS, id); }
 export async function listProjectRevisions() { return normalizeLifecycleRecords(await readAll<ProjectRevision>(PROJECT_REVISIONS), parseProjectRevision).sort((a, b) => b.capturedAt.localeCompare(a.capturedAt)); }
 export async function saveProjectRevision(value: ProjectRevision) { const record = parseProjectRevision(value); if (!record) throw new Error('Invalid project revision'); await put(PROJECT_REVISIONS, record); }
+export async function listProjectAnalysisRuns() { return normalizeProjectAnalysisRuns(await readAll<ProjectAnalysisRun>(PROJECT_ANALYSIS_RUNS)).sort((a, b) => b.finishedAt.localeCompare(a.finishedAt)); }
+export async function saveProjectAnalysisRun(value: ProjectAnalysisRun) {
+  const record = parseProjectAnalysisRun(value);
+  if (!record) throw new Error('工程分析记录无效或超过资源上限');
+  const database = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(PROJECT_ANALYSIS_RUNS, 'readwrite'), store = transaction.objectStore(PROJECT_ANALYSIS_RUNS);
+    store.put(record);
+    let retained = 0;
+    const cursorRequest = store.index('finishedAt').openCursor(null, 'prev');
+    cursorRequest.onsuccess = () => { const cursor = cursorRequest.result; if (!cursor) return; retained += 1; if (retained > PROJECT_ANALYSIS_RUN_LIMIT) cursor.delete(); cursor.continue(); };
+    transaction.oncomplete = () => { database.close(); resolve(); };
+    transaction.onerror = () => { database.close(); reject(transaction.error); };
+    transaction.onabort = () => { database.close(); reject(transaction.error ?? new Error('工程分析记录保存已中止')); };
+  });
+}
+export async function deleteProjectAnalysisRun(id: string) { await remove(PROJECT_ANALYSIS_RUNS, id); }
 export async function listBuildArtifacts() { return normalizeLifecycleRecords(await readAll<BuildArtifact>(BUILD_ARTIFACTS), parseBuildArtifact).sort((a, b) => b.capturedAt.localeCompare(a.capturedAt)); }
 export async function saveBuildArtifact(value: BuildArtifact) { const record = parseBuildArtifact(value); if (!record) throw new Error('Invalid build artifact'); await put(BUILD_ARTIFACTS, record); }
 export async function listFirmwareIdentities() { return normalizeLifecycleRecords(await readAll<FirmwareIdentity>(FIRMWARE_IDENTITIES), parseFirmwareIdentity).sort((a, b) => b.capturedAt.localeCompare(a.capturedAt)); }
@@ -159,21 +182,22 @@ export async function saveTestRunWithCommunicationSessions(runValue: TestRunReco
   return run;
 }
 export async function exportProductData(): Promise<ProductDataSnapshot> {
-  const [projects, runs, projectRevisions, buildArtifacts, firmwareIdentities, communicationSessions] = await Promise.all([
+  const [projects, runs, projectRevisions, buildArtifacts, firmwareIdentities, communicationSessions, projectAnalysisRuns] = await Promise.all([
     readAll<EngineeringProject>(PROJECTS),
     readAll<TestRunRecord>(RUNS),
     readAll<ProjectRevision>(PROJECT_REVISIONS),
     readAll<BuildArtifact>(BUILD_ARTIFACTS),
     readAll<FirmwareIdentity>(FIRMWARE_IDENTITIES),
     readAll<CommunicationSession>(COMMUNICATION_SESSIONS),
+    readAll<ProjectAnalysisRun>(PROJECT_ANALYSIS_RUNS),
   ]);
-  return createPortableProductData({ projects, runs, projectRevisions, buildArtifacts, firmwareIdentities, communicationSessions });
+  return createPortableProductData({ projects, runs, projectRevisions, buildArtifacts, firmwareIdentities, communicationSessions, projectAnalysisRuns });
 }
 
 export async function mergeProductData(snapshot: ProductDataSnapshot): Promise<void> {
   const database = await openDatabase();
   await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction([PROJECTS, RUNS, PROJECT_REVISIONS, BUILD_ARTIFACTS, FIRMWARE_IDENTITIES, COMMUNICATION_SESSIONS], 'readwrite');
+    const transaction = database.transaction([PROJECTS, RUNS, PROJECT_REVISIONS, BUILD_ARTIFACTS, FIRMWARE_IDENTITIES, COMMUNICATION_SESSIONS, PROJECT_ANALYSIS_RUNS], 'readwrite');
     const projects = transaction.objectStore(PROJECTS), runs = transaction.objectStore(RUNS);
     snapshot.projects.map(normalizeEngineeringProject).filter((item): item is EngineeringProject => item !== null).forEach(project => projects.put(project));
     snapshot.runs.forEach(run => runs.put(normalizeTestRunRecord(run)));
@@ -181,6 +205,7 @@ export async function mergeProductData(snapshot: ProductDataSnapshot): Promise<v
     normalizeLifecycleRecords(snapshot.buildArtifacts, parseBuildArtifact).forEach(item => transaction.objectStore(BUILD_ARTIFACTS).put(item));
     normalizeLifecycleRecords(snapshot.firmwareIdentities, parseFirmwareIdentity).forEach(item => transaction.objectStore(FIRMWARE_IDENTITIES).put(item));
     normalizeLifecycleRecords(snapshot.communicationSessions, parseCommunicationSession).forEach(item => transaction.objectStore(COMMUNICATION_SESSIONS).put(item));
+    normalizeProjectAnalysisRuns(snapshot.projectAnalysisRuns).forEach(item => transaction.objectStore(PROJECT_ANALYSIS_RUNS).put(item));
     transaction.oncomplete = () => { database.close(); resolve(); };
     transaction.onerror = () => { database.close(); reject(transaction.error); };
     transaction.onabort = () => { database.close(); reject(transaction.error ?? new Error('工作区数据导入已中止')); };
