@@ -356,13 +356,28 @@ export default function AgentNetworkDebugger() {
       </div>
     </div>
   );
+  const shortcutPanel = (
+    <aside className="max-h-36 min-h-0 overflow-y-auto border-t border-[#30363d] bg-[#0d1117] p-2 scrollbar-thin lg:max-h-none lg:border-l lg:border-t-0">
+      <div className="mb-2 flex items-center justify-between gap-2 px-1">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">快捷指令</span>
+        <small className="text-[10px] text-gray-700">{shortcuts.length}/{shortcutLimit} 条</small>
+      </div>
+      <div className="space-y-1">
+        {shortcuts.map(item => {
+          const cycling = cyclingShortcutIds.includes(item.id);
+          return <div key={item.id} className={`flex overflow-hidden rounded border bg-[#111820] ${cycling ? 'border-green-500/50' : 'border-[#30363d]'}`}><button onClick={() => activeId && void sendTo(activeId, item.value, item.hex ? 'hex' : 'text', false)} disabled={!canSend} className="min-w-0 flex-1 truncate px-2.5 py-1.5 text-left text-xs text-gray-300 disabled:opacity-40">{item.name}{item.hex && <small className="ml-1 text-purple-400">HEX</small>}{cycling && <small className="ml-1 text-green-400">{item.intervalMs}ms</small>}</button><button onClick={() => toggleShortcutCycle(item.id)} disabled={!canSend && !cycling} className={`border-l border-[#30363d] px-2 disabled:opacity-40 ${cycling ? 'bg-green-500/10 text-green-400' : 'text-gray-600 hover:text-green-400'}`} title={cycling ? '停止周期发送' : `每 ${item.intervalMs}ms 周期发送`}><Clock3 size={10} /></button><button onClick={() => deleteShortcut(item.id)} className="border-l border-[#30363d] px-2 text-gray-600 hover:text-red-400" title="删除快捷指令"><X size={10} /></button></div>;
+        })}
+      </div>
+      {!shortcuts.length && <div className="p-3 text-center text-[10px] text-gray-700">在下方输入内容并保存快捷指令</div>}
+    </aside>
+  );
 
   return (
     <div className="serial-page h-full overflow-hidden px-3 pb-3 pt-2 lg:px-4 lg:pb-4">
       <div className="mx-auto flex h-full min-h-0 max-w-[1600px] flex-col">
         <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[#30363d] bg-[#0d1117]">
-          <div className="flex min-h-0 flex-1 flex-col">
-            <div className="flex shrink-0 items-center gap-2 border-b border-[#30363d] bg-[#0b1016] px-3 py-2">
+          <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_220px] lg:grid-rows-1">
+            <div className="flex min-h-0 flex-col"><div className="flex shrink-0 items-center gap-2 border-b border-[#30363d] bg-[#0b1016] px-3 py-2">
               <Search size={13} className="text-gray-600" />
               <input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={split ? '同时搜索左右日志…' : '搜索当前会话日志…'} className="flex-1 bg-transparent text-xs text-gray-300 outline-none placeholder:text-gray-700" />
               {filter && (
@@ -378,6 +393,7 @@ export default function AgentNetworkDebugger() {
               {renderPane(left, leftLogs, 'left', split ? leftRxHex : rxHex)}
               {split && renderPane(right, rightLogs, 'right', rightRxHex)}
             </div>
+            </div>{shortcutPanel}
           </div>
           <div className="shrink-0 border-t border-[#30363d] bg-[#0b1016] px-3 py-3">
             <div className="mb-2 flex min-h-7 flex-wrap items-center gap-3 border-b border-[#30363d] pb-2 text-xs">
@@ -494,11 +510,6 @@ export default function AgentNetworkDebugger() {
                 {((mode === 'server' && host === '0.0.0.0') || (active?.mode === 'server' && active.host === '0.0.0.0')) && <div className="mt-2 rounded border border-yellow-500/20 bg-yellow-500/5 px-2 py-1.5 text-[10px] text-yellow-300">监听全部网卡，将向同一网络中的设备开放端口；仅本机调试请改为 127.0.0.1。</div>}
               </div>
               <div>
-                <div className="mb-2 flex max-h-20 flex-wrap gap-1 overflow-y-auto rounded border border-[#30363d] bg-[#090d12] p-2 scrollbar-thin">
-                  <span className="mr-1 self-center text-[10px] font-semibold text-gray-500">快捷指令</span>
-                  {shortcuts.map(item => { const cycling = cyclingShortcutIds.includes(item.id); return <div key={item.id} className={`flex overflow-hidden rounded border ${cycling ? 'border-green-500/50 bg-green-500/10' : 'border-[#30363d] bg-[#161b22]'}`}><button onClick={() => activeId && void sendTo(activeId, item.value, item.hex ? 'hex' : 'text', false)} disabled={!canSend} className="max-w-32 truncate px-2 py-1 text-[11px] text-gray-300 disabled:opacity-40">{item.name}{item.hex && <small className="ml-1 text-purple-400">HEX</small>}</button><button onClick={() => toggleShortcutCycle(item.id)} disabled={!canSend && !cycling} className={`border-l border-[#30363d] px-1.5 disabled:opacity-40 ${cycling ? 'text-green-400' : 'text-gray-600'}`} title={cycling ? '停止周期发送' : `每 ${item.intervalMs}ms 周期发送`}><Clock3 size={10} /></button><button onClick={() => deleteShortcut(item.id)} className="border-l border-[#30363d] px-1.5 text-gray-600 hover:text-red-400" title="删除快捷指令"><X size={10} /></button></div>; })}
-                  {!shortcuts.length && <span className="text-[10px] text-gray-700">输入内容后可保存为快捷指令</span>}
-                </div>
                 <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-gray-500">
                   <span className="rounded border border-blue-500/20 bg-blue-500/10 px-2 py-1 text-blue-300">
                     发送到：

@@ -135,6 +135,18 @@ describe('AgentNetworkDebugger independent workflow', () => {
     expect(screen.queryByTitle('停止周期发送')).not.toBeInTheDocument();
   });
 
+  it('places shortcuts in the responsive terminal side panel', async () => {
+    localStorage.setItem('embedkit.serial.shortcuts', JSON.stringify([{ id: 101, name: '轮询', value: 'PING', hex: false, intervalMs: 1000 }]));
+    vi.mocked(networkAgent.listNetworkSessions).mockResolvedValue([connectedSession]);
+    render(<AgentNetworkDebugger />);
+
+    await screen.findByText('PONG');
+    const shortcutHeading = screen.getByText('快捷指令');
+    expect(shortcutHeading.closest('aside')).toHaveClass('lg:border-l', 'lg:border-t-0');
+    expect(shortcutHeading.closest('aside')?.parentElement).toHaveClass('lg:grid-cols-[minmax(0,1fr)_220px]');
+    expect(screen.getAllByText('快捷指令')).toHaveLength(1);
+  });
+
   it('creates and closes an independent TCP Client session', async () => {
     vi.mocked(networkAgent.openNetworkSession).mockResolvedValue(connectedSession);
 
