@@ -14,7 +14,7 @@ import { analyzeElf, lookupElfAddress, parseElfAddress } from './elf.js';
 
 const PORT = process.env.EMBEDKIT_PROXY_PORT || 9999;
 const HOST = process.env.EMBEDKIT_PROXY_HOST || '127.0.0.1';
-const AGENT_VERSION = '1.1.0';
+const AGENT_VERSION = '1.1.1';
 const AGENT_PROTOCOL_VERSION = 1;
 const MAX_REQUEST_BYTES = Number(process.env.EMBEDKIT_MAX_REQUEST_BYTES || 2 * 1024 * 1024);
 const MAX_NETWORK_SESSIONS = 16;

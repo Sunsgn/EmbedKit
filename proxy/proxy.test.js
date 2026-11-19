@@ -38,6 +38,15 @@ function elfWithMainSymbol() {
 
 let agent;
 let agentBaseUrl;
+async function waitForInstallJob(job, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (job.state === 'running' && Date.now() < deadline) {
+    await new Promise(resolveWait => setTimeout(resolveWait, 20));
+    job = await (await fetch(`${agentBaseUrl}/api/environment/install-jobs/${job.id}`)).json();
+  }
+  return job;
+}
+
 test.before(async () => {
   configureSerialAdapter(virtualSerialAdapter);
   agent = startServer({ detectAi: false, restoreSerial: false, port: 0 });
@@ -227,7 +236,7 @@ test('reports local agent version and capabilities', async () => {
   const response = await fetch(`${agentBaseUrl}/api/agent/status`);
   assert.equal(response.status, 200);
   const result = await response.json();
-  assert.equal(result.version, '1.1.0');
+  assert.equal(result.version, '1.1.1');
   assert.equal(result.protocolVersion, 1);
   assert.ok(result.capabilities.includes('session-restore'));
   assert.ok(result.capabilities.includes('network-session-restore'));
@@ -310,7 +319,7 @@ test('installs a pinned portable tool only inside a user-selected directory and 
     const selected = await (await fetch(`${agentBaseUrl}/api/files/select`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'directory' }) })).json();
     const createdResponse = await fetch(`${agentBaseUrl}/api/environment/install-jobs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manifestId: manifest.id, directorySelectionId: selected.selectionId }) });
     assert.equal(createdResponse.status, 202); let job = await createdResponse.json();
-    for (let attempt = 0; attempt < 100 && job.state === 'running'; attempt += 1) { await new Promise(resolveWait => setTimeout(resolveWait, 20)); job = await (await fetch(`${agentBaseUrl}/api/environment/install-jobs/${job.id}`)).json(); }
+    job = await waitForInstallJob(job);
     assert.equal(job.state, 'passed', JSON.stringify(job, null, 2)); assert.equal(job.progress, 100); assert.equal(job.installation.capabilityId, 'test.node');
     assert.equal((await stat(join(directory, 'test-node', '1.0.0', executableName))).isFile(), true);
   } finally {
@@ -327,7 +336,7 @@ test('removes only the new installation target when verified installation fails'
   try {
     const selected = await (await fetch(`${agentBaseUrl}/api/files/select`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'directory' }) })).json();
     let job = await (await fetch(`${agentBaseUrl}/api/environment/install-jobs`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manifestId: manifest.id, directorySelectionId: selected.selectionId }) })).json();
-    for (let attempt = 0; attempt < 100 && job.state === 'running'; attempt += 1) { await new Promise(resolveWait => setTimeout(resolveWait, 20)); job = await (await fetch(`${agentBaseUrl}/api/environment/install-jobs/${job.id}`)).json(); }
+    job = await waitForInstallJob(job);
     assert.equal(job.state, 'failed'); assert.match(job.error, /Controlled extraction failure/);
     await assert.rejects(stat(join(directory, 'test-failure', '1.0.0')), { code: 'ENOENT' });
     await assert.rejects(stat(join(directory, 'test-failure')), { code: 'ENOENT' });
@@ -349,7 +358,7 @@ test('cancels between installation stages and removes task-created directories',
     for (let attempt = 0; attempt < 100 && typeof releaseExtract !== 'function'; attempt += 1) await new Promise(resolveWait => setTimeout(resolveWait, 10));
     assert.equal(typeof releaseExtract, 'function');
     const cancelResponse = await fetch(`${agentBaseUrl}/api/environment/install-jobs/${job.id}`, { method: 'DELETE' }); assert.equal(cancelResponse.status, 202); releaseExtract();
-    for (let attempt = 0; attempt < 100 && job.state === 'running'; attempt += 1) { await new Promise(resolveWait => setTimeout(resolveWait, 10)); job = await (await fetch(`${agentBaseUrl}/api/environment/install-jobs/${job.id}`)).json(); }
+    job = await waitForInstallJob(job);
     assert.equal(job.state, 'cancelled'); await assert.rejects(stat(join(directory, 'test-cancel')), { code: 'ENOENT' });
   } finally {
     releaseExtract?.(); configureInstallManifestRegistry(null); configureSoftwareInstallerAdapter(null); configureFilePickerAdapter(null); await rm(directory, { recursive: true, force: true });
