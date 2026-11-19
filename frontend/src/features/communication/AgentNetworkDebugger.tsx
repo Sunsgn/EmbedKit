@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Braces, Clock3, Download, Plus, RefreshCw, Search, Send, Server, Trash2, Unplug, X } from 'lucide-react';
+import { Braces, Clock3, Download, Plus, RefreshCw, Search, Send, Trash2, Unplug, X } from 'lucide-react';
 import { closeNetworkSession, getNetworkStatus, listNetworkSessions, openNetworkSession, readNetworkSession, sendNetworkData, type NetworkAgentEvent as EventItem, type NetworkAgentSession as AgentSession, type NetworkMode as Mode, type NetworkProtocol as Protocol } from '../../services/networkAgent';
 import { createCommunicationCapture, writePendingCommunicationCapture } from '../../services/communicationCapture';
 import { appendTerminalLineEnding, downloadTerminalLog, downloadTerminalRaw, formatTerminalTime, MAX_TERMINAL_LOGS, terminalDirectionLabel, type TerminalLineEnding } from './terminalFormat';
@@ -321,9 +321,9 @@ export default function AgentNetworkDebugger() {
   };
   const exportRaw = () => { if (active) downloadTerminalRaw(active.rawEvents, `${active.type}-${active.mode}-rx`); };
   const renderPane = (session: Session | null, logs: ViewEvent[], side: 'left' | 'right', displayHex: boolean) => (
-    <div onClick={() => { if (session) { setCycle(false); setActiveId(session.id); } }} className={`flex min-h-0 min-w-0 flex-col overflow-hidden border ${session?.id === activeId ? 'border-purple-500/70' : 'border-transparent'} ${split && side === 'right' ? 'lg:border-l-[#30363d]' : ''}`}>
+    <div onClick={() => { if (session) { setCycle(false); setActiveId(session.id); } }} className={`flex min-h-0 min-w-0 flex-col overflow-hidden border ${session?.id === activeId ? 'border-blue-500/70' : 'border-transparent'} ${split && side === 'right' ? 'lg:border-l-[#30363d]' : ''}`}>
       {split && (
-        <div className={`flex shrink-0 items-center gap-2 border-b px-2.5 py-1.5 ${session?.id === activeId ? 'border-purple-500/40 bg-purple-500/10' : 'border-[#30363d] bg-[#0b1016]'}`}>
+        <div className={`flex shrink-0 items-center gap-2 border-b px-2.5 py-1.5 ${session?.id === activeId ? 'border-blue-500/40 bg-blue-500/10' : 'border-[#30363d] bg-[#0b1016]'}`}>
           <select aria-label={`${side === 'left' ? '左侧' : '右侧'}网络会话`} value={session?.id ?? ''} onChange={(event) => selectPane(side, event.target.value)} className="min-w-0 flex-1 rounded border border-[#30363d] bg-[#161b22] px-2 py-1 text-[11px] text-gray-300">
             {sessions.map((item) => (
               <option key={item.id} value={item.id}>
@@ -334,7 +334,7 @@ export default function AgentNetworkDebugger() {
           <span className="shrink-0 text-[9px] text-gray-600">
             RX {session?.rxBytes ?? 0} · TX {session?.txBytes ?? 0}
           </span>
-          {session?.id === activeId && <span className="rounded bg-purple-500/15 px-1.5 py-0.5 text-[9px] text-purple-300">发送目标</span>}
+          {session?.id === activeId && <span className="rounded bg-blue-500/15 px-1.5 py-0.5 text-[9px] text-blue-300">发送目标</span>}
           <label className="ml-auto flex shrink-0 items-center gap-1 text-[10px] text-gray-400"><input type="checkbox" aria-label={`${side === 'left' ? '左侧' : '右侧'}网络窗口 HEX`} checked={displayHex} onChange={(event) => side === 'left' ? setLeftRxHex(event.target.checked) : setRightRxHex(event.target.checked)} />HEX</label>
         </div>
       )}
@@ -352,24 +352,9 @@ export default function AgentNetworkDebugger() {
   );
 
   return (
-    <div className="serial-page h-full overflow-hidden p-3 lg:p-4">
+    <div className="serial-page h-full overflow-hidden px-3 pb-3 pt-2 lg:px-4 lg:pb-4">
       <div className="mx-auto flex h-full min-h-0 max-w-[1600px] flex-col">
-        <header className="mb-2 flex shrink-0 items-center justify-between gap-2">
-          <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-purple-500/20 bg-purple-500/10 text-purple-400">
-              <Server size={18} />
-            </span>
-            <div>
-              <h1 className="text-base font-semibold text-gray-100">TCP / UDP 调试</h1>
-              <p className="text-[11px] text-gray-600">协议角色合并 · 多会话 · 双窗口对照</p>
-            </div>
-          </div>
-          <span className={`rounded-full border px-3 py-1 text-[11px] ${available ? 'border-green-500/30 bg-green-500/10 text-green-400' : available === false ? 'border-red-500/30 bg-red-500/10 text-red-400' : 'border-[#30363d] text-gray-500'}`}>
-            Local Agent：
-            {available ? `已连接 · ${sessions.length} 个会话` : available === false ? '未运行' : '检测中'}
-          </span>
-        </header>
-        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[#30363d] bg-[#0d1117] shadow-2xl shadow-black/20">
+        <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-[#30363d] bg-[#0d1117]">
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="flex shrink-0 items-center gap-2 border-b border-[#30363d] bg-[#0b1016] px-3 py-2">
               <Search size={13} className="text-gray-600" />
@@ -380,9 +365,8 @@ export default function AgentNetworkDebugger() {
                 </button>
               )}
               {paused && <span className="text-[10px] text-yellow-400">显示已暂停，仍在接收</span>}
-              <span className="rounded bg-[#161b22] px-2 py-0.5 text-[10px] text-gray-600">
-                {leftLogs.length + rightLogs.length}/{(left?.logs.length ?? 0) + (right?.logs.length ?? 0)}
-              </span>
+              <span className={`rounded px-2 py-0.5 text-[10px] ${available ? 'bg-green-500/10 text-green-400' : available === false ? 'bg-red-500/10 text-red-400' : 'bg-[#161b22] text-gray-500'}`}>Local Agent：{available ? `已连接 · ${sessions.length} 个会话` : available === false ? '未运行' : '检测中'}</span>
+              <span className="text-[10px] text-gray-600">{leftLogs.length + rightLogs.length}</span>
             </div>
             <div className={`grid min-h-0 flex-1 ${split ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
               {renderPane(left, leftLogs, 'left', split ? leftRxHex : rxHex)}
@@ -440,11 +424,11 @@ export default function AgentNetworkDebugger() {
               </div>
             )}
             {error && <div className="mb-2 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-red-300">{error}</div>}
-            <div className="grid gap-3 lg:grid-cols-[minmax(540px,1.25fr)_minmax(0,1fr)]">
+            <div className="grid gap-3 lg:grid-cols-[minmax(420px,520px)_minmax(0,1fr)]">
               <div className="min-w-0 lg:border-r lg:border-[#30363d] lg:pr-3">
                 <div className="mb-2 flex min-h-8 gap-1.5 overflow-x-auto scrollbar-thin">
                   {sessions.map((item) => (
-                    <div key={item.id} className={`flex shrink-0 overflow-hidden rounded-md border ${activeId === item.id ? 'border-purple-500/60 bg-purple-500/10' : 'border-[#30363d] bg-[#161b22]'}`}>
+                    <div key={item.id} className={`flex shrink-0 overflow-hidden rounded border ${activeId === item.id ? 'border-blue-500/60 bg-blue-500/10' : 'border-[#30363d] bg-[#161b22]'}`}>
                       <button onClick={() => choose(item)} className="flex items-center gap-1.5 px-2 py-1 text-left">
                         <i className={`h-1.5 w-1.5 rounded-full ${item.state === 'connected' ? 'bg-green-400' : 'bg-gray-600'}`} />
                         <span>
@@ -460,41 +444,41 @@ export default function AgentNetworkDebugger() {
                     </div>
                   ))}
                 </div>
-                <div className={`grid items-end gap-2 ${protocol === 'udp' && mode === 'client' ? 'grid-cols-[118px_1fr_76px_72px_auto_auto]' : 'grid-cols-[118px_1fr_82px_auto_auto]'}`}>
-                  <label className="text-[11px] text-gray-500">
+                <div className="flex flex-wrap items-end gap-2">
+                  <label className="w-[150px] text-[11px] font-semibold text-blue-300">
                     协议角色
-                    <select aria-label="协议角色" value={role} onChange={(event) => selectRole(event.target.value as Role)} className="field">
+                    <select aria-label="协议角色" value={role} onChange={(event) => selectRole(event.target.value as Role)} className="field h-[36px] border-blue-500/50 bg-blue-500/10 text-sm font-semibold text-blue-100">
                       <option value="tcp-client">TCP Client</option>
                       <option value="tcp-server">TCP Server</option>
                       <option value="udp-client">UDP Client</option>
                       <option value="udp-server">UDP Server</option>
                     </select>
                   </label>
-                  <label className="text-[11px] text-gray-500">
+                  <label className="min-w-[150px] flex-1 text-[10px] text-gray-500">
                     {mode === 'server' ? '监听地址' : '目标主机'}
-                    <input value={host} onChange={(event) => setHost(event.target.value)} className="field" />
+                    <input value={host} onChange={(event) => setHost(event.target.value)} className="field h-[36px]" />
                   </label>
-                  <label className="text-[11px] text-gray-500">
+                  <label className="w-[92px] text-[10px] text-gray-500">
                     {mode === 'server' ? '监听端口' : '目标端口'}
-                    <input value={port} onChange={(event) => setPort(event.target.value)} type="number" className="field" />
+                    <input value={port} onChange={(event) => setPort(event.target.value)} type="number" className="field h-[36px]" />
                   </label>
                   {protocol === 'udp' && mode === 'client' && (
-                    <label className="text-[11px] text-gray-500">
+                    <label className="w-[92px] text-[10px] text-gray-500">
                       本地端口
-                      <input value={localPort} onChange={(event) => setLocalPort(event.target.value)} type="number" className="field" />
+                      <input value={localPort} onChange={(event) => setLocalPort(event.target.value)} type="number" className="field h-[36px]" />
                     </label>
                   )}
-                  <button onClick={() => void create()} disabled={!available} className="flex h-[34px] items-center justify-center gap-1 rounded-lg bg-purple-600 px-3 text-xs text-white disabled:opacity-40">
+                  <button onClick={() => void create()} disabled={!available} className="flex h-[36px] items-center justify-center gap-1 rounded bg-blue-600 px-3 text-xs text-white disabled:opacity-40">
                     <Plus size={13} />
                     {mode === 'server' ? '添加监听' : '添加连接'}
                   </button>
                   {active && (
-                    <button onClick={() => void close(active.id)} className="flex h-[34px] items-center gap-1 rounded-lg border border-red-500/30 px-2 text-xs text-red-400">
+                    <button onClick={() => void close(active.id)} className="flex h-[36px] items-center gap-1 rounded border border-red-500/30 px-2 text-xs text-red-400">
                       <Unplug size={12} />
                       停止
                     </button>
                   )}
-                  <button onClick={toggleSplit} disabled={sessions.length < 2} className={`h-[34px] rounded-lg border px-2.5 text-xs disabled:opacity-35 ${split ? 'border-purple-500/40 bg-purple-500/10 text-purple-300' : 'border-[#30363d] text-gray-400'}`}>
+                  <button onClick={toggleSplit} disabled={sessions.length < 2} className={`h-[36px] rounded border px-2.5 text-xs disabled:opacity-35 ${split ? 'border-blue-500/40 bg-blue-500/10 text-blue-300' : 'border-[#30363d] text-gray-400'}`}>
                     {split ? '单窗口' : '双窗口'}
                   </button>
                 </div>
@@ -506,7 +490,7 @@ export default function AgentNetworkDebugger() {
                   {!shortcuts.length && <span className="text-[10px] text-gray-700">输入内容后可保存为快捷指令</span>}
                 </div>
                 <div className="mb-2 flex flex-wrap items-center gap-3 text-xs text-gray-500">
-                  <span className="rounded-md border border-purple-500/25 bg-purple-500/10 px-2 py-1 text-purple-300">
+                  <span className="rounded border border-blue-500/20 bg-blue-500/10 px-2 py-1 text-blue-300">
                     发送到：
                     {!online ? '未连接' : active?.mode === 'client' ? `${active.host}:${active.port}` : active?.type === 'tcp' ? `${active.clientCount || 0} 个客户端` : '最近一个 UDP 来源'}
                   </span>
@@ -551,9 +535,9 @@ export default function AgentNetworkDebugger() {
                     }}
                     disabled={!online}
                     placeholder={hexMode ? 'HEX：DE AD BE EF' : '输入文本，Enter 发送'}
-                    className="min-w-48 flex-1 rounded-lg border border-[#30363d] bg-[#161b22] px-4 py-2 text-sm outline-none focus:border-purple-500 disabled:opacity-50"
+                    className="min-w-48 flex-1 rounded border border-[#30363d] bg-[#161b22] px-3 py-2 text-sm outline-none focus:border-blue-500 disabled:opacity-50"
                   />
-                  <button onClick={() => void send(input, hexMode ? 'hex' : 'text', true)} disabled={!canSend || !input || cycle} className="flex min-w-20 items-center justify-center gap-2 rounded-lg bg-purple-600 px-3 py-2 text-sm text-white disabled:opacity-40">
+                  <button onClick={() => void send(input, hexMode ? 'hex' : 'text', true)} disabled={!canSend || !input || cycle} className="flex min-w-20 items-center justify-center gap-2 rounded bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-40">
                     <Send size={14} />
                     发送
                   </button>
