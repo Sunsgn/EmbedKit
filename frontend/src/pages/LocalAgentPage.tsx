@@ -23,6 +23,7 @@ function preferredPackageId() {
 const publicAgentEndpoint = (() => { try { const url = new URL(LOCAL_PROXY_BASE); url.username = ''; url.password = ''; url.search = ''; url.hash = ''; return url.toString().replace(/\/$/, ''); } catch { return '本机自定义地址'; } })();
 const capabilityLabels: Record<string, string> = {
   serial: '真实串口', 'tcp-client': 'TCP 客户端', 'tcp-server': 'TCP 服务端', udp: 'UDP', 'udp-server': 'UDP 服务端', websocket: 'WebSocket',
+  'serial-driver-diagnostics': '串口驱动诊断', 'serial-driver-installation': '受控串口驱动安装',
   'local-picker': '系统文件/目录选择', 'file-read': '受控文件读取', 'elf-analysis': 'ELF / DWARF', 'project-build': '工程识别与可选构建',
   'software-environment': '开发软件与版本检测', 'software-installation': '受控开发软件安装',
 };

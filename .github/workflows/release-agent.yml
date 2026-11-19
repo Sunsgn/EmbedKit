@@ -90,6 +90,10 @@ jobs:
             sleep 0.5
           done
           grep '"available":true' "$smoke_dir/status.json"
+          if [ "${{ matrix.platform }}" = "win32" ]; then
+            curl --fail --silent --header 'Origin: https://sunsgn.github.io' --header 'X-EmbedKit-Protocol: 1' http://127.0.0.1:19999/api/serial/drivers >"$smoke_dir/serial-drivers.json"
+            grep '"supported":true' "$smoke_dir/serial-drivers.json"
+          fi
           test ! -e .embedkit-state
       - name: Archive Windows package
         if: runner.os == 'Windows'

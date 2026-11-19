@@ -10,6 +10,8 @@ vi.mock('../../services/serialAgent', () => ({
   openSerialSession: vi.fn(),
   readSerialSession: vi.fn(),
   sendSerialData: vi.fn(),
+  scanSerialDrivers: vi.fn(),
+  installSerialDriver: vi.fn(),
   setSerialSignals: vi.fn(),
   updateSerialBaudRate: vi.fn(),
 }));
@@ -22,6 +24,7 @@ describe('AgentSerialDebugger independent degradation', () => {
     window.location.hash = '';
     vi.mocked(serialAgent.listSerialPorts).mockReset();
     vi.mocked(serialAgent.listSerialSessions).mockReset();
+    vi.mocked(serialAgent.scanSerialDrivers).mockResolvedValue({ schemaVersion: 1, platform: 'win32', supported: true, detectedAt: '2026-11-19T00:00:00Z', devices: [], limits: { maxDevices: 64, maxHardwareIdsPerDevice: 16 } });
   });
 
   it('keeps the serial workspace usable when Local Agent is offline', async () => {

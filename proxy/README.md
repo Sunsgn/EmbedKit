@@ -7,6 +7,12 @@ Ordinary users should download the self-contained package from GitHub Releases a
 
 Network debugging endpoints create bounded TCP client or UDP sessions, retain at most 2,000 events per session, and allow at most 16 sessions. They are only callable from configured browser origins.
 
+## Windows serial driver diagnostics
+
+`GET /api/serial/drivers` combines the native serial-port inventory with `pnputil.exe /enum-devices /problem 28 /deviceids`. It records the USB VID/PID evidence, distinguishes ready and missing-driver states, and matches only a bounded registry of manufacturer-owned HTTPS support pages. Unknown VID/PID values remain unknown rather than being guessed. The scan is limited to 64 devices and 16 hardware IDs per device and does not require administrator elevation.
+
+`POST /api/serial/drivers/install` accepts only a short-lived file selection token created by the system picker, requires explicit `{ "confirmed": true }`, accepts only an existing `.inf` file up to 10 MiB, and invokes `pnputil.exe /add-driver <selected INF> /install` without a shell. Windows may require the Local Agent to be started as administrator. The response omits the absolute path, records bounded command evidence, and rescans devices after success. EmbedKit does not silently download or install a guessed third-party driver; users download from the matched official manufacturer page and explicitly select the extracted INF.
+
 ```powershell
 npm start
 ```

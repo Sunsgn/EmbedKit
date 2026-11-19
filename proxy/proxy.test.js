@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
 import { copyFile, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { authorizeBuildArtifact, configureFilePickerAdapter, configureInstallManifestRegistry, configurePartDocumentBinaryFetcher, configurePartDocumentFetcher, configureSerialAdapter, configureSoftwareInstallerAdapter, createBuildCommand, decodeNetworkPayload, extractOfficialDocuments, extractSoftwareVersion, hashBuildArtifact, isAllowedOrigin, parseBuildDiagnostic, receiveSerialData, startServer, validateArchiveEntries, validateHostAndPort, validateInstallManifest, validateOfficialPartDocumentUrl, validateProxyTarget, validateSerialOptions } from './proxy.js';
+import { authorizeBuildArtifact, classifySerialDriverDevice, configureFilePickerAdapter, configureInstallManifestRegistry, configurePartDocumentBinaryFetcher, configurePartDocumentFetcher, configureSerialAdapter, configureSerialDriverAdapter, configureSoftwareInstallerAdapter, createBuildCommand, decodeNetworkPayload, extractOfficialDocuments, extractSoftwareVersion, extractUsbHardwareIdentity, hashBuildArtifact, isAllowedOrigin, parseBuildDiagnostic, parsePnpUtilProblemDevices, receiveSerialData, startServer, validateArchiveEntries, validateHostAndPort, validateInstallManifest, validateOfficialPartDocumentUrl, validateProxyTarget, validateSerialOptions } from './proxy.js';
 
 class VirtualSerialPort extends EventEmitter {
   constructor(options) { super(); this.options = options; this.isOpen = false; this.signals = { dtr: false, rts: false }; }
@@ -49,6 +49,7 @@ test.before(async () => {
 test.after(async () => {
   await new Promise(resolve => agent.close(resolve));
   configureSerialAdapter(null);
+  configureSerialDriverAdapter(null);
   configureFilePickerAdapter(null);
 });
 
@@ -116,6 +117,37 @@ test('validates serial session settings', () => {
   assert.deepEqual(validateSerialOptions({ path: 'COM11', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false }), { path: 'COM11', baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none', dtr: false, rts: false, frameMode: 'auto', frameGapMs: 30 });
   assert.throws(() => validateSerialOptions({ path: '', baudRate: 115200 }), /Invalid serial port path/);
   assert.throws(() => validateSerialOptions({ path: 'COM11', baudRate: 0 }), /baud rate/);
+});
+
+test('classifies USB serial driver evidence without guessing unknown vendors', () => {
+  assert.deepEqual(extractUsbHardwareIdentity(['USB\\VID_1A86&PID_7523\\ABC']), { vendorId: '1A86', productId: '7523', evidence: 'USB\\VID_1A86&PID_7523\\ABC' });
+  const missing = classifySerialDriverDevice({ instanceId: 'USB\\VID_1A86&PID_7523\\ABC', friendlyName: 'USB2.0-Serial', problemCode: 28, hardwareIds: ['USB\\VID_1A86&PID_7523'] });
+  assert.equal(missing.driverState, 'missing'); assert.equal(missing.recommendation.id, 'wch-usb-serial'); assert.equal(missing.recommendation.automaticDownload, false);
+  const unknown = classifySerialDriverDevice({ instanceId: 'USB\\VID_ABCD&PID_0001\\ABC', problemCode: 28, hardwareIds: [] });
+  assert.equal(unknown.driverState, 'missing'); assert.equal(unknown.recommendation, null);
+  const parsed = parsePnpUtilProblemDevices('Microsoft PnP Utility\r\n\r\nInstance ID: USB\\VID_10C4&PID_EA60\\0001\r\nDevice Description: CP210x\r\nProblem Code: 28\r\nHardware IDs: USB\\VID_10C4&PID_EA60\r\n', 28);
+  assert.equal(parsed.length, 1); assert.equal(parsed[0].instanceId, 'USB\\VID_10C4&PID_EA60\\0001'); assert.ok(parsed[0].hardwareIds.includes('USB\\VID_10C4&PID_EA60'));
+});
+
+test('diagnoses, installs, and rescans a selected Windows serial INF', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'embedkit-serial-driver-')), infPath = join(directory, 'wch-test.inf'); let installed = false, installedPath = '';
+  await writeFile(infPath, '[Version]\nSignature="$Windows NT$"\n', 'utf8');
+  configureSerialDriverAdapter({
+    platform: 'win32',
+    scan: async () => [{ instanceId: 'USB\\VID_1A86&PID_7523\\TEST', friendlyName: 'USB2.0-Serial', manufacturer: 'wch.cn', deviceClass: 'Ports', status: installed ? 'OK' : 'Error', problemCode: installed ? 0 : 28, hardwareIds: ['USB\\VID_1A86&PID_7523'] }],
+    install: async path => { installedPath = path; installed = true; },
+  });
+  configureFilePickerAdapter({ select: async () => ({ path: infPath }) });
+  try {
+    const diagnosis = await (await fetch(`${agentBaseUrl}/api/serial/drivers`)).json();
+    assert.equal(diagnosis.supported, true); assert.equal(diagnosis.devices[0].driverState, 'missing'); assert.equal(diagnosis.devices[0].recommendation.vendor, '南京沁恒微电子');
+    const selected = await (await fetch(`${agentBaseUrl}/api/files/select`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'file' }) })).json();
+    const unconfirmed = await fetch(`${agentBaseUrl}/api/serial/drivers/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selectionId: selected.selectionId }) });
+    assert.equal(unconfirmed.status, 400); assert.equal(installed, false);
+    const response = await fetch(`${agentBaseUrl}/api/serial/drivers/install`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selectionId: selected.selectionId, confirmed: true }) });
+    assert.equal(response.status, 200);
+    const result = await response.json(); assert.equal(result.state, 'completed'); assert.equal(result.selectedFile, 'wch-test.inf'); assert.equal(result.before.devices[0].driverState, 'missing'); assert.equal(result.after.devices[0].driverState, 'ready'); assert.equal(installedPath, infPath); assert.equal(result.evidence.arguments.includes(infPath), false);
+  } finally { configureSerialDriverAdapter(null); configureFilePickerAdapter(null); await rm(directory, { recursive: true, force: true }); }
 });
 
 test('groups byte-at-a-time serial input into complete lines', () => {
@@ -195,7 +227,7 @@ test('reports local agent version and capabilities', async () => {
   const response = await fetch(`${agentBaseUrl}/api/agent/status`);
   assert.equal(response.status, 200);
   const result = await response.json();
-  assert.equal(result.version, '1.0.0');
+  assert.equal(result.version, '1.1.0');
   assert.equal(result.protocolVersion, 1);
   assert.ok(result.capabilities.includes('session-restore'));
   assert.ok(result.capabilities.includes('network-session-restore'));
@@ -206,6 +238,8 @@ test('reports local agent version and capabilities', async () => {
   assert.ok(result.capabilities.includes('elf-analysis'));
   assert.ok(result.capabilities.includes('software-environment'));
   assert.ok(result.capabilities.includes('software-installation'));
+  assert.ok(result.capabilities.includes('serial-driver-diagnostics'));
+  assert.equal(result.capabilities.includes('serial-driver-installation'), process.platform === 'win32');
   assert.ok(result.capabilities.includes('part-source-status'));
   assert.ok(result.capabilities.includes('part-details-online'));
   assert.ok(result.capabilities.includes('part-document-read'));

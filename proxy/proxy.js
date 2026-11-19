@@ -14,7 +14,7 @@ import { analyzeElf, lookupElfAddress, parseElfAddress } from './elf.js';
 
 const PORT = process.env.EMBEDKIT_PROXY_PORT || 9999;
 const HOST = process.env.EMBEDKIT_PROXY_HOST || '127.0.0.1';
-const AGENT_VERSION = '1.0.0';
+const AGENT_VERSION = '1.1.0';
 const AGENT_PROTOCOL_VERSION = 1;
 const MAX_REQUEST_BYTES = Number(process.env.EMBEDKIT_MAX_REQUEST_BYTES || 2 * 1024 * 1024);
 const MAX_NETWORK_SESSIONS = 16;
@@ -54,6 +54,23 @@ const systemSerialAdapter = {
   create: options => new SerialPort(options),
 };
 let serialAdapter = systemSerialAdapter;
+const serialDriverRegistry = [
+  { id: 'wch-usb-serial', vendorId: '1A86', name: 'WCH USB 转串口驱动', vendor: '南京沁恒微电子', officialPage: 'https://www.wch-ic.com/downloads/CH341SER_ZIP.html', sourceType: 'manufacturer', verifiedAt: '2026-11-19' },
+  { id: 'silabs-cp210x', vendorId: '10C4', name: 'CP210x USB 转 UART VCP 驱动', vendor: 'Silicon Labs', officialPage: 'https://www.silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers', sourceType: 'manufacturer', verifiedAt: '2026-11-19' },
+  { id: 'ftdi-vcp', vendorId: '0403', name: 'FTDI VCP 驱动', vendor: 'FTDI', officialPage: 'https://ftdichip.com/drivers/vcp-drivers/', sourceType: 'manufacturer', verifiedAt: '2026-11-19' },
+];
+const systemSerialDriverAdapter = {
+  platform: process.platform,
+  scan: async () => {
+    if (process.platform !== 'win32') return [];
+    const [ports, missingOutput] = await Promise.all([systemSerialAdapter.list(), runBoundedProcess('pnputil.exe', ['/enum-devices', '/problem', '28', '/deviceids'], 15_000)]);
+    const ready = ports.map(port => ({ instanceId: port.pnpId || port.path, friendlyName: port.friendlyName || port.path, manufacturer: port.manufacturer || '', deviceClass: 'Ports', status: 'OK', problemCode: 0, hardwareIds: [port.pnpId || `USB\\VID_${port.vendorId || ''}&PID_${port.productId || ''}`] }));
+    const missing = parsePnpUtilProblemDevices(missingOutput, 28), seen = new Set(ready.map(item => item.instanceId.toLowerCase()));
+    return [...ready, ...missing.filter(item => !seen.has(item.instanceId.toLowerCase()))];
+  },
+  install: async path => runBoundedProcess('pnputil.exe', ['/add-driver', path, '/install'], 120_000),
+};
+let serialDriverAdapter = systemSerialDriverAdapter;
 let filePickerActive = false;
 const partDocumentCache = new Map();
 
@@ -265,11 +282,13 @@ function runPickerProcess(executable, args) {
 }
 
 const systemFilePickerAdapter = {
-  select: ({ kind }) => {
+  select: ({ kind, purpose }) => {
     if (process.platform === 'win32') {
       const script = kind === 'directory'
         ? "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description='Select an embedded project directory'; if($d.ShowDialog() -eq 'OK'){[Console]::Out.Write($d.SelectedPath)}"
-        : "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.OpenFileDialog; $d.Title='Select an embedded development file'; $d.Filter='Embedded files|*.map;*.elf;*.axf;*.out;*.bin;*.hex;*.srec;*.s19|All files|*.*'; if($d.ShowDialog() -eq 'OK'){[Console]::Out.Write($d.FileName)}";
+        : purpose === 'serial-driver-inf'
+          ? "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.OpenFileDialog; $d.Title='Select an extracted Windows serial driver INF'; $d.Filter='Windows driver INF|*.inf'; if($d.ShowDialog() -eq 'OK'){[Console]::Out.Write($d.FileName)}"
+          : "Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.OpenFileDialog; $d.Title='Select an embedded development file'; $d.Filter='Embedded files|*.map;*.elf;*.axf;*.out;*.bin;*.hex;*.srec;*.s19|All files|*.*'; if($d.ShowDialog() -eq 'OK'){[Console]::Out.Write($d.FileName)}";
       return runPickerProcess('powershell.exe', ['-NoProfile', '-STA', '-Command', script]);
     }
     if (process.platform === 'darwin') return runPickerProcess('osascript', ['-e', kind === 'directory' ? 'POSIX path of (choose folder with prompt "Select an embedded project directory")' : 'POSIX path of (choose file with prompt "Select an embedded development file")']);
@@ -294,6 +313,72 @@ export function configureSerialAdapter(adapter) {
   serialAdapter = adapter;
 }
 
+export function configureSerialDriverAdapter(adapter) {
+  if (adapter == null) { serialDriverAdapter = systemSerialDriverAdapter; return; }
+  if (typeof adapter.scan !== 'function' || typeof adapter.install !== 'function' || typeof adapter.platform !== 'string') throw new Error('Serial driver adapter must provide platform, scan() and install()');
+  serialDriverAdapter = adapter;
+}
+
+export function extractUsbHardwareIdentity(values) {
+  for (const value of Array.isArray(values) ? values : [values]) {
+    const match = String(value || '').match(/VID_([0-9A-F]{4}).*PID_([0-9A-F]{4})/i);
+    if (match) return { vendorId: match[1].toUpperCase(), productId: match[2].toUpperCase(), evidence: String(value).slice(0, 300) };
+  }
+  return { vendorId: '', productId: '', evidence: '' };
+}
+
+export function parsePnpUtilProblemDevices(output, problemCode = 28) {
+  return String(output || '').replace(/\r/g, '').split(/\n\s*\n/).map(block => {
+    const lines = block.split('\n').map(line => line.trim()).filter(Boolean), values = lines.map(line => line.match(/:\s+(.*)$/)?.[1]?.trim()).filter(Boolean);
+    const instanceId = values.find(value => /^(?:USB|FTDIBUS)\\/i.test(value)) || '';
+    const hardwareIds = lines.map(line => line.match(/(?:USB|FTDIBUS)\\[^\s]+/i)?.[0]).filter(Boolean);
+    const identity = extractUsbHardwareIdentity([instanceId, ...hardwareIds]);
+    if (!instanceId || !identity.vendorId) return null;
+    return { instanceId, friendlyName: values[1] || 'USB 设备（驱动缺失）', manufacturer: '', deviceClass: 'Unknown USB', status: 'Error', problemCode, hardwareIds: [...new Set(hardwareIds)] };
+  }).filter(Boolean);
+}
+
+export function classifySerialDriverDevice(value) {
+  const hardwareIds = Array.isArray(value?.hardwareIds) ? value.hardwareIds.map(item => String(item).slice(0, 300)).slice(0, 16) : [];
+  const identity = extractUsbHardwareIdentity([value?.instanceId, ...hardwareIds]), problemCode = Number(value?.problemCode || 0);
+  const recommendation = serialDriverRegistry.find(item => item.vendorId === identity.vendorId);
+  return {
+    instanceId: String(value?.instanceId || '').slice(0, 500),
+    friendlyName: String(value?.friendlyName || '未知 USB 设备').slice(0, 200),
+    manufacturer: String(value?.manufacturer || '').slice(0, 200),
+    deviceClass: String(value?.deviceClass || '').slice(0, 100),
+    status: String(value?.status || '').slice(0, 100),
+    problemCode,
+    driverState: problemCode === 0 ? 'ready' : problemCode === 28 ? 'missing' : 'error',
+    vendorId: identity.vendorId,
+    productId: identity.productId,
+    hardwareIds,
+    evidence: identity.evidence,
+    recommendation: recommendation ? { ...recommendation, applicableVendorId: recommendation.vendorId, automaticDownload: false } : null,
+  };
+}
+
+export async function scanSerialDriverDevices() {
+  const detectedAt = new Date().toISOString(), supported = serialDriverAdapter.platform === 'win32';
+  if (!supported) return { schemaVersion: 1, platform: serialDriverAdapter.platform, supported: false, detectedAt, devices: [], limits: { maxDevices: 64, maxHardwareIdsPerDevice: 16 }, message: '当前平台不支持 Windows PnP 串口驱动诊断' };
+  const raw = await serialDriverAdapter.scan();
+  if (!Array.isArray(raw)) throw new Error('Serial driver adapter returned an invalid device list');
+  const devices = raw.slice(0, 64).map(classifySerialDriverDevice);
+  return { schemaVersion: 1, platform: serialDriverAdapter.platform, supported: true, detectedAt, devices, limits: { maxDevices: 64, maxHardwareIdsPerDevice: 16 } };
+}
+
+export async function installSelectedSerialDriver(options = {}) {
+  if (serialDriverAdapter.platform !== 'win32') throw new Error('Serial driver installation is only available on Windows');
+  if (options.confirmed !== true) throw new Error('Explicit confirmation is required before installing a driver');
+  const selection = getFileSelection(options.selectionId, 'file');
+  if (!/\.inf$/i.test(selection.name || '') || !/\.inf$/i.test(selection.path || '')) throw new Error('Selected driver file must be an INF file');
+  if (selection.size > 10 * 1024 * 1024) throw new Error('Selected INF file exceeds the 10 MiB limit');
+  const startedAt = new Date().toISOString(), before = await scanSerialDriverDevices();
+  await serialDriverAdapter.install(selection.path);
+  const after = await scanSerialDriverDevices(), finishedAt = new Date().toISOString();
+  return { schemaVersion: 1, state: 'completed', selectedFile: selection.name, startedAt, finishedAt, before, after, evidence: { installer: 'pnputil.exe', arguments: ['/add-driver', '[selected INF]', '/install'], userConfirmed: true } };
+}
+
 export function configureFilePickerAdapter(adapter) {
   if (adapter == null) { filePickerAdapter = systemFilePickerAdapter; return; }
   if (typeof adapter.select !== 'function') throw new Error('File picker adapter must provide select()');
@@ -302,11 +387,12 @@ export function configureFilePickerAdapter(adapter) {
 
 async function selectLocalPath(options = {}) {
   const kind = options.kind === 'file' ? 'file' : options.kind === 'directory' ? 'directory' : '';
+  const purpose = options.purpose === 'serial-driver-inf' ? 'serial-driver-inf' : 'general';
   if (!kind) throw new Error('Picker kind must be file or directory');
   if (filePickerActive) throw new Error('A system file picker is already open');
   filePickerActive = true;
   try {
-    const result = await filePickerAdapter.select({ kind });
+    const result = await filePickerAdapter.select({ kind, purpose });
     if (result?.cancelled || !result?.path) return { cancelled: true, kind };
     if (!isAbsolute(result.path) || /[\0\r\n]/.test(result.path)) throw new Error('System picker returned an invalid path');
     const path = resolve(result.path), info = await stat(path);
@@ -1670,7 +1756,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === '/api/agent/status' && req.method === 'GET') {
-    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: ['serial', 'tcp-client', 'tcp-server', 'udp-client', 'udp-server', 'session-restore', 'network-session-restore', 'structured-errors', 'project-build', 'project-scan', 'local-picker', 'local-file-read', 'elf-analysis', 'software-environment', 'software-installation', 'part-source-status', 'part-details-online', 'part-document-discovery', 'part-document-read'] });
+    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: ['serial', 'serial-driver-diagnostics', ...(process.platform === 'win32' ? ['serial-driver-installation'] : []), 'tcp-client', 'tcp-server', 'udp-client', 'udp-server', 'session-restore', 'network-session-restore', 'structured-errors', 'project-build', 'project-scan', 'local-picker', 'local-file-read', 'elf-analysis', 'software-environment', 'software-installation', 'part-source-status', 'part-details-online', 'part-document-discovery', 'part-document-read'] });
     return;
   }
 
@@ -1800,6 +1886,21 @@ const server = http.createServer(async (req, res) => {
   if (pathname === '/api/serial/ports' && req.method === 'GET') {
     try { jsonRes(res, 200, { ports: await listSerialPorts() }); }
     catch (error) { jsonRes(res, 500, { error: error.message }); }
+    return;
+  }
+
+  if (pathname === '/api/serial/drivers' && req.method === 'GET') {
+    try { jsonRes(res, 200, await scanSerialDriverDevices()); }
+    catch (error) { jsonRes(res, 500, { code: 'serial-driver-scan-failed', error: error.message }); }
+    return;
+  }
+
+  if (pathname === '/api/serial/drivers/install' && req.method === 'POST') {
+    try { jsonRes(res, 200, await installSelectedSerialDriver(await readJSONBody(req))); }
+    catch (error) {
+      const permission = /access.*denied|elevation|administrator|exit(?:ed)? with code 5/i.test(error.message);
+      jsonRes(res, permission ? 403 : 400, { code: permission ? 'administrator-required' : 'serial-driver-install-failed', error: permission ? '驱动安装需要管理员权限，请以管理员身份重新启动 Local Agent 后重试' : error.message });
+    }
     return;
   }
 

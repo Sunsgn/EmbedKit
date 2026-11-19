@@ -4,16 +4,16 @@ export interface LocalPathSelection { cancelled: boolean; kind: 'file' | 'direct
 export interface LocalFileMetadata { id: string; kind: 'file'; name: string; size: number; modifiedAt: string; expiresAt: string }
 export interface LocalFileChunk { selectionId: string; offset: number; byteLength: number; size: number; eof: boolean; encoding: 'base64'; data: string }
 
-export function selectLocalPath(kind: 'file' | 'directory') {
+export function selectLocalPath(kind: 'file' | 'directory', purpose: 'general' | 'serial-driver-inf' = 'general') {
   return agentRequest<LocalPathSelection>('/api/files/select', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ kind }),
+    body: JSON.stringify({ kind, purpose }),
   }, 5 * 60 * 1000);
 }
 
 export function selectLocalDirectory() { return selectLocalPath('directory'); }
-export function selectLocalFile() { return selectLocalPath('file'); }
+export function selectLocalFile(purpose: 'general' | 'serial-driver-inf' = 'general') { return selectLocalPath('file', purpose); }
 export function getLocalFileMetadata(selectionId: string) { return agentRequest<LocalFileMetadata>(`/api/files/selections/${selectionId}`); }
 export function readLocalFileChunk(selectionId: string, offset: number, length = 256 * 1024) { return agentRequest<LocalFileChunk>(`/api/files/selections/${selectionId}/chunk?offset=${offset}&length=${length}`); }
 export function revokeLocalPath(selectionId: string) { return agentRequest<{ revoked: boolean }>(`/api/files/selections/${selectionId}`, { method: 'DELETE' }); }
