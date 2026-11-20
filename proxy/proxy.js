@@ -14,6 +14,7 @@ import { analyzeElf, lookupElfAddress, parseElfAddress } from './elf.js';
 import { AGENT_PROTOCOL_VERSION, listAgentCapabilities, validateAgentContract } from '../contracts/agent-api.js';
 import { createHttpBoundary } from './server/http.js';
 import { AgentRouter } from './server/router.js';
+import { registerFileAnalysisRoutes } from './routes/files-analysis.js';
 import { registerPartRoutes } from './routes/parts.js';
 
 const PORT = process.env.EMBEDKIT_PROXY_PORT || 9999;
@@ -653,6 +654,20 @@ const agentRouter = new AgentRouter().register({
   handler: async ({ res }) => jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: listAgentCapabilities(process.platform) }),
 });
 registerPartRoutes(agentRouter, { jsonResponse: jsonRes, discoverDocuments: discoverOfficialPartDocuments, readDocument: readOfficialPartDocument, readPartDetails: getChipDetails, maxDocumentResults: PART_DOCUMENT_MAX_RESULTS });
+registerFileAnalysisRoutes(agentRouter, {
+  jsonResponse: jsonRes,
+  selectPath: async req => selectLocalPath(await readJSONBody(req)),
+  scanProject: async req => {
+    const body = await readJSONBody(req);
+    return scanSelectedProject(body.selectionId, body);
+  },
+  revokeSelection: id => fileSelections.delete(id),
+  getSelection: getFileSelection,
+  readChunk: readSelectedFileChunk,
+  analyzeElf: analyzeSelectedElf,
+  lookupElf: lookupAnalyzedElf,
+  disassembleElf: disassembleAnalyzedElf,
+});
 
 async function persistSerialSessions() {
   const sessions = [...serialSessions.values()].filter(session => session.state === 'connected').map(({ path, baudRate, dataBits, stopBits, parity, flowControl, dtr, rts, frameMode, frameGapMs }) => ({ path, baudRate, dataBits, stopBits, parity, flowControl, dtr, rts, frameMode, frameGapMs }));
@@ -1844,52 +1859,6 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET') { jsonRes(res, 200, publicInstallJob(job)); return; }
     if (req.method === 'DELETE') { if (job.state !== 'running') { jsonRes(res, 409, { error: 'Installation job is not running' }); return; } job.cancelRequested = true; job.request?.destroy(new Error('Installation cancelled')); jsonRes(res, 202, publicInstallJob(job)); return; }
     jsonRes(res, 405, { error: 'Unsupported operation for installation job' }); return;
-  }
-
-  if (pathname === '/api/files/select' && req.method === 'POST') {
-    try { jsonRes(res, 200, await selectLocalPath(await readJSONBody(req))); }
-    catch (error) { jsonRes(res, 400, { error: error.message }); }
-    return;
-  }
-
-  if (pathname === '/api/projects/scan' && req.method === 'POST') {
-    try { const body = await readJSONBody(req); jsonRes(res, 200, await scanSelectedProject(body.selectionId, body)); }
-    catch (error) { jsonRes(res, 400, { error: error.message }); }
-    return;
-  }
-
-  const fileSelectionMatch = pathname.match(/^\/api\/files\/selections\/([0-9a-f-]+)(?:\/(chunk))?$/i);
-  if (fileSelectionMatch) {
-    try {
-      const id = fileSelectionMatch[1], operation = fileSelectionMatch[2];
-      if (req.method === 'DELETE' && !operation) { jsonRes(res, 200, { revoked: fileSelections.delete(id) }); return; }
-      if (req.method !== 'GET') { jsonRes(res, 405, { error: 'Unsupported operation for file selection' }); return; }
-      if (operation === 'chunk') { jsonRes(res, 200, await readSelectedFileChunk(id, requestUrl.searchParams.get('offset'), requestUrl.searchParams.get('length'))); return; }
-      const selection = getFileSelection(id), { path: _path, expiresAt, ...safe } = selection;
-      jsonRes(res, 200, { ...safe, expiresAt: new Date(expiresAt).toISOString() });
-    } catch (error) { jsonRes(res, 400, { error: error.message }); }
-    return;
-  }
-
-  const elfAnalysisMatch = pathname.match(/^\/api\/elf\/analyze\/([0-9a-f-]+)$/i);
-  if (elfAnalysisMatch && req.method === 'GET') {
-    try { jsonRes(res, 200, await analyzeSelectedElf(elfAnalysisMatch[1])); }
-    catch (error) { jsonRes(res, 400, { error: error.message }); }
-    return;
-  }
-
-  const elfLookupMatch = pathname.match(/^\/api\/elf\/analyses\/([0-9a-f-]+)\/lookup$/i);
-  if (elfLookupMatch && req.method === 'GET') {
-    try { jsonRes(res, 200, lookupAnalyzedElf(elfLookupMatch[1], requestUrl.searchParams.get('address'))); }
-    catch (error) { jsonRes(res, 400, { error: error.message }); }
-    return;
-  }
-
-  const elfDisassemblyMatch = pathname.match(/^\/api\/elf\/analyses\/([0-9a-f-]+)\/disassemble$/i);
-  if (elfDisassemblyMatch && req.method === 'GET') {
-    try { jsonRes(res, 200, await disassembleAnalyzedElf(elfDisassemblyMatch[1], requestUrl.searchParams.get('address'), requestUrl.searchParams.get('before'), requestUrl.searchParams.get('after'))); }
-    catch (error) { jsonRes(res, 400, { error: error.message }); }
-    return;
   }
 
   if (pathname === '/api/build/detect' && req.method === 'POST') {

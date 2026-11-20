@@ -73,6 +73,7 @@ import {
 import { applyLineEnding, createAtNetworkCase, createTestStep as createStep, isLineEnding, resolveFlowVariables as resolveVariables, type Channel, type FlowVariable, type Incoming, type LineEnding, type NetworkConfig, type RunLog, type SerialConnectionConfig, type SerialRuntime, type StepStage, type StepStatus, type StepType, type TestCase, type TestStep, type TestSuite } from "../features/test-automation/domain";
 import { loadSerialConfigs, loadTestSuites as loadSuites, saveSerialConfigs, saveTestSuites } from "../features/test-automation/persistence";
 import { executeStepWithRetry } from "../features/test-automation/executionController";
+import { assignRuntimeVariable, captureResponseVariable, evaluateIncomingResponse } from "../features/test-automation/responseEvaluation";
 
 interface FirmwareChoice {
   id: string;
@@ -652,9 +653,7 @@ export default function TestAutomationPage() {
     failureValue = "",
   ): Promise<string> => {
     await ensureChannel(step.channel);
-    const expected = resolveVariables(expectedValue, runtimeVariables.current),
-      failure = resolveVariables(failureValue, runtimeVariables.current),
-      started = Date.now(),
+    const started = Date.now(),
       cursor = cursors.current[step.channel] ?? 0;
     while (Date.now() - started < Math.max(100, step.timeoutMs)) {
       if (stopRequested.current && !executingTeardown.current)
@@ -666,31 +665,9 @@ export default function TestAutomationPage() {
         .map((item, offset) => ({ item, index: cursor + offset }))
         .filter((value) => value.item.channel === step.channel);
       if (candidates.length) {
-        if (!shouldMatch) {
-          cursors.current[step.channel] = candidates[0].index + 1;
-          return step.hex ? candidates[0].item.hex : candidates[0].item.text;
-        }
-        const sources = candidates.map(({ item }) =>
-            step.hex ? item.hex : item.text,
-          ),
-          combined = sources.join(step.hex ? " " : "");
-        if (failure && new RegExp(failure, "i").test(combined)) {
-          cursors.current[step.channel] =
-            candidates[candidates.length - 1].index + 1;
-          throw new Error(`设备返回失败响应：${failureValue}`);
-        }
-        const matched =
-          step.matchMode === "equals"
-            ? sources.some((source) => source.trim() === expected.trim()) ||
-              combined.trim() === expected.trim()
-            : step.matchMode === "regex"
-              ? new RegExp(expected).test(combined)
-              : combined.includes(expected);
-        if (matched) {
-          cursors.current[step.channel] =
-            candidates[candidates.length - 1].index + 1;
-          return combined;
-        }
+        const evaluation = evaluateIncomingResponse(step, candidates, runtimeVariables.current, shouldMatch, expectedValue, failureValue);
+        if (evaluation.state === "failure") { cursors.current[step.channel] = evaluation.consumedThrough; throw new Error(evaluation.message); }
+        if (evaluation.state === "received" || evaluation.state === "matched") { cursors.current[step.channel] = evaluation.consumedThrough; return evaluation.observed; }
       }
       await sleep(100);
     }
@@ -699,25 +676,9 @@ export default function TestAutomationPage() {
     );
   };
   const captureResponse = (step: TestStep, response: string) => {
-    const name = step.captureName?.trim().toUpperCase().replace(/\W/g, "_"),
-      expression = step.captureRegex?.trim();
-    if (!name || !expression) return;
-    const match = new RegExp(
-      resolveVariables(expression, runtimeVariables.current),
-    ).exec(response);
-    if (!match) throw new Error(`响应通过，但未提取到变量 ${name}`);
-    const value = match.groups
-        ? Object.values(match.groups)[0]
-        : (match[1] ?? match[0]),
-      existing = runtimeVariables.current.find((item) => item.name === name);
-    runtimeVariables.current = existing
-      ? runtimeVariables.current.map((item) =>
-          item.name === name ? { ...item, value } : item,
-        )
-      : [
-          ...runtimeVariables.current,
-          { id: crypto.randomUUID(), name, value, secret: false },
-        ];
+    const captured = captureResponseVariable(step, response, runtimeVariables.current);
+    if (!captured) return;
+    runtimeVariables.current = captured.variables;
     setSuites((previous) =>
       previous.map((suite) =>
         suite.id === selectedSuite.id
@@ -725,7 +686,7 @@ export default function TestAutomationPage() {
           : suite,
       ),
     );
-    addRunLog("pass", `已提取变量 {{${name}}} = ${value}`);
+    addRunLog("pass", `已提取变量 {{${captured.name}}} = ${captured.value}`);
   };
   const requestManualConfirmation = (message: string) =>
     new Promise<boolean>((resolve) =>
@@ -843,25 +804,11 @@ export default function TestAutomationPage() {
               );
               cursors.current = {};
             } else if (executionStep.type === "set-variable") {
-              const name = (executionStep.captureName || "VARIABLE")
-                  .trim()
-                  .toUpperCase()
-                  .replace(/\W/g, "_"),
-                value = resolveVariables(
+              const value = resolveVariables(
                   executionStep.data,
                   runtimeVariables.current,
-                ),
-                existing = runtimeVariables.current.find(
-                  (item) => item.name === name,
                 );
-              runtimeVariables.current = existing
-                ? runtimeVariables.current.map((item) =>
-                    item.name === name ? { ...item, value } : item,
-                  )
-                : [
-                    ...runtimeVariables.current,
-                    { id: crypto.randomUUID(), name, value, secret: false },
-                  ];
+              runtimeVariables.current = assignRuntimeVariable(executionStep.captureName || "VARIABLE", value, runtimeVariables.current);
             } else if (executionStep.type === "manual") {
               if (
                 !(await requestManualConfirmation(
