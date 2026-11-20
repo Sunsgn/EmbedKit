@@ -13,6 +13,7 @@ import { URL, pathToFileURL } from 'url';
 import { analyzeElf, lookupElfAddress, parseElfAddress } from './elf.js';
 import { AGENT_PROTOCOL_VERSION, listAgentCapabilities, validateAgentContract } from '../contracts/agent-api.js';
 import { createHttpBoundary } from './server/http.js';
+import { AgentRouter } from './server/router.js';
 
 const PORT = process.env.EMBEDKIT_PROXY_PORT || 9999;
 const HOST = process.env.EMBEDKIT_PROXY_HOST || '127.0.0.1';
@@ -645,6 +646,11 @@ const fileSelections = new Map();
 const elfAnalyses = new Map();
 const installJobs = new Map();
 let restoringSerialSessions = false;
+
+const agentRouter = new AgentRouter().register({
+  id: 'agent.status', method: 'GET', path: '/api/agent/status',
+  handler: async ({ res }) => jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: listAgentCapabilities(process.platform) }),
+});
 
 async function persistSerialSessions() {
   const sessions = [...serialSessions.values()].filter(session => session.state === 'connected').map(({ path, baudRate, dataBits, stopBits, parity, flowControl, dtr, rts, frameMode, frameGapMs }) => ({ path, baudRate, dataBits, stopBits, parity, flowControl, dtr, rts, frameMode, frameGapMs }));
@@ -1809,10 +1815,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (pathname === '/api/agent/status' && req.method === 'GET') {
-    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: listAgentCapabilities(process.platform) });
-    return;
-  }
+  if (await agentRouter.dispatch({ req, res, requestUrl, pathname })) return;
 
   if (pathname === '/api/environment/installations' && req.method === 'GET') {
     try { jsonRes(res, 200, await detectDevelopmentSoftware()); }

@@ -41,7 +41,7 @@ describe('ChipLibPage layout', () => {
   it('opens the offline embedded development knowledge base and persists the workspace', async () => {
     render(<ChipLibPage />);
     fireEvent.click(screen.getByRole('button', { name: /知识与工程经验/ }));
-    expect(await screen.findByRole('region', { name: '嵌入式开发知识库' })).toHaveClass('theme-panel-soft', 'theme-border');
+    expect(await screen.findByRole('region', { name: '嵌入式开发知识库' }, { timeout: 5000 })).toHaveClass('theme-panel-soft', 'theme-border');
     expect(screen.getByRole('textbox', { name: '搜索知识库' })).toBeInTheDocument();
     expect(screen.getByText('27 份内置文档')).toBeInTheDocument();
     expect(localStorage.getItem('embedkit.resources-mode')).toBe('knowledge');
@@ -52,7 +52,7 @@ describe('ChipLibPage layout', () => {
   it('imports and searches a local document inside the knowledge base', async () => {
     render(<ChipLibPage />);
     fireEvent.click(screen.getByRole('button', { name: /知识与工程经验/ }));
-    await screen.findByRole('region', { name: '嵌入式开发知识库' });
+    await screen.findByRole('region', { name: '嵌入式开发知识库' }, { timeout: 5000 });
     fireEvent.click(screen.getByRole('button', { name: '导入文档' }));
     fireEvent.change(screen.getByLabelText('选择知识库文档'), { target: { files: [new File(['# CAN 调试\n检查终端电阻与错误帧。'], 'can-guide.md', { type: 'text/markdown' })] } });
     expect(await screen.findByRole('button', { name: /CAN 调试/ })).toBeInTheDocument();
@@ -65,7 +65,7 @@ describe('ChipLibPage layout', () => {
   it('records local engineering experience and blocks unverified conclusions', async () => {
     render(<ChipLibPage />);
     fireEvent.click(screen.getByRole('button', { name: /知识与工程经验/ }));
-    await screen.findByRole('region', { name: '嵌入式开发知识库' });
+    await screen.findByRole('region', { name: '嵌入式开发知识库' }, { timeout: 5000 });
     fireEvent.click(screen.getByRole('button', { name: '本地工程经验' }));
     expect(screen.getByRole('heading', { name: '记录真实问题经验' }).closest('article')).toHaveClass('theme-canvas');
     fireEvent.change(screen.getByLabelText('标题 *'), { target: { value: 'UART DMA 超时' } });

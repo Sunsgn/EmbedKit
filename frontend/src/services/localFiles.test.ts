@@ -11,8 +11,8 @@ describe('controlled Local Agent path picker', () => {
 
     await expect(selectLocalDirectory()).resolves.toMatchObject({ cancelled: false, path: 'D:\\firmware' });
     await expect(selectLocalFile()).resolves.toEqual({ cancelled: true, kind: 'file' });
-    expect(fetch.mock.calls[0][1]).toEqual(expect.objectContaining({ method: 'POST', body: JSON.stringify({ kind: 'directory' }) }));
-    expect(fetch.mock.calls[1][1]).toEqual(expect.objectContaining({ method: 'POST', body: JSON.stringify({ kind: 'file' }) }));
+    expect(fetch.mock.calls[0][1]).toEqual(expect.objectContaining({ method: 'POST', body: JSON.stringify({ kind: 'directory', purpose: 'general' }) }));
+    expect(fetch.mock.calls[1][1]).toEqual(expect.objectContaining({ method: 'POST', body: JSON.stringify({ kind: 'file', purpose: 'general' }) }));
   });
 
   it('reads bounded chunks by selection token and revokes access', async () => {

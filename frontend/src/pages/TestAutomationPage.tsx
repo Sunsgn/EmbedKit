@@ -73,8 +73,9 @@ import {
   normalizeRetryPolicy,
   retryTimeRemaining,
 } from "../utils/testRetryPolicy";
+import { applyLineEnding, createAtNetworkCase, createTestStep as createStep, isLineEnding, resolveFlowVariables as resolveVariables, type Channel, type FlowVariable, type Incoming, type LineEnding, type NetworkConfig, type RunLog, type SerialConnectionConfig, type SerialRuntime, type StepStage, type StepStatus, type StepType, type TestCase, type TestStep, type TestSuite } from "../features/test-automation/domain";
+import { loadSerialConfigs, loadTestSuites as loadSuites, saveSerialConfigs, saveTestSuites } from "../features/test-automation/persistence";
 
-type Channel = "serial-a" | "serial-b" | "websocket" | "tcp" | "udp";
 interface FirmwareChoice {
   id: string;
   firmwareId?: string;
@@ -86,123 +87,7 @@ interface FirmwareChoice {
   sha256: string;
   analyzedAt: string;
 }
-type StepType =
-  | "command"
-  | "send"
-  | "wait"
-  | "match"
-  | "delay"
-  | "wait-online"
-  | "clear-buffer"
-  | "set-variable"
-  | "manual";
-type StepStatus = "idle" | "running" | "passed" | "failed" | "skipped";
-type StepStage = "setup" | "test" | "teardown";
-type LineEnding = "none" | "cr" | "lf" | "crlf";
-interface TestStep {
-  id: string;
-  name: string;
-  type: StepType;
-  stage?: StepStage;
-  channel: Channel;
-  data: string;
-  hex: boolean;
-  durationMs: number;
-  timeoutMs: number;
-  retryCount: number;
-  retryDelayMs?: number;
-  retryTimeLimitMs?: number;
-  matchMode: "contains" | "equals" | "regex";
-  expected?: string;
-  failurePattern?: string;
-  captureName?: string;
-  captureRegex?: string;
-  onFailure?: "stop" | "continue";
-  lineEnding?: LineEnding;
-}
-interface TestCase {
-  id: string;
-  name: string;
-  steps: TestStep[];
-  sharedChannel?: boolean;
-  channel?: Channel;
-  lineEnding?: LineEnding;
-}
-interface FlowVariable {
-  id: string;
-  name: string;
-  value: string;
-  secret: boolean;
-}
-interface TestSuite {
-  id: string;
-  name: string;
-  cases: TestCase[];
-  variables?: FlowVariable[];
-}
-interface RunLog {
-  id: number;
-  time: string;
-  level: "info" | "pass" | "fail" | "rx" | "tx";
-  text: string;
-}
-interface Incoming {
-  channel: Channel;
-  text: string;
-  hex: string;
-}
 type SessionEvidence = ArchivedCommunicationEvidence;
-interface SerialRuntime {
-  id: string;
-  after: number;
-  path: string;
-  polling: boolean;
-}
-interface SerialConnectionConfig {
-  path: string;
-  baudRate: number;
-  dataBits: 7 | 8;
-  stopBits: 1 | 2;
-  parity: "none" | "even" | "odd";
-  flowControl: "none" | "hardware";
-}
-interface NetworkConfig {
-  mode: "client" | "server";
-  host: string;
-  port: string;
-  localPort: string;
-}
-
-const STORAGE_KEY = "embedkit.automation.suites";
-const SERIAL_CONFIG_KEY = "embedkit.automation.serial-config.v1";
-const defaultSerialConnection = (): SerialConnectionConfig => ({
-  path: "",
-  baudRate: 115200,
-  dataBits: 8,
-  stopBits: 1,
-  parity: "none",
-  flowControl: "none",
-});
-const loadSerialConfigs = (): Record<"serial-a" | "serial-b", SerialConnectionConfig> => {
-  const fallback = { "serial-a": defaultSerialConnection(), "serial-b": defaultSerialConnection() };
-  try {
-    const saved = JSON.parse(localStorage.getItem(SERIAL_CONFIG_KEY) ?? "null") as Partial<Record<"serial-a" | "serial-b", Partial<SerialConnectionConfig>>> | null;
-    if (!saved) return fallback;
-    for (const channel of ["serial-a", "serial-b"] as const) {
-      const value = saved[channel];
-      if (!value) continue;
-      fallback[channel] = {
-        path: typeof value.path === "string" ? value.path.slice(0, 260) : "",
-        baudRate: Number.isInteger(value.baudRate) && Number(value.baudRate) >= 50 && Number(value.baudRate) <= 4_000_000 ? Number(value.baudRate) : 115200,
-        dataBits: value.dataBits === 7 ? 7 : 8,
-        stopBits: value.stopBits === 2 ? 2 : 1,
-        parity: value.parity === "even" || value.parity === "odd" ? value.parity : "none",
-        flowControl: value.flowControl === "hardware" ? "hardware" : "none",
-      };
-    }
-  } catch { /* damaged preferences fall back without blocking test editing */ }
-  return fallback;
-};
 const channelLabels: Record<Channel, string> = {
   "serial-a": "串口 A",
   "serial-b": "串口 B",
@@ -251,112 +136,8 @@ const lineEndingLabels: Record<LineEnding, string> = {
   cr: "仅回车（CR）",
   lf: "仅换行（LF）",
 };
-const isLineEnding = (value: unknown): value is LineEnding =>
-  value === "none" || value === "crlf" || value === "cr" || value === "lf";
-const createStep = (type: StepType = "command"): TestStep => ({
-  id: crypto.randomUUID(),
-  name: typeLabels[type],
-  type,
-  stage: "test",
-  channel: "serial-a",
-  data:
-    type === "command"
-      ? "AT"
-      : type === "match"
-        ? "OK"
-        : type === "manual"
-          ? "请确认设备状态正常后继续"
-          : "",
-  expected: type === "command" ? "OK" : "",
-  failurePattern: "ERROR|FAIL",
-  captureName: type === "set-variable" ? "VARIABLE" : "",
-  captureRegex: "",
-  onFailure: "stop",
-  hex: false,
-  durationMs: 500,
-  timeoutMs: 3000,
-  retryCount: type === "command" ? 1 : 0,
-  retryDelayMs: 1000,
-  retryTimeLimitMs: 5 * 60 * 1000,
-  matchMode: "contains",
-});
-const createAtNetworkCase = (): TestCase => {
-  const command = (
-    name: string,
-    data: string,
-    expected = "OK",
-    timeoutMs = 3000,
-    extra: Partial<TestStep> = {},
-  ): TestStep => ({
-    ...createStep("command"),
-    name,
-    data,
-    expected,
-    timeoutMs,
-    ...extra,
-  });
-  return {
-    id: crypto.randomUUID(),
-    name: "ESP-AT 模组联网流程",
-    sharedChannel: true,
-    channel: "serial-a",
-    lineEnding: "crlf",
-    steps: [
-      command("检测模组", "AT"),
-      command("关闭指令回显", "ATE0"),
-      command("设置 Station 模式", "AT+CWMODE=1"),
-      command(
-        "连接 Wi-Fi",
-        'AT+CWJAP="{{SSID}}","{{PASSWORD}}"',
-        "WIFI GOT IP|OK",
-        20000,
-        { matchMode: "regex", retryCount: 2 },
-      ),
-      command("读取并保存 IP 地址", "AT+CIFSR", "STAIP,", 5000, {
-        captureName: "DEVICE_IP",
-        captureRegex: 'STAIP,"([^"]+)"',
-      }),
-    ],
-  };
-};
-const defaultSuites = (): TestSuite[] => [
-  {
-    id: crypto.randomUUID(),
-    name: "设备通信测试",
-    variables: [],
-    cases: [
-      {
-        id: crypto.randomUUID(),
-        name: "启动与响应",
-        sharedChannel: true,
-        channel: "serial-a",
-        lineEnding: "none",
-        steps: [createStep("command")],
-      },
-    ],
-  },
-];
-function loadSuites() {
-  try {
-    const value = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null") as
-      TestSuite[] | null;
-    return value?.length ? value : defaultSuites();
-  } catch {
-    return defaultSuites();
-  }
-}
 const sleep = (ms: number) =>
   new Promise((resolve) => window.setTimeout(resolve, ms));
-const resolveVariables = (value: string, variables: FlowVariable[] = []) =>
-  value.replace(
-    /\{\{([A-Za-z_][\w]*)\}\}/g,
-    (token, name: string) =>
-      variables.find((item) => item.name === name)?.value ?? token,
-  );
-const applyLineEnding = (value: string, lineEnding: LineEnding = "none") =>
-  lineEnding === "none"
-    ? value
-    : `${value.replace(/(?:\r\n|\r|\n)$/, "")}${lineEnding === "crlf" ? "\r\n" : lineEnding === "cr" ? "\r" : "\n"}`;
 
 export default function TestAutomationPage() {
   const [suites, setSuites] = useState<TestSuite[]>(loadSuites);
@@ -480,16 +261,10 @@ export default function TestAutomationPage() {
   }, []);
 
   useEffect(() => {
-    const safeSuites = suites.map((suite) => ({
-      ...suite,
-      variables: suite.variables?.map((variable) =>
-        variable.secret ? { ...variable, value: "" } : variable,
-      ),
-    }));
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(safeSuites));
+    saveTestSuites(suites);
   }, [suites]);
   useEffect(() => {
-    localStorage.setItem(SERIAL_CONFIG_KEY, JSON.stringify(serialConfigs));
+    saveSerialConfigs(serialConfigs);
   }, [serialConfigs]);
   useEffect(() => {
     void Promise.all([
