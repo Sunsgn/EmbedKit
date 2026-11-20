@@ -69,12 +69,10 @@ import {
   MAX_RETRY_COUNT,
   MAX_RETRY_DELAY_MS,
   MAX_RETRY_TIME_LIMIT_MS,
-  canRetryStep,
-  normalizeRetryPolicy,
-  retryTimeRemaining,
 } from "../utils/testRetryPolicy";
 import { applyLineEnding, createAtNetworkCase, createTestStep as createStep, isLineEnding, resolveFlowVariables as resolveVariables, type Channel, type FlowVariable, type Incoming, type LineEnding, type NetworkConfig, type RunLog, type SerialConnectionConfig, type SerialRuntime, type StepStage, type StepStatus, type StepType, type TestCase, type TestStep, type TestSuite } from "../features/test-automation/domain";
 import { loadSerialConfigs, loadTestSuites as loadSuites, saveSerialConfigs, saveTestSuites } from "../features/test-automation/persistence";
+import { executeStepWithRetry } from "../features/test-automation/executionController";
 
 interface FirmwareChoice {
   id: string;
@@ -816,17 +814,10 @@ export default function TestAutomationPage() {
         `${stageLabels[stage]} · ${typeLabels[step.type]}：${step.name}`,
       );
       try {
-        let lastError: unknown;
-        const retryPolicy = normalizeRetryPolicy(step);
-        for (let attempt = 0; attempt <= retryPolicy.retryCount; attempt += 1) {
-          if (
-            attempt > 0 &&
-            retryPolicy.retryTimeLimitMs > 0 &&
-            Date.now() - stepStarted >= retryPolicy.retryTimeLimitMs
-          )
-            break;
-          attempts = attempt;
-          try {
+        const execution = await executeStepWithRetry(
+          step,
+          async () => {
+            let attemptEvidence = "";
             if (stopRequested.current && stage !== "teardown")
               throw new Error("执行已停止");
             if (executionStep.type === "command") {
@@ -838,7 +829,7 @@ export default function TestAutomationPage() {
                 executionStep.expected || "OK",
                 executionStep.failurePattern || "ERROR|FAIL",
               );
-              observedEvidence = response;
+              attemptEvidence = response;
               captureResponse(executionStep, response);
             } else if (executionStep.type === "send")
               await sendData(executionStep);
@@ -879,44 +870,26 @@ export default function TestAutomationPage() {
               )
                 throw new Error("人工确认未通过");
             } else
-              observedEvidence = await waitForInput(
+              attemptEvidence = await waitForInput(
                 executionStep,
                 executionStep.type === "match",
               );
-            lastError = undefined;
-            break;
-          } catch (reason) {
-            lastError = reason;
-            if (stopRequested.current && stage !== "teardown") break;
-            const elapsedMs = Date.now() - stepStarted;
-            if (!canRetryStep(retryPolicy, attempt, elapsedMs)) {
-              if (
-                attempt < retryPolicy.retryCount &&
-                retryPolicy.retryTimeLimitMs > 0
-              )
-                addRunLog(
-                  "info",
-                  `${step.name} · 已达到总持续时间 ${Math.round(retryPolicy.retryTimeLimitMs / 1000)} 秒，停止重试`,
-                );
-              break;
-            }
+            return attemptEvidence;
+          },
+          {
+            shouldStop: () => stopRequested.current && stage !== "teardown",
+            sleep,
+            onAttempt: (attempt) => { attempts = attempt; },
+            onRetry: ({ failedAttempt, delayMs }) =>
             addRunLog(
               "info",
-              `${step.name} · 第 ${attempt + 1} 次失败，${retryPolicy.retryDelayMs ? `${retryPolicy.retryDelayMs} ms 后` : "立即"}重新执行完整步骤`,
-            );
-            const retryDelay = Math.min(
-              retryPolicy.retryDelayMs,
-              retryTimeRemaining(retryPolicy, elapsedMs),
-            );
-            for (let waited = 0; waited < retryDelay; ) {
-              if (stopRequested.current && stage !== "teardown") break;
-              const slice = Math.min(100, retryDelay - waited);
-              await sleep(slice);
-              waited += slice;
-            }
-          }
-        }
-        if (lastError) throw lastError;
+              `${step.name} · 第 ${failedAttempt + 1} 次失败，${delayMs ? `${delayMs} ms 后` : "立即"}重新执行完整步骤`,
+            ),
+            onTimeLimit: (limitMs) => addRunLog("info", `${step.name} · 已达到总持续时间 ${Math.round(limitMs / 1000)} 秒，停止重试`),
+          },
+        );
+        attempts = execution.attempts;
+        observedEvidence = execution.value;
         const finished = Date.now();
         stepRuns.push({
           id: step.id,

@@ -14,6 +14,7 @@ import { analyzeElf, lookupElfAddress, parseElfAddress } from './elf.js';
 import { AGENT_PROTOCOL_VERSION, listAgentCapabilities, validateAgentContract } from '../contracts/agent-api.js';
 import { createHttpBoundary } from './server/http.js';
 import { AgentRouter } from './server/router.js';
+import { registerPartRoutes } from './routes/parts.js';
 
 const PORT = process.env.EMBEDKIT_PROXY_PORT || 9999;
 const HOST = process.env.EMBEDKIT_PROXY_HOST || '127.0.0.1';
@@ -651,6 +652,7 @@ const agentRouter = new AgentRouter().register({
   id: 'agent.status', method: 'GET', path: '/api/agent/status',
   handler: async ({ res }) => jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: listAgentCapabilities(process.platform) }),
 });
+registerPartRoutes(agentRouter, { jsonResponse: jsonRes, discoverDocuments: discoverOfficialPartDocuments, readDocument: readOfficialPartDocument, readPartDetails: getChipDetails, maxDocumentResults: PART_DOCUMENT_MAX_RESULTS });
 
 async function persistSerialSessions() {
   const sessions = [...serialSessions.values()].filter(session => session.state === 'connected').map(({ path, baudRate, dataBits, stopBits, parity, flowControl, dtr, rts, frameMode, frameGapMs }) => ({ path, baudRate, dataBits, stopBits, parity, flowControl, dtr, rts, frameMode, frameGapMs }));
@@ -2077,38 +2079,8 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (pathname === '/api/parts/sources' && req.method === 'GET') {
-    jsonRes(res, 200, {
-      schemaVersion: 1,
-      sources: [
-        { id: 'snapmagic', name: 'SnapMagic', kind: 'aggregator', state: 'configured', capabilities: ['keyword-details', 'datasheet-link'], dataScope: '仅发送用户输入的器件型号', authoritative: false },
-        { id: 'manufacturer-navigation', name: '厂商官方资料导航', kind: 'manufacturer', state: 'configured', capabilities: ['product-page-link', 'official-pdf-discovery'], dataScope: '仅向已注册的厂商官方域名发送器件型号并限量读取产品页面', authoritative: true },
-      ],
-      limits: { queryLength: 120, automaticPdfDownload: false, parametricSearch: false, documentResults: PART_DOCUMENT_MAX_RESULTS },
-    });
-    return;
-  }
-
-  if (pathname === '/api/parts/documents' && req.method === 'GET') {
-    try {
-      jsonRes(res, 200, await discoverOfficialPartDocuments({ model: requestUrl.searchParams.get('part'), manufacturer: requestUrl.searchParams.get('manufacturer'), productUrl: requestUrl.searchParams.get('productUrl') }));
-    } catch (error) { jsonRes(res, 400, { error: error.message, code: 'invalid-document-query' }); }
-    return;
-  }
-
-  if (pathname === '/api/parts/document-content' && req.method === 'GET') {
-    try {
-      const result = await readOfficialPartDocument(requestUrl.searchParams.get('url'));
-      const candidate = new URL(result.finalUrl).pathname.split('/').filter(Boolean).pop() || 'official-document.pdf';
-      const fileName = /\.pdf$/i.test(candidate) ? candidate : `${candidate}.pdf`;
-      res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': result.bytes.length, 'Content-Disposition': `inline; filename="${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}"`, 'X-EmbedKit-Source-Url': result.finalUrl });
-      res.end(result.bytes);
-    } catch (error) { jsonRes(res, /registered manufacturer domain/.test(error.message) ? 403 : 502, { error: error.message, code: 'official-pdf-unavailable' }); }
-    return;
-  }
-
-  if (pathname === '/api/chip-details' || pathname === '/api/component-details') {
-    const chipName = requestUrl.searchParams.get('chip') || requestUrl.searchParams.get('part');
+  if (pathname === '/api/chip-details') {
+    const chipName = requestUrl.searchParams.get('chip');
     if (!chipName) {
       jsonRes(res, 400, { error: 'Missing "chip" or "part" parameter' });
       return;
