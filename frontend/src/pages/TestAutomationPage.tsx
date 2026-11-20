@@ -360,12 +360,12 @@ const applyLineEnding = (value: string, lineEnding: LineEnding = "none") =>
 
 export default function TestAutomationPage() {
   const [suites, setSuites] = useState<TestSuite[]>(loadSuites);
-  const [selectedSuiteId, setSelectedSuiteId] = useState(() => suites[0].id);
+  const [selectedSuiteId, setSelectedSuiteId] = useState(() => suites[0]?.id ?? "");
   const [selectedCaseId, setSelectedCaseId] = useState(
-    () => suites[0].cases[0].id,
+    () => suites[0]?.cases[0]?.id ?? "",
   );
   const [selectedStepId, setSelectedStepId] = useState(
-    () => suites[0].cases[0].steps[0]?.id ?? "",
+    () => suites[0]?.cases[0]?.steps[0]?.id ?? "",
   );
   const [statuses, setStatuses] = useState<Record<string, StepStatus>>({});
   const [runLogs, setRunLogs] = useState<RunLog[]>([]);
@@ -2013,6 +2013,13 @@ export default function TestAutomationPage() {
               <span className="text-[10px] text-gray-600">自动保存</span>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-2 scrollbar-thin">
+              {!selectedCase && (
+                <div className="flex h-full min-h-52 flex-col items-center justify-center rounded-lg border border-dashed border-[#30363d] bg-[#111820]/50 px-6 text-center">
+                  <b className="text-sm text-gray-300">当前套件还没有测试流程</b>
+                  <p className="mt-2 max-w-sm text-[11px] leading-5 text-gray-600">可以新建空白流程或使用 AT 模组联网模板。已保存的运行历史不会因流程列表为空而删除。</p>
+                  <button onClick={addCase} disabled={running} className="mt-3 flex items-center gap-1 rounded-lg bg-cyan-600 px-3 py-2 text-xs text-white disabled:opacity-40"><Plus size={12} />新建第一个流程</button>
+                </div>
+              )}
               {selectedCase?.steps.map((step, index) => {
                 const status = statuses[step.id] ?? "idle";
                 return (
@@ -2105,7 +2112,7 @@ export default function TestAutomationPage() {
                 <button
                   key={type}
                   onClick={() => addStep(type)}
-                  disabled={running}
+                  disabled={running || !selectedCase}
                   className="flex items-center gap-1 rounded-md border border-[#30363d] bg-[#161b22] px-2 py-1.5 text-[10px] text-gray-400 hover:border-cyan-500/40 hover:text-cyan-300 disabled:opacity-40"
                 >
                   <Plus size={10} />

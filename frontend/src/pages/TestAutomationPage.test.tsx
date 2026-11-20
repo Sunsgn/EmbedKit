@@ -67,6 +67,23 @@ describe('TestAutomationPage centralized Agent workflow', () => {
     expect(screen.getByText(/测试创建的网络资源已释放/)).toBeVisible();
   });
 
+  it('keeps an empty suite usable after deleting and reloading its last flow', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const first = render(<TestAutomationPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: '删除' }));
+    expect(await screen.findByText('当前套件还没有测试流程')).toBeVisible();
+    expect(screen.getByRole('button', { name: '新建第一个流程' })).toBeEnabled();
+    await waitFor(() => expect(JSON.parse(localStorage.getItem('embedkit.automation.suites') ?? '[]')[0].cases).toEqual([]));
+
+    first.unmount();
+    render(<TestAutomationPage />);
+    expect(screen.getByText('当前套件还没有测试流程')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '新建第一个流程' }));
+    expect(screen.getByText('测试流程 1')).toBeVisible();
+    confirm.mockRestore();
+  });
+
   it('overrides the case line ending for one text send step and persists the choice', async () => {
     render(<TestAutomationPage />);
     const lineEnding = screen.getByLabelText('步骤发送行尾');
