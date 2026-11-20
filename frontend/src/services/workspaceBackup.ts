@@ -4,24 +4,12 @@ import { exportProductData, mergeProductData, type ProductDataSnapshot } from '.
 import { normalizeEngineeringProject } from './projectModel';
 import { KNOWLEDGE_EXPERIENCE_STORAGE_KEY, parseKnowledgeExperienceLibrary } from './knowledgeExperience';
 import { PROJECT_ANALYSIS_RUN_LIMIT, normalizeProjectAnalysisRuns, parseProjectAnalysisRun } from './projectAnalysisModel';
+import { PORTABLE_LOCAL_STORAGE_KEYS, type RegisteredLocalStorageKey } from '../infrastructure/persistence/storageRegistry';
 
 const SCHEMA = 'embedkit.workspace-backup';
 const VERSION = 1;
 export const WORKSPACE_BACKUP_MAX_BYTES = 16 * 1024 * 1024;
 const MAX_LOCAL_VALUE_BYTES = 4 * 1024 * 1024;
-const PORTABLE_LOCAL_KEYS = [
-  'embedkit.tool-preferences',
-  'embedkit.appearance',
-  'embedkit.serial.settings',
-  'embedkit.serial.shortcuts',
-  'embedkit.serial.shortcut-limit',
-  'embedkit.network.send-history',
-  'embedkit.automation.suites',
-  'embedkit-learning-progress',
-  'embedkit.build-analysis-records',
-  'embedkit.part-selection-records',
-  'embedkit.knowledge-experiences',
-] as const;
 
 type PortableValue = null | boolean | number | string | PortableValue[] | { [key: string]: PortableValue };
 
@@ -29,7 +17,7 @@ export interface WorkspaceBackup {
   schema: typeof SCHEMA;
   version: typeof VERSION;
   createdAt: string;
-  local: Partial<Record<(typeof PORTABLE_LOCAL_KEYS)[number], PortableValue>>;
+  local: Partial<Record<RegisteredLocalStorageKey, PortableValue>>;
   product: ProductDataSnapshot;
   privacy: {
     excluded: string[];
@@ -64,7 +52,7 @@ function sanitize(value: unknown, key = ''): PortableValue {
 
 function readPortableLocal(storage: Storage) {
   const result: WorkspaceBackup['local'] = {};
-  for (const key of PORTABLE_LOCAL_KEYS) {
+  for (const key of PORTABLE_LOCAL_STORAGE_KEYS) {
     const raw = storage.getItem(key);
     if (raw === null || encodedSize(raw) > MAX_LOCAL_VALUE_BYTES) continue;
     try { result[key] = sanitize(key === KNOWLEDGE_EXPERIENCE_STORAGE_KEY ? parseKnowledgeExperienceLibrary(raw) : JSON.parse(raw)); }
@@ -97,7 +85,7 @@ export function parseWorkspaceBackup(text: string): WorkspaceBackup {
   const normalizedProjects = projects.map(normalizeEngineeringProject);
   if (normalizedProjects.some(project => project === null)) throw new Error('工程档案数据无效或超过资源上限');
   if (!Array.isArray(runs) || runs.length > 5000 || !runs.every(validRun)) throw new Error('测试记录数据无效或超过 5000 项');
-  const local = Object.fromEntries(Object.entries(value.local).filter(([key]) => (PORTABLE_LOCAL_KEYS as readonly string[]).includes(key)).map(([key, item]) => [key, sanitize(item)])) as WorkspaceBackup['local'];
+  const local = Object.fromEntries(Object.entries(value.local).filter(([key]) => PORTABLE_LOCAL_STORAGE_KEYS.includes(key as RegisteredLocalStorageKey)).map(([key, item]) => [key, sanitize(item)])) as WorkspaceBackup['local'];
   if (Object.values(local).some(item => encodedSize(JSON.stringify(item)) > MAX_LOCAL_VALUE_BYTES)) throw new Error('单项本地配置超过 4 MiB 上限');
   if (local[KNOWLEDGE_EXPERIENCE_STORAGE_KEY] !== undefined) local[KNOWLEDGE_EXPERIENCE_STORAGE_KEY] = sanitize(parseKnowledgeExperienceLibrary(JSON.stringify(local[KNOWLEDGE_EXPERIENCE_STORAGE_KEY])));
   return { schema: SCHEMA, version: VERSION, createdAt: typeof value.createdAt === 'string' ? value.createdAt : '', local, product: { projects: normalizedProjects as EngineeringProject[], runs, projectRevisions: parseLifecycleCollection(product.projectRevisions, parseProjectRevision, '工程修订'), buildArtifacts: parseLifecycleCollection(product.buildArtifacts, parseBuildArtifact, '构建产物'), firmwareIdentities: parseLifecycleCollection(product.firmwareIdentities, parseFirmwareIdentity, '固件身份'), communicationSessions: parseLifecycleCollection(product.communicationSessions, parseCommunicationSession, '通信会话'), projectAnalysisRuns: parseAnalysisRuns(product.projectAnalysisRuns) }, privacy: { excluded: Array.isArray((value.privacy as Record<string, unknown> | undefined)?.excluded) ? (value.privacy as { excluded: string[] }).excluded : [], note: '导入前已重新执行字段白名单和秘密值清理。' } };

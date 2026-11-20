@@ -62,7 +62,10 @@ function AppShell() {
   const navigate = useNavigate();
   const communicationActive = location.pathname === '/communication';
   const [communicationMounted, setCommunicationMounted] = useState(communicationActive);
-  if (communicationActive && !communicationMounted) setCommunicationMounted(true);
+  useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- the workspace is mounted once, then intentionally retained so browser-owned ports survive route changes.
+    if (communicationActive) setCommunicationMounted(true);
+  }, [communicationActive]);
   useEffect(() => { const connected = () => setOnline(true), disconnected = () => setOnline(false); window.addEventListener('online', connected); window.addEventListener('offline', disconnected); const unsubscribe = subscribePwaUpdate(setUpdateAvailable); return () => { window.removeEventListener('online', connected); window.removeEventListener('offline', disconnected); unsubscribe(); }; }, []);
   useEffect(() => {
     const media = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)') : null;

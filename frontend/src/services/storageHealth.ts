@@ -1,28 +1,12 @@
 const SCHEMA = 'embedkit.storage-health';
 const VERSION = 1;
-const MAX_VALUE_BYTES = 4 * 1024 * 1024;
+import { STORAGE_HEALTH_RULES, type StorageShape } from '../infrastructure/persistence/storageRegistry';
 
-type ExpectedShape = 'object' | 'array' | 'number';
+type ExpectedShape = StorageShape;
 export type StorageHealthReason = 'invalid-json' | 'unexpected-shape' | 'too-large' | 'unreadable';
 
-interface StorageRule {
-  key: string;
-  label: string;
-  shape: ExpectedShape;
-}
-
-const RULES: StorageRule[] = [
-  { key: 'embedkit.appearance', label: '外观与主题设置', shape: 'object' },
-  { key: 'embedkit.tool-preferences', label: '工具收藏与最近使用', shape: 'object' },
-  { key: 'embedkit.serial.settings', label: '串口显示设置', shape: 'object' },
-  { key: 'embedkit.serial.shortcuts', label: '串口快捷指令', shape: 'array' },
-  { key: 'embedkit.serial.shortcut-limit', label: '串口快捷指令数量', shape: 'number' },
-  { key: 'embedkit.network.send-history', label: '网络发送历史', shape: 'array' },
-  { key: 'embedkit.automation.suites', label: '集成测试套件', shape: 'array' },
-  { key: 'embedkit-learning-progress', label: '学习进度', shape: 'object' },
-  { key: 'embedkit.build-analysis-records', label: '构建分析摘要', shape: 'array' },
-  { key: 'embedkit.knowledge-experiences', label: '本地工程经验', shape: 'object' },
-];
+const LABELS: Record<string, string> = { appearance: '外观与主题设置', 'tool-preferences': '工具收藏与最近使用', 'serial-settings': '串口显示设置', 'serial-shortcuts': '串口快捷指令', 'serial-shortcut-limit': '串口快捷指令数量', 'network-send-history': '网络发送历史', 'test-suites': '集成测试套件', 'learning-progress': '学习进度', 'build-analysis-records': '构建分析摘要', 'knowledge-experiences': '本地工程经验' };
+const RULES = STORAGE_HEALTH_RULES.map(rule => ({ ...rule, label: LABELS[rule.label] ?? rule.label }));
 
 export interface StorageHealthIssue {
   key: string;
@@ -56,7 +40,7 @@ export function inspectStorageHealth(storage: Storage = localStorage, now = new 
     catch { issues.push({ key: rule.key, label: rule.label, reason: 'unreadable', bytes: null }); continue; }
     if (raw === null) continue;
     const bytes = byteLength(raw);
-    if (bytes > MAX_VALUE_BYTES) { issues.push({ key: rule.key, label: rule.label, reason: 'too-large', bytes }); continue; }
+    if (bytes > rule.maxBytes) { issues.push({ key: rule.key, label: rule.label, reason: 'too-large', bytes }); continue; }
     let value: unknown;
     try { value = JSON.parse(raw); }
     catch { issues.push({ key: rule.key, label: rule.label, reason: 'invalid-json', bytes }); continue; }

@@ -1,5 +1,6 @@
 import type { PartDocumentKind, PartParameter, PartRecord } from '../types';
 import { agentBinaryRequest, agentRequest, AgentClientError } from './agentClient';
+import { agentPaths } from '../application/agent/routes';
 
 export interface PartSourceCapability { id: string; name: string; kind: 'manufacturer' | 'distributor' | 'aggregator' | 'user-import'; state: 'configured' | 'unavailable'; capabilities: string[]; dataScope: string; authoritative: boolean }
 export interface PartSourceStatus { schemaVersion: 1; sources: PartSourceCapability[]; limits: { queryLength: number; automaticPdfDownload: boolean; parametricSearch: boolean; documentResults?: number } }
@@ -11,7 +12,7 @@ const text = (value: unknown, limit: number) => typeof value === 'string' && val
 const safeUrl = (value: unknown) => { const raw = text(value, 2048); if (!raw) return undefined; try { const url = new URL(raw); return ['https:', 'http:'].includes(url.protocol) ? url.toString() : undefined; } catch { return undefined; } };
 
 export async function getPartSourceStatus(): Promise<PartSourceStatus> {
-  const result = await agentRequest<PartSourceStatus>('/api/parts/sources', {}, 3000);
+  const result = await agentRequest<PartSourceStatus>(agentPaths.partSources, {}, 3000);
   if (result.schemaVersion !== 1 || !Array.isArray(result.sources) || result.sources.length > 32 || !result.limits) throw new AgentClientError('invalid-response', '在线器件来源状态格式无效');
   return result;
 }
@@ -19,7 +20,7 @@ export async function getPartSourceStatus(): Promise<PartSourceStatus> {
 export async function lookupOnlinePart(model: string, signal?: AbortSignal): Promise<OnlinePartDetails> {
   const query = model.trim();
   if (query.length < 2 || query.length > 120 || !/^[\p{L}\p{N}][\p{L}\p{N}._+\-/ ]*$/u.test(query)) throw new AgentClientError('invalid-response', '请输入 2～120 个字符的完整器件型号');
-  const raw = await agentRequest<Record<string, unknown>>(`/api/component-details?part=${encodeURIComponent(query)}`, { signal }, 12000);
+  const raw = await agentRequest<Record<string, unknown>>(agentPaths.partDetails(query), { signal }, 12000);
   if (raw.error) throw new AgentClientError('http', text(raw.error, 500) || '在线来源没有找到该型号');
   const specs: Record<string, string> = {};
   if (raw.specs && typeof raw.specs === 'object' && !Array.isArray(raw.specs)) for (const [key, value] of Object.entries(raw.specs).slice(0, 64)) { const label = text(key, 120), detail = text(value, 500); if (label && detail) specs[label] = detail; }
@@ -31,7 +32,7 @@ export async function discoverPartDocuments(input: { model: string; manufacturer
   const model = input.model.trim(), params = new URLSearchParams({ part: model });
   if (input.manufacturer?.trim()) params.set('manufacturer', input.manufacturer.trim());
   if (input.productUrl) params.set('productUrl', input.productUrl);
-  const raw = await agentRequest<Record<string, unknown>>(`/api/parts/documents?${params}`, { signal }, 30000);
+  const raw = await agentRequest<Record<string, unknown>>(`${agentPaths.partDocuments}?${params}`, { signal }, 30000);
   if (raw.schemaVersion !== 1 || !Array.isArray(raw.documents) || raw.documents.length > 24 || !Array.isArray(raw.failures)) throw new AgentClientError('invalid-response', '官方 PDF 发现结果格式无效');
   const allowedKinds = new Set<PartDocumentKind>(['datasheet', 'reference-manual', 'user-guide', 'programming-manual', 'application-note', 'errata', 'hardware-design-guide', 'getting-started-guide', 'product-page', 'other']);
   const documents: DiscoveredPartDocument[] = [];
@@ -48,7 +49,7 @@ export async function discoverPartDocuments(input: { model: string; manufacturer
 export async function readOfficialPartDocument(url: string, signal?: AbortSignal) {
   const safe = safeUrl(url);
   if (!safe?.startsWith('https:')) throw new AgentClientError('invalid-response', '官方文档地址必须使用 HTTPS');
-  const result = await agentBinaryRequest(`/api/parts/document-content?url=${encodeURIComponent(safe)}`, { signal }, 45000);
+  const result = await agentBinaryRequest(`${agentPaths.partDocumentContent}?url=${encodeURIComponent(safe)}`, { signal }, 45000);
   if (result.bytes.byteLength < 5 || result.bytes.byteLength > 50 * 1024 * 1024 || new TextDecoder('ascii').decode(result.bytes.subarray(0, 5)) !== '%PDF-') throw new AgentClientError('invalid-response', '本地助手返回的内容不是有效 PDF 或超过 50 MiB 上限');
   return { ...result, sourceUrl: safeUrl(result.sourceUrl) || safe };
 }

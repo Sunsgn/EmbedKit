@@ -1,5 +1,6 @@
 import { agentRequest } from './agentClient';
 import type { LocalPathSelection } from './localFiles';
+import { agentPaths } from '../application/agent/routes';
 
 export type BuildSystem = 'cmake' | 'make' | 'ninja';
 export type BuildAction = 'configure' | 'build' | 'clean' | 'rebuild';
@@ -12,12 +13,12 @@ export interface BuildJobOptions { rootPath: string; system: BuildSystem; buildD
 export interface BuildArtifactHash { algorithm: 'sha256'; digest: string; size: number; modifiedAt: string }
 
 export function detectBuildEnvironment(rootPath: string) {
-  return agentRequest<BuildDetection>('/api/build/detect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rootPath }) });
+  return agentRequest<BuildDetection>(agentPaths.buildDetect, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rootPath }) });
 }
 export function createBuildJob(options: BuildJobOptions) {
-  return agentRequest<BuildJob>('/api/build/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options) });
+  return agentRequest<BuildJob>(agentPaths.buildJobs, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options) });
 }
-export function readBuildJob(id: string, after = 0) { return agentRequest<BuildJob>(`/api/build/jobs/${id}?after=${after}`); }
-export function stopBuildJob(id: string) { return agentRequest<BuildJob>(`/api/build/jobs/${id}`, { method: 'DELETE' }); }
-export function authorizeBuildArtifact(jobId: string, artifactIndex: number) { return agentRequest<LocalPathSelection>(`/api/build/jobs/${jobId}/artifacts/${artifactIndex}/select`, { method: 'POST' }); }
-export function hashBuildArtifact(jobId: string, artifactIndex: number) { return agentRequest<BuildArtifactHash>(`/api/build/jobs/${jobId}/artifacts/${artifactIndex}/hash`, { method: 'POST' }, 120000); }
+export function readBuildJob(id: string, after = 0) { return agentRequest<BuildJob>(agentPaths.buildJob(id, after)); }
+export function stopBuildJob(id: string) { return agentRequest<BuildJob>(agentPaths.buildJob(id), { method: 'DELETE' }); }
+export function authorizeBuildArtifact(jobId: string, artifactIndex: number) { return agentRequest<LocalPathSelection>(agentPaths.buildArtifactSelect(jobId, artifactIndex), { method: 'POST' }); }
+export function hashBuildArtifact(jobId: string, artifactIndex: number) { return agentRequest<BuildArtifactHash>(agentPaths.buildArtifactHash(jobId, artifactIndex), { method: 'POST' }, 120000); }

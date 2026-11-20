@@ -1,6 +1,7 @@
 import { LOCAL_PROXY_BASE } from './aiService';
+import { AGENT_PROTOCOL_VERSION, AGENT_ROUTES, type AgentRouteDefinition } from '../../../contracts/agent-api.js';
 
-export const AGENT_PROTOCOL_VERSION = 1;
+export { AGENT_PROTOCOL_VERSION };
 export type AgentErrorKind = 'offline' | 'timeout' | 'cancelled' | 'incompatible' | 'http' | 'invalid-response';
 export interface AgentStatus { available: boolean; name: string; version: string; protocolVersion: number; uptimeSeconds: number; capabilities: string[]; serialSessions: number; networkSessions: number; buildJobs: number }
 
@@ -26,6 +27,12 @@ export async function agentRequest<T>(path: string, init: RequestInit = {}, time
   } finally { window.clearTimeout(timer); }
 }
 
+export function requestAgentRoute<T>(route: AgentRouteDefinition, init: RequestInit = {}) {
+  const method = (init.method ?? route.method).toUpperCase();
+  if (method !== route.method) throw new AgentClientError('invalid-response', `本地助手路由 ${route.id} 仅允许 ${route.method}`);
+  return agentRequest<T>(route.path, { ...init, method }, route.timeoutMs);
+}
+
 export async function agentBinaryRequest(path: string, init: RequestInit = {}, timeoutMs = 30000) {
   const controller = new AbortController(), timer = window.setTimeout(() => controller.abort(), timeoutMs), headers = new Headers(init.headers); headers.set('X-EmbedKit-Protocol', String(AGENT_PROTOCOL_VERSION));
   try {
@@ -39,5 +46,5 @@ export async function agentBinaryRequest(path: string, init: RequestInit = {}, t
   } finally { window.clearTimeout(timer); }
 }
 
-export async function getAgentStatus(timeoutMs = 2000) { const status = await agentRequest<AgentStatus>('/api/agent/status', {}, timeoutMs); if (!status.available || status.protocolVersion !== AGENT_PROTOCOL_VERSION || !Array.isArray(status.capabilities)) throw new AgentClientError('invalid-response', '本地助手状态响应缺少必要字段'); return status; }
+export async function getAgentStatus(timeoutMs = AGENT_ROUTES.status.timeoutMs) { const status = await agentRequest<AgentStatus>(AGENT_ROUTES.status.path, { method: AGENT_ROUTES.status.method }, timeoutMs); if (!status.available || status.protocolVersion !== AGENT_PROTOCOL_VERSION || !Array.isArray(status.capabilities)) throw new AgentClientError('invalid-response', '本地助手状态响应缺少必要字段'); return status; }
 export function hasAgentCapability(status: AgentStatus | null | undefined, capability: string) { return status?.capabilities.includes(capability) ?? false; }

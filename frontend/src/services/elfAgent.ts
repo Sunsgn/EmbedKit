@@ -1,4 +1,5 @@
 import { agentRequest } from './agentClient';
+import { agentPaths } from '../application/agent/routes';
 
 export interface ElfSection { index: number; name: string; type: string; flags: string; address: string; offset: number; size: number; entrySize: number; link: number }
 export interface ElfSegment { index: number; type: string; flags: number; offset: string; virtualAddress: string; physicalAddress: string; fileSize: number; memorySize: number }
@@ -8,6 +9,6 @@ export interface ElfSourceLine { file: string; line: number; column: number; add
 export interface ElfAddressLookup { requestedAddress: string; normalizedAddress: string; thumbBitCleared: boolean; match: 'exact-symbol' | 'inside-symbol' | 'nearest-symbol' | 'section' | 'unresolved'; confidence: 'high' | 'medium' | 'low' | 'none'; symbol: (ElfSymbol & { offset: string }) | null; section: { index: number; name: string; address: string; size: number; offset: string } | null; source: ElfSourceLine | null; note: string }
 export interface ElfDisassemblyWindow { available: boolean; requestedAddress: string; normalizedAddress: string; tool: string | null; instructions: Array<{ address: string; bytes: string; mnemonic: string; operands: string; isTarget: boolean }>; warnings: string[] }
 
-export function analyzeSelectedElf(selectionId: string) { return agentRequest<ElfAnalysis>(`/api/elf/analyze/${selectionId}`, {}, 30000); }
-export function lookupElfAddress(analysisId: string, address: string) { return agentRequest<ElfAddressLookup>(`/api/elf/analyses/${analysisId}/lookup?address=${encodeURIComponent(address)}`); }
-export function disassembleElfAddress(analysisId: string, address: string, before = 16, after = 32) { return agentRequest<ElfDisassemblyWindow>(`/api/elf/analyses/${analysisId}/disassemble?address=${encodeURIComponent(address)}&before=${before}&after=${after}`, {}, 10000); }
+export function analyzeSelectedElf(selectionId: string) { return agentRequest<ElfAnalysis>(agentPaths.elfAnalyze(selectionId), {}, 30000); }
+export function lookupElfAddress(analysisId: string, address: string) { return agentRequest<ElfAddressLookup>(agentPaths.elfLookup(analysisId, address)); }
+export function disassembleElfAddress(analysisId: string, address: string, before = 16, after = 32) { return agentRequest<ElfDisassemblyWindow>(agentPaths.elfDisassemble(analysisId, address, before, after), {}, 10000); }

@@ -11,11 +11,12 @@ import { tmpdir } from 'os';
 import { dirname, isAbsolute, join, relative, resolve } from 'path';
 import { URL, pathToFileURL } from 'url';
 import { analyzeElf, lookupElfAddress, parseElfAddress } from './elf.js';
+import { AGENT_PROTOCOL_VERSION, listAgentCapabilities, validateAgentContract } from '../contracts/agent-api.js';
+import { createHttpBoundary } from './server/http.js';
 
 const PORT = process.env.EMBEDKIT_PROXY_PORT || 9999;
 const HOST = process.env.EMBEDKIT_PROXY_HOST || '127.0.0.1';
 const AGENT_VERSION = '1.1.1';
-const AGENT_PROTOCOL_VERSION = 1;
 const MAX_REQUEST_BYTES = Number(process.env.EMBEDKIT_MAX_REQUEST_BYTES || 2 * 1024 * 1024);
 const MAX_NETWORK_SESSIONS = 16;
 const MAX_NETWORK_EVENTS = 2000;
@@ -614,33 +615,10 @@ const allowedTargets = new Set((process.env.EMBEDKIT_ALLOWED_TARGETS || [
   'http://127.0.0.1:8080',
 ].join(',')).split(',').map(value => value.trim()).filter(Boolean));
 
-export function isAllowedOrigin(origin) {
-  return !origin || allowedOrigins.has(origin);
-}
-
-function setCORS(req, res) {
-  const origin = req.headers.origin;
-  if (origin && allowedOrigins.has(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin');
-    if (req.headers['access-control-request-private-network'] === 'true') {
-      res.setHeader('Access-Control-Allow-Private-Network', 'true');
-    }
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-EmbedKit-Protocol');
-  res.setHeader('Access-Control-Expose-Headers', 'X-EmbedKit-Protocol, Content-Disposition, Content-Length, X-EmbedKit-Source-Url');
-  res.setHeader('X-EmbedKit-Protocol', String(AGENT_PROTOCOL_VERSION));
-}
-
-function jsonRes(res, status, data) {
-  if (status >= 400 && typeof data?.error === 'string') {
-    const message = data.error;
-    data = { ...data, code: status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : status === 405 ? 'METHOD_NOT_ALLOWED' : status >= 500 ? 'AGENT_INTERNAL_ERROR' : 'INVALID_REQUEST', message, details: data.details ?? null, recoverable: status < 500 };
-  }
-  res.writeHead(status, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify(data));
-}
+const httpBoundary = createHttpBoundary({ allowedOrigins, maxRequestBytes: MAX_REQUEST_BYTES });
+export const isAllowedOrigin = httpBoundary.isAllowedOrigin;
+const setCORS = httpBoundary.setCors;
+const jsonRes = httpBoundary.jsonResponse;
 
 export function validateProxyTarget(targetUrl) {
   let target;
@@ -658,32 +636,7 @@ export function validateProxyTarget(targetUrl) {
   return target;
 }
 
-function readRequestBody(req) {
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    let size = 0;
-    let tooLarge = false;
-    req.on('data', chunk => {
-      if (tooLarge) return;
-      size += chunk.length;
-      if (size > MAX_REQUEST_BYTES) {
-        tooLarge = true;
-        reject(new Error(`Request body exceeds ${MAX_REQUEST_BYTES} bytes`));
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on('end', () => { if (!tooLarge) resolve(Buffer.concat(chunks)); });
-    req.on('error', reject);
-  });
-}
-
-async function readJSONBody(req) {
-  const body = await readRequestBody(req);
-  if (!body.length) return {};
-  try { return JSON.parse(body.toString('utf8')); }
-  catch { throw new Error('Request body must be valid JSON'); }
-}
+const readJSONBody = httpBoundary.readJsonBody;
 
 const networkSessions = new Map();
 const serialSessions = new Map();
@@ -1857,7 +1810,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (pathname === '/api/agent/status' && req.method === 'GET') {
-    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: ['serial', 'serial-driver-diagnostics', ...(process.platform === 'win32' ? ['serial-driver-installation'] : []), 'tcp-client', 'tcp-server', 'udp-client', 'udp-server', 'network-framing', 'session-restore', 'network-session-restore', 'structured-errors', 'project-build', 'project-scan', 'local-picker', 'local-file-read', 'elf-analysis', 'software-environment', 'software-installation', 'part-source-status', 'part-details-online', 'part-document-discovery', 'part-document-read'] });
+    jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: listAgentCapabilities(process.platform) });
     return;
   }
 
@@ -2198,6 +2151,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 export function startServer({ detectAi = true, restoreSerial = true, restoreNetwork = restoreSerial, host = HOST, port = PORT } = {}) {
+  validateAgentContract();
   installAgentLogging();
   return server.listen(port, host, async () => {
     const address = server.address();
