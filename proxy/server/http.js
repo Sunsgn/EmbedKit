@@ -48,5 +48,5 @@ export function createHttpBoundary({ allowedOrigins: configuredOrigins, maxReque
     catch { throw new Error('Request body must be valid JSON'); }
   };
 
-  return Object.freeze({ isAllowedOrigin, setCors, jsonResponse, readJsonBody });
+  return Object.freeze({ isAllowedOrigin, setCors, jsonResponse, readRequestBody, readJsonBody });
 }

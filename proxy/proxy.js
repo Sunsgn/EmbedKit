@@ -15,6 +15,7 @@ import { AGENT_PROTOCOL_VERSION, listAgentCapabilities, validateAgentContract } 
 import { createHttpBoundary } from './server/http.js';
 import { AgentRouter } from './server/router.js';
 import { createAiDiscovery } from './server/ai-discovery.js';
+import { createForwardProxy } from './server/forward-proxy.js';
 import { registerAiServiceRoutes } from './routes/ai-services.js';
 import { registerBuildArtifactRoutes } from './routes/build-artifacts.js';
 import { registerBuildRoutes } from './routes/build.js';
@@ -649,6 +650,11 @@ export function validateProxyTarget(targetUrl) {
 }
 
 const readJSONBody = httpBoundary.readJsonBody;
+const proxyRequest = createForwardProxy({
+  validateTarget: validateProxyTarget,
+  readRequestBody: httpBoundary.readRequestBody,
+  jsonResponse: jsonRes,
+});
 
 const networkSessions = new Map();
 const serialSessions = new Map();
@@ -1225,53 +1231,6 @@ async function startBuildJob(options) {
   child.on('error', error => { pushBuildEvent(job, 'stderr', error.message); job.state = 'failed'; job.finishedAt = new Date().toISOString(); });
   child.on('close', async (code, signal) => { job.exitCode = code; job.signal = signal; const finalState = job.state === 'stopping' ? 'cancelled' : code === 0 ? 'passed' : 'failed'; if (finalState === 'passed' && job.action !== 'clean') job.artifacts = await collectBuildArtifacts(job.buildPath); job.state = finalState; job.finishedAt = new Date().toISOString(); pushBuildEvent(job, 'system', job.state === 'passed' ? `构建成功，发现 ${job.artifacts.length} 个固件产物` : job.state === 'cancelled' ? '构建已停止' : `构建失败，退出码 ${code}`); job.child = null; });
   return job;
-}
-
-async function proxyRequest(req, res, targetUrl) {
-  let target;
-  try {
-    target = validateProxyTarget(targetUrl);
-  } catch (error) {
-    jsonRes(res, 403, { error: error.message });
-    return;
-  }
-  const isHttps = target.protocol === 'https:';
-  const client = isHttps ? https : http;
-
-  let body;
-  try {
-    body = await readRequestBody(req);
-  } catch (error) {
-    if (!res.headersSent) jsonRes(res, 413, { error: error.message });
-    return;
-  }
-
-  const headers = {};
-  for (const name of ['content-type', 'accept', 'authorization']) {
-    if (req.headers[name]) headers[name] = req.headers[name];
-  }
-  if (body.length) headers['content-length'] = String(body.length);
-
-  const proxyReq = client.request({
-    hostname: target.hostname,
-    port: target.port || (isHttps ? 443 : 80),
-    path: target.pathname + target.search,
-    method: req.method,
-    headers,
-  }, (proxyRes) => {
-    const responseHeaders = { ...proxyRes.headers };
-    for (const name of Object.keys(responseHeaders)) {
-      if (name.toLowerCase().startsWith('access-control-')) delete responseHeaders[name];
-    }
-    res.writeHead(proxyRes.statusCode || 502, responseHeaders);
-    proxyRes.pipe(res);
-  });
-
-  proxyReq.on('error', (err) => {
-    if (res.headersSent) res.destroy(err);
-    else jsonRes(res, 502, { error: err.message });
-  });
-  proxyReq.end(body);
 }
 
 function fetchHTML(urlStr, timeoutMs = 8000) {
