@@ -42,6 +42,7 @@ import { summarizeProject, type ProjectSummary } from "../features/project/proje
 import { inspectProjectStructure } from "../features/project/projectStructureInspection";
 import { runProjectAiAnalysis } from "../features/project/projectAiAnalysisController";
 import { buildProjectAnalysisReport } from "../features/project/projectAnalysisReport";
+import { downloadBrowserText } from "../services/browserDownload";
 
 const defaultFiles: FileNode[] = [
   {
@@ -666,6 +667,7 @@ export default function EditorPage() {
   const [selectedMapPath, setSelectedMapPath] = useState("");
   const [projectLoaded, setProjectLoaded] = useState(false);
   const [importError, setImportError] = useState("");
+  const [exportError, setExportError] = useState("");
   const [aiReport, setAiReport] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
   const [workspaceReady, setWorkspaceReady] = useState(false);
@@ -884,25 +886,24 @@ export default function EditorPage() {
 
   const handleDownload = () => {
     const file = files.find((f) => f.path === activeFile);
-    if (file) {
-      const blob = new Blob([file.content], { type: "text/plain" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = file.name;
-      a.click();
-      URL.revokeObjectURL(url);
+    if (!file) { setExportError("当前文件不存在，无法下载。"); return; }
+    try {
+      downloadBrowserText(file.content, file.name);
+      setExportError("");
+    } catch (reason) {
+      setExportError(`当前文件下载失败：${reason instanceof Error ? reason.message : String(reason)}`);
     }
   };
 
   const handleExportAnalysis = () => {
     if (!projectSummary) return;
     const report = buildProjectAnalysisReport({ projectName, generatedAt: new Date().toLocaleString(), summary: projectSummary, architecture: projectArchitecture, behavior: programBehavior, runtimeTrace, mapAnalysis });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(new Blob([report], { type: "text/markdown;charset=utf-8" }));
-    link.download = `${projectName || "project"}-analysis.md`;
-    link.click();
-    URL.revokeObjectURL(link.href);
+    try {
+      downloadBrowserText(report, `${projectName || "project"}-analysis.md`, "text/markdown;charset=utf-8");
+      setExportError("");
+    } catch (reason) {
+      setExportError(`分析报告导出失败：${reason instanceof Error ? reason.message : String(reason)}`);
+    }
   };
 
   const chipLang = activeFile.split(".").pop();
@@ -1012,6 +1013,8 @@ export default function EditorPage() {
             </button>
           </div>
         </div>
+
+        {exportError && <div role="alert" className="shrink-0 border-b border-red-500/30 bg-red-500/5 px-4 py-2 text-[10px] text-red-300">{exportError}</div>}
 
         {requestedProjectId && (
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[#30363d] bg-cyan-500/5 px-4 py-2 text-[10px]">
