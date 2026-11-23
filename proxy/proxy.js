@@ -18,6 +18,7 @@ import { createAiDiscovery } from './server/ai-discovery.js';
 import { createForwardProxy } from './server/forward-proxy.js';
 import { createBuildService, createBuildCommand, parseBuildDiagnostic } from './server/build-service.js';
 import { scanProjectDirectory } from './server/project-scanner.js';
+import { createFileSelectionService } from './server/file-selection-service.js';
 import { registerAiServiceRoutes } from './routes/ai-services.js';
 import { registerBuildArtifactRoutes } from './routes/build-artifacts.js';
 import { registerBuildRoutes } from './routes/build.js';
@@ -83,7 +84,6 @@ const systemSerialDriverAdapter = {
   install: async path => runBoundedProcess('pnputil.exe', ['/add-driver', path, '/install'], 120_000),
 };
 let serialDriverAdapter = systemSerialDriverAdapter;
-let filePickerActive = false;
 const partDocumentCache = new Map();
 const { detectServers } = createAiDiscovery();
 
@@ -266,7 +266,7 @@ async function startInstallJob(options) {
   const manifest = installManifests.map(validateInstallManifest).find(item => item.id === options.manifestId);
   if (!manifest || manifest.platform !== process.platform || manifest.architecture !== process.arch) throw new Error('Install manifest is unavailable for this platform');
   if (manifest.requiresLicenseAcceptance && options.acceptedLicense !== true) throw new Error('License acceptance is required');
-  const selection = getFileSelection(options.directorySelectionId, 'directory'), rootPath = await realpath(resolve(selection.path)), targetPath = resolve(rootPath, ...manifest.installSubdirectory.split('/'));
+  const selection = fileSelectionService.getSelection(options.directorySelectionId, 'directory'), rootPath = await realpath(resolve(selection.path)), targetPath = resolve(rootPath, ...manifest.installSubdirectory.split('/'));
   const relation = relative(rootPath, targetPath);
   if (!relation || relation.startsWith('..') || isAbsolute(relation)) throw new Error('Install target must stay inside the selected directory');
   const rootInfo = await stat(rootPath); if (!rootInfo.isDirectory()) throw new Error('Selected install root is no longer a directory');
@@ -308,17 +308,6 @@ const systemFilePickerAdapter = {
     return runPickerProcess('zenity', ['--file-selection', ...(kind === 'directory' ? ['--directory'] : []), '--title', kind === 'directory' ? 'Select an embedded project directory' : 'Select an embedded development file']);
   },
 };
-let filePickerAdapter = systemFilePickerAdapter;
-
-function createPathSelection(kind, path, info) {
-  if (kind === 'file' && info.size > MAX_SELECTED_FILE_BYTES) throw new Error(`Selected file exceeds ${MAX_SELECTED_FILE_BYTES} bytes`);
-  const now = Date.now(), selectionId = randomUUID();
-  for (const [id, selection] of fileSelections) if (selection.expiresAt <= now) fileSelections.delete(id);
-  while (fileSelections.size >= MAX_FILE_SELECTIONS) fileSelections.delete(fileSelections.keys().next().value);
-  const selection = { id: selectionId, kind, path, name: path.split(/[\\/]/).filter(Boolean).pop() || path, size: kind === 'file' ? info.size : undefined, modifiedAt: info.mtime.toISOString(), expiresAt: now + FILE_SELECTION_TTL_MS };
-  fileSelections.set(selectionId, selection);
-  return { cancelled: false, kind, path, name: selection.name, selectionId, size: selection.size, modifiedAt: selection.modifiedAt, expiresAt: new Date(selection.expiresAt).toISOString() };
-}
 
 export function configureSerialAdapter(adapter) {
   if (adapter == null) { serialAdapter = systemSerialAdapter; return; }
@@ -383,7 +372,7 @@ export async function scanSerialDriverDevices() {
 export async function installSelectedSerialDriver(options = {}) {
   if (serialDriverAdapter.platform !== 'win32') throw new Error('Serial driver installation is only available on Windows');
   if (options.confirmed !== true) throw new Error('Explicit confirmation is required before installing a driver');
-  const selection = getFileSelection(options.selectionId, 'file');
+  const selection = fileSelectionService.getSelection(options.selectionId, 'file');
   if (!/\.inf$/i.test(selection.name || '') || !/\.inf$/i.test(selection.path || '')) throw new Error('Selected driver file must be an INF file');
   if (selection.size > 10 * 1024 * 1024) throw new Error('Selected INF file exceeds the 10 MiB limit');
   const startedAt = new Date().toISOString(), before = await scanSerialDriverDevices();
@@ -393,53 +382,16 @@ export async function installSelectedSerialDriver(options = {}) {
 }
 
 export function configureFilePickerAdapter(adapter) {
-  if (adapter == null) { filePickerAdapter = systemFilePickerAdapter; return; }
-  if (typeof adapter.select !== 'function') throw new Error('File picker adapter must provide select()');
-  filePickerAdapter = adapter;
-}
-
-async function selectLocalPath(options = {}) {
-  const kind = options.kind === 'file' ? 'file' : options.kind === 'directory' ? 'directory' : '';
-  const purpose = options.purpose === 'serial-driver-inf' ? 'serial-driver-inf' : 'general';
-  if (!kind) throw new Error('Picker kind must be file or directory');
-  if (filePickerActive) throw new Error('A system file picker is already open');
-  filePickerActive = true;
-  try {
-    const result = await filePickerAdapter.select({ kind, purpose });
-    if (result?.cancelled || !result?.path) return { cancelled: true, kind };
-    if (!isAbsolute(result.path) || /[\0\r\n]/.test(result.path)) throw new Error('System picker returned an invalid path');
-    const path = resolve(result.path), info = await stat(path);
-    if (kind === 'directory' ? !info.isDirectory() : !info.isFile()) throw new Error(`Selected path is not a ${kind}`);
-    return createPathSelection(kind, path, info);
-  } finally { filePickerActive = false; }
-}
-
-function getFileSelection(id, requiredKind) {
-  const selection = fileSelections.get(id);
-  if (!selection || selection.expiresAt <= Date.now()) { fileSelections.delete(id); throw new Error('File selection is missing or expired'); }
-  if (requiredKind && selection.kind !== requiredKind) throw new Error(`Selection is not a ${requiredKind}`);
-  return selection;
+  fileSelectionService.configurePicker(adapter || systemFilePickerAdapter);
 }
 
 async function scanSelectedProject(selectionId, options) {
-  const selection = getFileSelection(selectionId, 'directory');
+  const selection = fileSelectionService.getSelection(selectionId, 'directory');
   return scanProjectDirectory(selection.path, options);
 }
 
-async function readSelectedFileChunk(id, offsetValue, lengthValue) {
-  const selection = getFileSelection(id, 'file'), info = await stat(selection.path);
-  if (!info.isFile() || info.size !== selection.size) throw new Error('Selected file changed after authorization');
-  const offset = Number(offsetValue ?? 0), length = Number(lengthValue ?? MAX_FILE_CHUNK_BYTES);
-  if (!Number.isSafeInteger(offset) || offset < 0) throw new Error('Chunk offset must be a non-negative integer');
-  if (!Number.isSafeInteger(length) || length < 1 || length > MAX_FILE_CHUNK_BYTES) throw new Error(`Chunk length must be between 1 and ${MAX_FILE_CHUNK_BYTES}`);
-  if (offset > info.size) throw new Error('Chunk offset exceeds file size');
-  const end = Math.min(info.size, offset + length), handle = await open(selection.path, 'r');
-  try { const buffer = Buffer.alloc(end - offset), { bytesRead } = await handle.read(buffer, 0, buffer.length, offset); return { selectionId: id, offset, byteLength: bytesRead, size: info.size, eof: offset + bytesRead >= info.size, encoding: 'base64', data: buffer.subarray(0, bytesRead).toString('base64') }; }
-  finally { await handle.close(); }
-}
-
 async function analyzeSelectedElf(id) {
-  const selection = getFileSelection(id, 'file'), info = await stat(selection.path);
+  const selection = fileSelectionService.getSelection(id, 'file'), info = await stat(selection.path);
   if (!info.isFile() || info.size !== selection.size) throw new Error('Selected file changed after authorization');
   const handle = await open(selection.path, 'r');
   try {
@@ -580,12 +532,18 @@ const proxyRequest = createForwardProxy({
 
 const networkSessions = new Map();
 const serialSessions = new Map();
-const fileSelections = new Map();
 const elfAnalyses = new Map();
 const installJobs = new Map();
 let restoringSerialSessions = false;
+const fileSelectionService = createFileSelectionService({
+  picker: systemFilePickerAdapter,
+  maxSelections: MAX_FILE_SELECTIONS,
+  maxFileBytes: MAX_SELECTED_FILE_BYTES,
+  maxChunkBytes: MAX_FILE_CHUNK_BYTES,
+  ttlMs: FILE_SELECTION_TTL_MS,
+});
 const buildService = createBuildService({
-  createSelection: createPathSelection,
+  createSelection: fileSelectionService.createSelection,
   maxHashJobs: MAX_ARTIFACT_HASH_JOBS,
   maxArtifactBytes: MAX_SELECTED_FILE_BYTES,
 });
@@ -603,14 +561,14 @@ registerAiServiceRoutes(agentRouter, { jsonResponse: jsonRes, detectServers, pro
 registerPartRoutes(agentRouter, { jsonResponse: jsonRes, discoverDocuments: discoverOfficialPartDocuments, readDocument: readOfficialPartDocument, readPartDetails: getChipDetails, maxDocumentResults: PART_DOCUMENT_MAX_RESULTS });
 registerFileAnalysisRoutes(agentRouter, {
   jsonResponse: jsonRes,
-  selectPath: async req => selectLocalPath(await readJSONBody(req)),
+  selectPath: async req => fileSelectionService.selectPath(await readJSONBody(req)),
   scanProject: async req => {
     const body = await readJSONBody(req);
     return scanSelectedProject(body.selectionId, body);
   },
-  revokeSelection: id => fileSelections.delete(id),
-  getSelection: getFileSelection,
-  readChunk: readSelectedFileChunk,
+  revokeSelection: fileSelectionService.revoke,
+  getSelection: fileSelectionService.getSelection,
+  readChunk: fileSelectionService.readChunk,
   analyzeElf: analyzeSelectedElf,
   lookupElf: lookupAnalyzedElf,
   disassembleElf: disassembleAnalyzedElf,
