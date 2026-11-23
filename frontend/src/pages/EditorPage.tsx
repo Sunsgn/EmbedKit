@@ -30,7 +30,6 @@ import {
   copyLegacyWorkspaceToProject,
   createProjectRevisionId,
   createWorkspaceFingerprint,
-  saveCurrentWorkspace,
   saveProjectWorkspace,
 } from "../services/workspaceStorage";
 import ProjectBuildPanel from "../features/project/ProjectBuildPanel";
@@ -48,6 +47,7 @@ import type { ProjectAnalysisRun } from "../types/projectAnalysis";
 import { exportProjectAnalysisRun } from "../services/projectAnalysisSnapshot";
 import { analysisRunSavedMessage, mergeAnalysisRunHistory, saveCompletedAnalysisRun } from "../features/project/analysisRunController";
 import { loadEditorWorkspace } from "../features/project/workspaceController";
+import { saveEditorWorkspace } from "../features/project/workspaceSaveController";
 
 const defaultFiles: FileNode[] = [
   {
@@ -1072,9 +1072,7 @@ export default function EditorPage() {
   useEffect(() => {
     if (!workspaceReady || !projectSummary) return;
     const timer = window.setTimeout(() => {
-      const save = requestedProjectId && engineeringProject && revisionId && sourceFingerprint && importedAt
-        ? saveProjectWorkspace({ schemaVersion: 1, projectId: requestedProjectId, revisionId, name: engineeringProject.name, files, activeFile, importedAt, sourceFingerprint })
-        : requestedProjectId ? Promise.resolve() : saveCurrentWorkspace({ name: projectName, files, activeFile });
+      const save = saveEditorWorkspace({ requestedProjectId, engineeringProject, revisionId, sourceFingerprint, importedAt, projectName, files, activeFile });
       void save.catch(reason => setWorkspaceMessage(`工作区保存失败：${reason instanceof Error ? reason.message : String(reason)}`));
     }, 500);
     return () => window.clearTimeout(timer);
