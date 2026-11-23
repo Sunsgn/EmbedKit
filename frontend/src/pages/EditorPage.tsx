@@ -20,12 +20,6 @@ import {
 } from "lucide-react";
 import type { FileNode, Chip, CompileResult } from "../types";
 import { chips } from "../data/chips";
-import {
-  loadStoredAiConfig,
-  localProxyUrl,
-  streamAiResponse,
-} from "../services/aiService";
-import { AI_PROVIDERS, type AiConfig } from "../types/ai";
 import ProjectBuildPanel from "../features/project/ProjectBuildPanel";
 import MapAnalysisPanel from "../features/project/MapAnalysisPanel";
 import { analyzeMap } from "../utils/mapAnalyzer";
@@ -46,6 +40,7 @@ import { resolveBuildDiagnosticFile, resolveMapModuleFile } from "../features/pr
 import type { ProjectFinding } from "../features/project/projectRiskAnalysis";
 import { summarizeProject, type ProjectSummary } from "../features/project/projectSummary";
 import { inspectProjectStructure } from "../features/project/projectStructureInspection";
+import { runProjectAiAnalysis } from "../features/project/projectAiAnalysisController";
 
 const defaultFiles: FileNode[] = [
   {
@@ -876,69 +871,14 @@ export default function EditorPage() {
 
   const handleAiAnalyze = async () => {
     if (!projectSummary || analyzing) return;
-    let config: AiConfig | null = {
-      provider: "local",
-      model: "qwen2.5:7b",
-      apiKey: "",
-      customEndpoint: localProxyUrl(
-        "http://localhost:11434/v1/chat/completions",
-      ),
-    };
-    try {
-      const saved = loadStoredAiConfig() || config;
-      config =
-        saved.provider === "huggingface" && !saved.apiKey ? config : saved;
-    } catch {
-      /* 使用本地默认配置 */
-    }
-    const provider = config?.provider ? AI_PROVIDERS[config.provider] : null;
-    const hasEndpoint =
-      config?.provider === "custom"
-        ? Boolean(config.customEndpoint)
-        : config?.provider === "local"
-          ? Boolean(config.customEndpoint || provider?.endpoint)
-          : Boolean(provider?.endpoint);
-    const hasCredential =
-      !provider?.requiresKey || Boolean(config?.apiKey || config?.customApiKey);
-    if (
-      !config?.provider ||
-      !config.model ||
-      !provider ||
-      !hasEndpoint ||
-      !hasCredential
-    ) {
-      setAiReport(
-        "尚未连接真实 AI。请先进入“AI 助手”页面配置可用模型、API 地址和密钥；工程分析不会使用模拟回答。",
-      );
-      return;
-    }
-    if (
-      config.provider !== "local" &&
-      !window.confirm(
-        `将向 ${provider.name} 发送工程摘要和最多 50 KB 的源码片段。是否继续？`,
-      )
-    )
-      return;
-    const source = files
-      .filter((file) => /\.(c|cc|cpp|h|hpp)$/i.test(file.name))
-      .map(
-        (file) => `\n===== ${file.path} =====\n${file.content.slice(0, 12000)}`,
-      )
-      .join("\n")
-      .slice(0, 50000);
-    const prompt = `请分析下面导入的嵌入式工程。只能根据提供的工程事实和代码判断，不要臆测未提供的芯片或 SDK。\n\n工程摘要：${JSON.stringify(projectSummary, null, 2)}\n\n源码片段：${source}\n\n请用中文输出：\n1. 工程实际使用的芯片、工具链、SDK依据\n2. 外设和关键入口的用途\n3. 明确指出至少 3 个风险或待验证项，并引用文件路径\n4. 给出按优先级排序的修改建议\n5. 无法确认的内容标记“需要官方手册或硬件验证”`;
-    setAnalyzing(true);
-    setAiReport("");
-    await streamAiResponse(
-      config,
-      [{ role: "user", content: prompt }],
-      (chunk) => setAiReport((current) => current + chunk),
-      () => setAnalyzing(false),
-      (error) => {
-        setAiReport(`AI 分析失败：${error}`);
-        setAnalyzing(false);
-      },
-    );
+    const result = await runProjectAiAnalysis(files, projectSummary, {
+      confirmExternal: message => window.confirm(message),
+      onStart: () => { setAnalyzing(true); setAiReport(""); },
+      onChunk: chunk => setAiReport(current => current + chunk),
+      onDone: () => setAnalyzing(false),
+      onError: error => { setAiReport(`AI 分析失败：${error}`); setAnalyzing(false); },
+    });
+    if (result.status === 'unavailable') setAiReport(result.message);
   };
 
   const handleDownload = () => {
