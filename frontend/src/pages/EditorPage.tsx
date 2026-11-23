@@ -43,6 +43,7 @@ import { saveEditorWorkspace } from "../features/project/workspaceSaveController
 import { importProjectFiles, ProjectImportError } from "../features/project/projectImportController";
 import { associateLegacyProjectWorkspace, recordProjectSourceRevision } from "../features/project/projectRevisionController";
 import { resolveBuildDiagnosticFile, resolveMapModuleFile } from "../features/project/sourceNavigationController";
+import { detectProjectBuild, type AgentBuildSystem, type ProjectBuildConfidence, type ProjectBuildKind } from "../features/project/projectBuildDetection";
 
 const defaultFiles: FileNode[] = [
   {
@@ -326,10 +327,10 @@ interface ProjectSummary {
   entryPoints: string[];
   buildFiles: string[];
   findings: ProjectFinding[];
-  buildKind: 'keil' | 'iar' | 'cmake' | 'esp-idf' | 'zephyr' | 'platformio' | 'make' | 'ninja' | 'unknown';
-  buildConfidence: 'high' | 'medium' | 'low';
+  buildKind: ProjectBuildKind;
+  buildConfidence: ProjectBuildConfidence;
   buildEvidence: string[];
-  agentBuildSystem?: 'cmake' | 'make' | 'ninja';
+  agentBuildSystem?: AgentBuildSystem;
 }
 
 interface ProjectFinding {
@@ -340,29 +341,6 @@ interface ProjectFinding {
   line: number;
   evidence: string;
   recommendation: string;
-}
-
-function detectProjectBuild(files: FileNode[]) {
-  const names = files.map(file => file.name.toLowerCase()), paths = files.map(file => file.path.replace(/\\/g, '/').toLowerCase()), content = files.map(file => file.content).join('\n');
-  const candidates: Array<{ kind: ProjectSummary['buildKind']; label: string; score: number; evidence: string[]; agentBuildSystem?: ProjectSummary['agentBuildSystem'] }> = [];
-  const add = (kind: ProjectSummary['buildKind'], label: string, score: number, evidence: string[], agentBuildSystem?: ProjectSummary['agentBuildSystem']) => { if (score > 0) candidates.push({ kind, label, score, evidence, agentBuildSystem }); };
-  const keilProject = files.find(file => /\.(uvprojx|uvproj)$/i.test(file.name)), iarProject = files.find(file => /\.(ewp|eww)$/i.test(file.name));
-  add('keil', 'Keil MDK', keilProject ? 100 : 0, keilProject ? [`发现 Keil 工程文件 ${keilProject.path}`, ...(files.some(file => /\.sct$/i.test(file.name)) ? ['发现 Scatter 链接脚本'] : []), ...(paths.some(path => path.includes('/rte/')) ? ['发现 RTE/Pack 配置目录'] : [])] : []);
-  add('iar', 'IAR Embedded Workbench', iarProject ? 100 : 0, iarProject ? [`发现 IAR 工程文件 ${iarProject.path}`, ...(files.some(file => /\.icf$/i.test(file.name)) ? ['发现 ICF 链接配置'] : [])] : []);
-  const hasCmake = names.includes('cmakelists.txt'), hasIdfRegister = /idf_component_register\s*\(/i.test(content), hasIdfProject = /IDF_PATH|project\.cmake|idf\.cmake/i.test(content), hasSdkconfig = names.some(name => name === 'sdkconfig' || name.startsWith('sdkconfig.'));
-  add('esp-idf', 'ESP-IDF / CMake', hasCmake && (hasIdfRegister || hasIdfProject || hasSdkconfig) ? 120 : 0, [hasCmake && '发现 CMakeLists.txt', hasIdfRegister && '使用 idf_component_register', hasIdfProject && '引用 ESP-IDF 构建脚本', hasSdkconfig && '发现 sdkconfig'].filter(Boolean) as string[]);
-  const hasWest = names.includes('west.yml'), hasPrjConf = names.includes('prj.conf'), hasKconfig = names.includes('kconfig'), hasDts = files.some(file => /\.(dts|dtsi|overlay)$/i.test(file.name));
-  add('zephyr', hasWest ? 'nRF Connect / Zephyr' : 'Zephyr', (hasWest ? 70 : 0) + (hasPrjConf ? 50 : 0) + (hasKconfig ? 25 : 0) + (hasDts ? 15 : 0) + (hasPrjConf && hasCmake ? 30 : 0), [hasWest && '发现 west.yml', hasPrjConf && '发现 prj.conf', hasKconfig && '发现 Kconfig', hasDts && '发现设备树文件'].filter(Boolean) as string[]);
-  const hasPlatformio = names.includes('platformio.ini');
-  add('platformio', 'PlatformIO', hasPlatformio ? 100 : 0, hasPlatformio ? ['发现 platformio.ini'] : []);
-  add('cmake', 'CMake', hasCmake ? 70 : 0, hasCmake ? ['发现 CMakeLists.txt', ...(names.includes('cmakepresets.json') ? ['发现 CMakePresets.json'] : []), ...(files.some(file => /toolchain.*\.cmake$/i.test(file.name)) ? ['发现 CMake 工具链文件'] : [])] : [], 'cmake');
-  const hasMake = names.includes('makefile') || files.some(file => /\.mk$/i.test(file.name));
-  add('make', 'Make', hasMake ? 60 : 0, hasMake ? [names.includes('makefile') ? '发现 Makefile' : '发现 .mk 构建文件'] : [], 'make');
-  const hasNinja = names.includes('build.ninja');
-  add('ninja', 'Ninja（已有构建目录）', hasNinja ? 30 : 0, hasNinja ? ['发现 build.ninja；它通常是生成产物，不一定是主工程配置'] : [], 'ninja');
-  const best = candidates.sort((a, b) => b.score - a.score)[0];
-  if (!best) return { kind: 'unknown' as const, label: '未识别', confidence: 'low' as const, evidence: ['未发现受支持的工程配置文件'], agentBuildSystem: undefined };
-  return { kind: best.kind, label: best.label, confidence: (best.score >= 90 ? 'high' : best.score >= 60 ? 'medium' : 'low') as ProjectSummary['buildConfidence'], evidence: best.evidence, agentBuildSystem: best.agentBuildSystem };
 }
 
 function analyzeProjectRisks(files: FileNode[]): ProjectFinding[] {
