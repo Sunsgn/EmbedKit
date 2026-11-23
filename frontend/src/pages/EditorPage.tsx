@@ -41,6 +41,7 @@ import type { ProjectFinding } from "../features/project/projectRiskAnalysis";
 import { summarizeProject, type ProjectSummary } from "../features/project/projectSummary";
 import { inspectProjectStructure } from "../features/project/projectStructureInspection";
 import { runProjectAiAnalysis } from "../features/project/projectAiAnalysisController";
+import { buildProjectAnalysisReport } from "../features/project/projectAnalysisReport";
 
 const defaultFiles: FileNode[] = [
   {
@@ -896,17 +897,12 @@ export default function EditorPage() {
 
   const handleExportAnalysis = () => {
     if (!projectSummary) return;
-    const riskRows = projectSummary.findings.length ? projectSummary.findings.map((item, index) => `${index + 1}. **${item.severity.toUpperCase()} · ${item.title}**\n   - 位置：\`${item.file}${item.line ? `:${item.line}` : ""}\`\n   - 证据：\`${item.evidence.replace(/`/g, "'")}\`\n   - 建议：${item.recommendation}`).join("\n") : "未命中当前本地规则。该结果不代表工程不存在其他问题。";
-    const architectureRows = projectArchitecture ? projectArchitecture.layers.map(layer => `- **${layer.name}**：${layer.nodes.map(node => `${node.name}（${node.file}:${node.line}）`).join("、") || layer.files.join("、") || "未识别"}`).join("\n") : "未执行程序框架分析。";
-    const flowEvidenceRows = projectArchitecture ? `> 注册回调：${projectArchitecture.callbacks.map(item => item.name).join("、") || "未识别"}；静态调用解析率 ${(projectArchitecture.coverage.resolvedRate * 100).toFixed(1)}% （${projectArchitecture.coverage.resolvedCallSites}/${projectArchitecture.coverage.callSites}）。` : "";
-    const flowDetails = projectArchitecture?.flows.length ? projectArchitecture.flows.map(flow => `### ${flow.title}\n\n${flow.steps.map(step => `${"  ".repeat(step.depth)}- ${step.name}（${step.control === 'loop' ? '循环内' : step.control === 'branch' ? '条件分支' : step.relation}，${step.file}:${step.line}）`).join("\n")}\n\n${flow.notes.map(note => `> ${note}`).join("\n")}`).join("\n\n") : "未识别到可展开的执行流程。";
-    const flowRows = [flowEvidenceRows, flowDetails].filter(Boolean).join("\n\n");
-    const stateRows = programBehavior?.stateMachines.length ? programBehavior.stateMachines.map(machine => `### ${machine.name}\n\n- 状态变量：\`${machine.variable}\`\n- 状态：${machine.states.join("、")}\n${machine.transitions.map(item => `- ${item.from} → ${item.to}${item.event ? `，条件：\`${item.event}\`` : ""}（${item.file}:${item.line}）`).join("\n")}`).join("\n\n") : "未识别到状态机。";
-    const concurrencyRows = programBehavior ? `- 任务：${programBehavior.tasks.map(item => `${item.name}（入口 ${item.entry || "?"}，栈 ${item.stack || "?"}，优先级 ${item.priority || "?"}）`).join("；") || "未识别"}\n- 同步资源：${programBehavior.resources.map(item => `${item.kind} ${item.name}（写：${item.writers.join("/") || "?"}；读：${item.readers.join("/") || "?"}）`).join("；") || "未识别"}\n- 回调：${programBehavior.callbacks.map(item => `${item.callback} ← ${item.api}`).join("；") || "未识别"}` : "未执行并发分析。";
-    const traceRows = runtimeTrace ? `- 事件：${runtimeTrace.events.length}\n- 上下文：${runtimeTrace.contexts.join("、") || "未标记"}\n- 时间跨度：${runtimeTrace.durationMs.toFixed(3)} ms\n\n${runtimeTrace.events.slice(0, 1000).map(item => `- ${item.timestamp.toFixed(3)} · ${item.type} · ${item.name}${item.context ? ` · ${item.context}` : ""}`).join("\n")}${runtimeTrace.events.length > 1000 ? `\n\n> 报告仅列出前1000条，完整轨迹保存在本地工作区。` : ""}` : "尚未导入真实设备运行轨迹。";
-    const optimizationRows = mapAnalysis?.optimizations.length ? mapAnalysis.optimizations.map((item, index) => `${index + 1}. **${item.title}**：${item.minBytes.toLocaleString()}～${item.maxBytes.toLocaleString()} 字节（${item.confidence} 可信度）\n   - 依据：${item.basis}\n   - 操作：${item.action}`).join("\n") : "没有足够的 MAP 信息量化优化空间。";
-    const report = `# EmbedKit 工程分析报告\n\n- 工程：${projectName}\n- 生成时间：${new Date().toLocaleString()}\n- 芯片：${projectSummary.chip}\n- 构建体系：${projectSummary.toolchain}（可信度 ${projectSummary.buildConfidence}）\n- 识别依据：${projectSummary.buildEvidence.join("；")}\n- SDK：${projectSummary.sdk}\n- 工程类型：${projectSummary.projectType}\n- 文件：${projectSummary.files}（源文件 ${projectSummary.sourceFiles}，头文件 ${projectSummary.headerFiles}）\n- 总行数：${projectSummary.totalLines}\n- 入口：${projectSummary.entryPoints.join(", ") || "未识别"}\n- 构建配置：${projectSummary.buildFiles.join(", ") || "未识别"}\n- 外设：${projectSummary.peripherals.join(", ") || "未识别"}\n\n## 程序执行流程\n\n- 运行模型：${projectArchitecture?.runtime ?? "未识别"}\n- 分析可信度：${projectArchitecture?.confidence ?? "low"}\n- 任务：${projectArchitecture?.tasks.map(item => item.name).join("、") || "未识别"}\n- 中断/回调：${projectArchitecture?.interrupts.map(item => item.name).join("、") || "未识别"}\n\n${flowRows}\n\n## 状态机\n\n${stateRows}\n\n## 并发资源\n\n${concurrencyRows}\n\n## 真实设备轨迹\n\n${traceRows}\n\n## 程序分层\n\n${architectureRows}\n\n## MAP 优化空间\n\n${optimizationRows}\n\n## 本地静态风险\n\n${riskRows}\n\n## 能力边界\n\n本报告是源码、工程配置、产物和已导入运行轨迹的关联结果。优化空间是待验证区间；宏、函数指针、任务调度、中断抢占和运行时注册仍可能影响流程完整性。\n`;
-    const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([report], { type: "text/markdown;charset=utf-8" })); link.download = `${projectName || "project"}-analysis.md`; link.click(); URL.revokeObjectURL(link.href);
+    const report = buildProjectAnalysisReport({ projectName, generatedAt: new Date().toLocaleString(), summary: projectSummary, architecture: projectArchitecture, behavior: programBehavior, runtimeTrace, mapAnalysis });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([report], { type: "text/markdown;charset=utf-8" }));
+    link.download = `${projectName || "project"}-analysis.md`;
+    link.click();
+    URL.revokeObjectURL(link.href);
   };
 
   const chipLang = activeFile.split(".").pop();
