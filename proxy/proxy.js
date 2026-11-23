@@ -14,6 +14,7 @@ import { analyzeElf, lookupElfAddress, parseElfAddress } from './elf.js';
 import { AGENT_PROTOCOL_VERSION, listAgentCapabilities, validateAgentContract } from '../contracts/agent-api.js';
 import { createHttpBoundary } from './server/http.js';
 import { AgentRouter } from './server/router.js';
+import { registerBuildArtifactRoutes } from './routes/build-artifacts.js';
 import { registerBuildRoutes } from './routes/build.js';
 import { registerEnvironmentRoutes } from './routes/environment.js';
 import { registerFileAnalysisRoutes } from './routes/files-analysis.js';
@@ -696,6 +697,12 @@ registerBuildRoutes(agentRouter, {
       job.child.kill();
     }
   },
+});
+registerBuildArtifactRoutes(agentRouter, {
+  jsonResponse: jsonRes,
+  getJob: id => buildJobs.get(id),
+  authorizeArtifact: authorizeBuildArtifact,
+  hashArtifact: hashBuildArtifact,
 });
 
 async function persistSerialSessions() {
@@ -1862,26 +1869,6 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (await agentRouter.dispatch({ req, res, requestUrl, pathname })) return;
-
-  const buildArtifactMatch = pathname.match(/^\/api\/build\/jobs\/([0-9a-f-]+)\/artifacts\/(\d+)\/select$/i);
-  if (buildArtifactMatch) {
-    if (req.method !== 'POST') { jsonRes(res, 405, { error: 'Build artifact authorization requires POST' }); return; }
-    const job = buildJobs.get(buildArtifactMatch[1]);
-    if (!job) { jsonRes(res, 404, { error: 'Build job not found' }); return; }
-    try { jsonRes(res, 200, await authorizeBuildArtifact(job, buildArtifactMatch[2])); }
-    catch (error) { jsonRes(res, 400, { error: error.message }); }
-    return;
-  }
-
-  const buildArtifactHashMatch = pathname.match(/^\/api\/build\/jobs\/([0-9a-f-]+)\/artifacts\/(\d+)\/hash$/i);
-  if (buildArtifactHashMatch) {
-    if (req.method !== 'POST') { jsonRes(res, 405, { error: 'Build artifact hashing requires POST' }); return; }
-    const job = buildJobs.get(buildArtifactHashMatch[1]);
-    if (!job) { jsonRes(res, 404, { error: 'Build job not found' }); return; }
-    try { jsonRes(res, 200, await hashBuildArtifact(job, buildArtifactHashMatch[2])); }
-    catch (error) { jsonRes(res, 400, { error: error.message }); }
-    return;
-  }
 
   if (pathname === '/api/serial/status' && req.method === 'GET') {
     jsonRes(res, 200, { available: true, activeSessions: serialSessions.size, maxSessions: MAX_SERIAL_SESSIONS });
