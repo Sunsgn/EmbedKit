@@ -19,6 +19,7 @@ import { registerBuildRoutes } from './routes/build.js';
 import { registerEnvironmentRoutes } from './routes/environment.js';
 import { registerFileAnalysisRoutes } from './routes/files-analysis.js';
 import { registerPartRoutes } from './routes/parts.js';
+import { registerSerialSystemRoutes } from './routes/serial-system.js';
 
 const PORT = process.env.EMBEDKIT_PROXY_PORT || 9999;
 const HOST = process.env.EMBEDKIT_PROXY_HOST || '127.0.0.1';
@@ -703,6 +704,14 @@ registerBuildArtifactRoutes(agentRouter, {
   getJob: id => buildJobs.get(id),
   authorizeArtifact: authorizeBuildArtifact,
   hashArtifact: hashBuildArtifact,
+});
+registerSerialSystemRoutes(agentRouter, {
+  jsonResponse: jsonRes,
+  readJsonBody: readJSONBody,
+  status: () => ({ available: true, activeSessions: serialSessions.size, maxSessions: MAX_SERIAL_SESSIONS }),
+  listPorts: listSerialPorts,
+  scanDrivers: scanSerialDriverDevices,
+  installDriver: installSelectedSerialDriver,
 });
 
 async function persistSerialSessions() {
@@ -1869,32 +1878,6 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (await agentRouter.dispatch({ req, res, requestUrl, pathname })) return;
-
-  if (pathname === '/api/serial/status' && req.method === 'GET') {
-    jsonRes(res, 200, { available: true, activeSessions: serialSessions.size, maxSessions: MAX_SERIAL_SESSIONS });
-    return;
-  }
-
-  if (pathname === '/api/serial/ports' && req.method === 'GET') {
-    try { jsonRes(res, 200, { ports: await listSerialPorts() }); }
-    catch (error) { jsonRes(res, 500, { error: error.message }); }
-    return;
-  }
-
-  if (pathname === '/api/serial/drivers' && req.method === 'GET') {
-    try { jsonRes(res, 200, await scanSerialDriverDevices()); }
-    catch (error) { jsonRes(res, 500, { code: 'serial-driver-scan-failed', error: error.message }); }
-    return;
-  }
-
-  if (pathname === '/api/serial/drivers/install' && req.method === 'POST') {
-    try { jsonRes(res, 200, await installSelectedSerialDriver(await readJSONBody(req))); }
-    catch (error) {
-      const permission = /access.*denied|elevation|administrator|exit(?:ed)? with code 5/i.test(error.message);
-      jsonRes(res, permission ? 403 : 400, { code: permission ? 'administrator-required' : 'serial-driver-install-failed', error: permission ? '驱动安装需要管理员权限，请以管理员身份重新启动 Local Agent 后重试' : error.message });
-    }
-    return;
-  }
 
   if (pathname === '/api/serial/sessions') {
     if (req.method === 'GET') { jsonRes(res, 200, { sessions: [...serialSessions.values()].map(session => publicSerialSession(session)) }); return; }

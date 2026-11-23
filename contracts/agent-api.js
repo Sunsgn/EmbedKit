@@ -62,6 +62,7 @@ export const AGENT_ROUTES = Object.freeze({
   buildArtifactHash: route('build.artifact-hash', 'POST', '/api/build/jobs/:jobId/artifacts/:artifactIndex/hash', AGENT_CAPABILITIES.PROJECT_BUILD),
   buildArtifactHashReadUnsupported: route('build.artifact-hash-read-unsupported', 'GET', '/api/build/jobs/:jobId/artifacts/:artifactIndex/hash', AGENT_CAPABILITIES.PROJECT_BUILD),
   buildArtifactHashDeleteUnsupported: route('build.artifact-hash-delete-unsupported', 'DELETE', '/api/build/jobs/:jobId/artifacts/:artifactIndex/hash', AGENT_CAPABILITIES.PROJECT_BUILD),
+  serialStatus: route('serial.status', 'GET', '/api/serial/status', AGENT_CAPABILITIES.SERIAL),
   serialPorts: route('serial.ports', 'GET', '/api/serial/ports', AGENT_CAPABILITIES.SERIAL),
   serialSessions: route('serial.sessions', 'POST', '/api/serial/sessions', AGENT_CAPABILITIES.SERIAL),
   serialDrivers: route('serial.drivers', 'GET', '/api/serial/drivers', AGENT_CAPABILITIES.SERIAL_DRIVER_DIAGNOSTICS, { timeoutMs: 20_000 }),

@@ -17,6 +17,7 @@ export const agentPaths = Object.freeze({
   buildJob: (id: string, after?: number) => `${AGENT_ROUTES.buildJob.path.replace(':jobId', segment(id))}${after === undefined ? '' : `?after=${segment(after)}`}`,
   buildArtifactSelect: (jobId: string, index: number) => AGENT_ROUTES.buildArtifactSelect.path.replace(':jobId', segment(jobId)).replace(':artifactIndex', segment(index)),
   buildArtifactHash: (jobId: string, index: number) => AGENT_ROUTES.buildArtifactHash.path.replace(':jobId', segment(jobId)).replace(':artifactIndex', segment(index)),
+  serialStatus: AGENT_ROUTES.serialStatus.path,
   serialPorts: AGENT_ROUTES.serialPorts.path,
   serialSessions: AGENT_ROUTES.serialSessions.path,
   serialSession: (id: string, after?: number) => `/api/serial/sessions/${segment(id)}${after === undefined ? '' : `?after=${segment(after)}`}`,
