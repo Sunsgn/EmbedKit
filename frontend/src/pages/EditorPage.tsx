@@ -30,8 +30,6 @@ import {
   copyLegacyWorkspaceToProject,
   createProjectRevisionId,
   createWorkspaceFingerprint,
-  loadCurrentWorkspace,
-  loadProjectWorkspace,
   saveCurrentWorkspace,
   saveProjectWorkspace,
 } from "../services/workspaceStorage";
@@ -43,12 +41,13 @@ import { analyzeProjectArchitecture } from "../utils/projectArchitecture";
 import { analyzeProgramBehavior } from "../utils/programBehavior";
 import type { RuntimeTraceAnalysis } from "../utils/runtimeTrace";
 import { clearRuntimeTrace, loadRuntimeTrace, saveRuntimeTrace } from "../services/runtimeTraceStorage";
-import { listEngineeringProjects, listProjectAnalysisRuns, saveProjectRevision } from "../services/productStorage";
+import { saveProjectRevision } from "../services/productStorage";
 import { PROJECT_REVISION_SCHEMA_VERSION } from "../types/lifecycle";
 import type { EngineeringProject } from "../types/product";
 import type { ProjectAnalysisRun } from "../types/projectAnalysis";
 import { exportProjectAnalysisRun } from "../services/projectAnalysisSnapshot";
 import { analysisRunSavedMessage, mergeAnalysisRunHistory, saveCompletedAnalysisRun } from "../features/project/analysisRunController";
+import { loadEditorWorkspace } from "../features/project/workspaceController";
 
 const defaultFiles: FileNode[] = [
   {
@@ -1048,21 +1047,16 @@ export default function EditorPage() {
     let cancelled = false;
     void (async () => {
       setWorkspaceReady(false); setProjectLoaded(false); setRuntimeTrace(null); setEngineeringProject(null); setRevisionId(''); setSourceFingerprint(''); setImportedAt(''); setLegacyWorkspaceAvailable(false); setWorkspaceMessage(''); setAnalysisRuns([]); setSelectedAnalysisId('');
-      if (requestedProjectId) {
-        if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(requestedProjectId)) throw new Error('工程链接包含无效 ID，请返回工程中心重新进入');
-        const projects = await listEngineeringProjects(), project = projects.find(item => item.id === requestedProjectId);
-        if (!project) throw new Error('工程档案不存在或已删除，请返回工程中心重新选择');
-        const [workspace, legacy, storedAnalysisRuns] = await Promise.all([loadProjectWorkspace(requestedProjectId), loadCurrentWorkspace(), listProjectAnalysisRuns()]);
-        if (cancelled) return;
-        const projectRuns = storedAnalysisRuns.filter(run => run.projectId === requestedProjectId);
-        setEngineeringProject(project); setProjectName(project.name); setLegacyWorkspaceAvailable(Boolean(legacy?.files.length)); setAnalysisRuns(projectRuns); setSelectedAnalysisId(projectRuns[0]?.id ?? '');
-        if (!workspace?.files.length) { setFiles([]); setActiveFile(''); setWorkspaceMessage('当前工程尚未关联源码工作区，请导入工程目录；不会自动加载其他工程的源码。'); return; }
-        setFiles(workspace.files); setActiveFile(workspace.files.some(file => file.path === workspace.activeFile) ? workspace.activeFile : workspace.files[0].path); setRevisionId(workspace.revisionId); setSourceFingerprint(workspace.sourceFingerprint); setImportedAt(workspace.importedAt); setProjectLoaded(true);
+      const loaded = await loadEditorWorkspace(requestedProjectId);
+      if (cancelled) return;
+      if (loaded.mode === 'project') {
+        setEngineeringProject(loaded.project); setProjectName(loaded.project.name); setLegacyWorkspaceAvailable(loaded.legacyAvailable); setAnalysisRuns(loaded.analysisRuns); setSelectedAnalysisId(loaded.analysisRuns[0]?.id ?? ''); setWorkspaceMessage(loaded.message);
+        if (!loaded.workspace) { setFiles([]); setActiveFile(''); return; }
+        setFiles(loaded.workspace.files); setActiveFile(loaded.activeFile); setRevisionId(loaded.workspace.revisionId); setSourceFingerprint(loaded.workspace.sourceFingerprint); setImportedAt(loaded.workspace.importedAt); setProjectLoaded(true);
         return;
       }
-      const workspace = await loadCurrentWorkspace();
-      if (cancelled || !workspace?.files.length) return;
-      setFiles(workspace.files); setActiveFile(workspace.files.some(file => file.path === workspace.activeFile) ? workspace.activeFile : workspace.files[0].path); setProjectName(workspace.name); setProjectLoaded(true);
+      if (!loaded.workspace) return;
+      setFiles(loaded.workspace.files); setActiveFile(loaded.activeFile); setProjectName(loaded.workspace.name); setProjectLoaded(true);
     })()
       .catch((reason) => {
         if (!cancelled) setWorkspaceMessage(reason instanceof Error ? reason.message : '工作区加载失败。工程档案未受影响，可返回工程中心或重新导入源码。');
