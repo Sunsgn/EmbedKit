@@ -1912,17 +1912,6 @@ const server = http.createServer(async (req, res) => {
 
   if (await agentRouter.dispatch({ req, res, requestUrl, pathname })) return;
 
-  if (pathname === '/api/chip-details') {
-    const chipName = requestUrl.searchParams.get('chip');
-    if (!chipName) {
-      jsonRes(res, 400, { error: 'Missing "chip" or "part" parameter' });
-      return;
-    }
-    const details = await getChipDetails(chipName);
-    jsonRes(res, 200, details);
-    return;
-  }
-
   const targetUrl = requestUrl.searchParams.get('target');
   if (targetUrl) {
     await proxyRequest(req, res, targetUrl);

@@ -34,5 +34,13 @@ export function registerPartRoutes(router, dependencies) {
       jsonResponse(res, 200, await readPartDetails(part));
     },
   });
+  const legacyDetails = async ({ res, requestUrl }) => {
+    const part = requestUrl.searchParams.get('chip');
+    if (!part) { jsonResponse(res, 400, { error: 'Missing "chip" or "part" parameter' }); return; }
+    jsonResponse(res, 200, await readPartDetails(part));
+  };
+  router.register({ id: 'parts.details-legacy', method: 'GET', path: '/api/chip-details', handler: legacyDetails });
+  router.register({ id: 'parts.details-legacy-post-compatibility', method: 'POST', path: '/api/chip-details', handler: legacyDetails });
+  router.register({ id: 'parts.details-legacy-delete-compatibility', method: 'DELETE', path: '/api/chip-details', handler: legacyDetails });
   return router;
 }

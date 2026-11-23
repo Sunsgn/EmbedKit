@@ -96,6 +96,9 @@ export const AGENT_ROUTES = Object.freeze({
   aiProxyDelete: route('ai.proxy-delete', 'DELETE', '/proxy/:target'),
   partSources: route('parts.sources', 'GET', '/api/parts/sources', AGENT_CAPABILITIES.PART_SOURCE_STATUS, { timeoutMs: 3_000 }),
   partDetails: route('parts.details', 'GET', '/api/component-details', AGENT_CAPABILITIES.PART_DETAILS_ONLINE, { timeoutMs: 12_000 }),
+  partDetailsLegacy: route('parts.details-legacy', 'GET', '/api/chip-details', AGENT_CAPABILITIES.PART_DETAILS_ONLINE, { timeoutMs: 12_000 }),
+  partDetailsLegacyPostCompatibility: route('parts.details-legacy-post-compatibility', 'POST', '/api/chip-details', AGENT_CAPABILITIES.PART_DETAILS_ONLINE, { timeoutMs: 12_000 }),
+  partDetailsLegacyDeleteCompatibility: route('parts.details-legacy-delete-compatibility', 'DELETE', '/api/chip-details', AGENT_CAPABILITIES.PART_DETAILS_ONLINE, { timeoutMs: 12_000 }),
   partDocuments: route('parts.documents', 'GET', '/api/parts/documents', AGENT_CAPABILITIES.PART_DOCUMENT_DISCOVERY, { timeoutMs: 30_000 }),
   partDocumentContent: route('parts.document-content', 'GET', '/api/parts/document-content', AGENT_CAPABILITIES.PART_DOCUMENT_READ, { timeoutMs: 45_000, binary: true }),
 });
