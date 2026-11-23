@@ -42,6 +42,7 @@ import { loadEditorWorkspace } from "../features/project/workspaceController";
 import { saveEditorWorkspace } from "../features/project/workspaceSaveController";
 import { importProjectFiles, ProjectImportError } from "../features/project/projectImportController";
 import { associateLegacyProjectWorkspace, recordProjectSourceRevision } from "../features/project/projectRevisionController";
+import { resolveBuildDiagnosticFile, resolveMapModuleFile } from "../features/project/sourceNavigationController";
 
 const defaultFiles: FileNode[] = [
   {
@@ -1082,18 +1083,13 @@ export default function EditorPage() {
   }, []);
   const handleBuildDiagnostic = useCallback(
     (diagnostic: { file: string; line: number }) => {
-      const normalized = diagnostic.file.replace(/\\/g, "/").toLowerCase();
-      const target = files.find((file) => {
-        const path = file.path.replace(/\\/g, "/").toLowerCase();
-        return normalized.endsWith(path.replace(/^\//, "")) || path.endsWith(normalized.replace(/^\//, ""));
-      });
+      const target = resolveBuildDiagnosticFile(files, diagnostic.file);
       if (target) handleFindingSelect({ id: `build:${target.path}:${diagnostic.line}`, severity: "high", title: "编译诊断", file: target.path, line: diagnostic.line, evidence: "", recommendation: "" });
     },
     [files, handleFindingSelect],
   );
   const handleMapModuleSelect = useCallback((module: string) => {
-    const normalized = module.replace(/\\/g, "/"), nested = normalized.match(/\(([^()]+\.(?:o|obj))\)/i)?.[1], objectName = (nested || normalized.split('/').pop() || normalized).replace(/\.(?:o|obj)$/i, '').toLowerCase();
-    const target = files.find(file => /\.(c|cc|cpp|s|S)$/i.test(file.name) && file.name.replace(/\.[^.]+$/, '').toLowerCase() === objectName);
+    const target = resolveMapModuleFile(files, module);
     if (target) handleFindingSelect({ id: `map:${target.path}`, severity: 'low', title: 'MAP 模块', file: target.path, line: 1, evidence: module, recommendation: '' });
   }, [files, handleFindingSelect]);
 
