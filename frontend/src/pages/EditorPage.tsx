@@ -43,8 +43,9 @@ import { saveEditorWorkspace } from "../features/project/workspaceSaveController
 import { importProjectFiles, ProjectImportError } from "../features/project/projectImportController";
 import { associateLegacyProjectWorkspace, recordProjectSourceRevision } from "../features/project/projectRevisionController";
 import { resolveBuildDiagnosticFile, resolveMapModuleFile } from "../features/project/sourceNavigationController";
-import { analyzeProjectRisks, type ProjectFinding } from "../features/project/projectRiskAnalysis";
+import type { ProjectFinding } from "../features/project/projectRiskAnalysis";
 import { summarizeProject, type ProjectSummary } from "../features/project/projectSummary";
+import { inspectProjectStructure } from "../features/project/projectStructureInspection";
 
 const defaultFiles: FileNode[] = [
   {
@@ -254,67 +255,6 @@ int main(void) {
   ];
 }
 
-function stripCCommentsAndStrings(value: string) {
-  return value
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\/\/[^\r\n]*/g, "")
-    .replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, "");
-}
-
-function inspectProject(files: FileNode[], chipName: string): CompileResult {
-  const sourceFiles = files.filter((file) => /\.(c|cpp)$/i.test(file.name));
-  const errors: string[] = [];
-  const warnings: string[] = [];
-  if (!sourceFiles.length) errors.push("未找到 .c 或 .cpp 源文件");
-  if (
-    !files.some(
-      (file) => file.name === "Makefile" || file.name === "CMakeLists.txt",
-    )
-  )
-    warnings.push("未找到 Makefile 或 CMakeLists.txt");
-  for (const file of sourceFiles) {
-    const code = stripCCommentsAndStrings(file.content);
-    const open = (code.match(/{/g) || []).length;
-    const close = (code.match(/}/g) || []).length;
-    if (open !== close) errors.push(`${file.path}：大括号数量不匹配`);
-  }
-  if (
-    sourceFiles.length &&
-    !sourceFiles.some((file) =>
-      /\bmain\s*\(/.test(stripCCommentsAndStrings(file.content)),
-    )
-  )
-    warnings.push("未检测到 main() 入口函数");
-  const findings = analyzeProjectRisks(files);
-  warnings.push(
-    `目标芯片：${chipName}；当前仅进行本地结构检查，未调用 ARM GCC、Keil 或 IAR`,
-  );
-  warnings.push("请使用厂商工具或实际工具链完成最终编译、链接、下载和硬件验证");
-  const output = [
-    "EmbedKit 工程检查（参考模式）",
-    `检查文件：${files.length} 个，源文件：${sourceFiles.length} 个`,
-    errors.length
-      ? `错误：\n${errors.map((item) => `  ✗ ${item}`).join("\n")}`
-      : "错误：无",
-    warnings.length
-      ? `提示：\n${warnings.map((item) => `  ! ${item}`).join("\n")}`
-      : "",
-    findings.length
-      ? `静态风险：\n${findings.map((item) => `  ${item.severity === "high" ? "✗" : item.severity === "medium" ? "!" : "·"} [${item.severity.toUpperCase()}] ${item.title} · ${item.file}${item.line ? `:${item.line}` : ""}\n    ${item.recommendation}`).join("\n")}`
-      : "静态风险：未命中当前规则",
-    errors.length
-      ? "检查未通过，请先修正错误。"
-      : "基础结构检查通过；这不代表已完成真实编译。",
-  ]
-    .filter(Boolean)
-    .join("\n");
-  return {
-    success: errors.length === 0,
-    output,
-    size: files.reduce((total, file) => total + file.content.length, 0),
-  };
-}
-
 function FileTree({
   files,
   activeFile,
@@ -418,7 +358,7 @@ function OutputPanel({ result }: { result: CompileResult | null }) {
   if (!result) {
     return (
       <div className="h-full flex items-center justify-center text-gray-500 text-sm">
-        点击“检查代码”进行本地工程结构检查
+        点击“结构检查”进行本地工程结构检查
       </div>
     );
   }
@@ -595,7 +535,7 @@ function ProjectSummaryPanel({ summary, onFindingSelect }: { summary: ProjectSum
       <div className="mt-3 border-t border-[#30363d] pt-3">
         <div className="mb-2 flex items-center justify-between"><b className="text-[11px] text-gray-300">本地静态风险</b><span className={`text-[10px] ${summary.findings.some(item => item.severity === "high") ? "text-red-400" : summary.findings.length ? "text-yellow-400" : "text-green-400"}`}>{summary.findings.length ? `${summary.findings.length} 项` : "未命中规则"}</span></div>
         <div className="space-y-1.5">{summary.findings.slice(0, 8).map(item => <button type="button" key={item.id} onClick={() => onFindingSelect(item)} disabled={!item.line || item.file === "/"} title={item.line && item.file !== "/" ? `打开 ${item.file}:${item.line}` : "这是工程级问题，没有可跳转的源码位置"} className={`block w-full rounded border p-2 text-left transition-colors disabled:cursor-default ${item.severity === "high" ? "border-red-500/20 bg-red-500/5 enabled:hover:border-red-400/60" : item.severity === "medium" ? "border-yellow-500/20 bg-yellow-500/5 enabled:hover:border-yellow-400/60" : "border-[#30363d] bg-[#161b22] enabled:hover:border-blue-400/50"}`}><div className="flex items-center justify-between gap-2"><b className={`text-[10px] ${item.severity === "high" ? "text-red-300" : item.severity === "medium" ? "text-yellow-300" : "text-gray-300"}`}>{item.title}</b><span className="shrink-0 text-[8px] uppercase text-gray-600">{item.severity}</span></div><p className="mt-1 truncate font-mono text-[8px] text-gray-600" title={item.evidence}>{item.file}{item.line ? `:${item.line}` : ""} · {item.evidence}</p><p className="mt-1 text-[9px] leading-4 text-gray-500">{item.recommendation}</p>{item.line > 0 && item.file !== "/" && <span className="mt-1 block text-[9px] text-blue-400">点击定位到源码 →</span>}</button>)}</div>
-        {summary.findings.length > 8 && <p className="mt-2 text-[9px] text-gray-600">其余 {summary.findings.length - 8} 项请在“检查代码”结果或导出报告中查看。</p>}
+        {summary.findings.length > 8 && <p className="mt-2 text-[9px] text-gray-600">其余 {summary.findings.length - 8} 项请在“结构检查”结果或导出报告中查看。</p>}
       </div>
     </div>
   );
@@ -720,10 +660,10 @@ export default function EditorPage() {
   const [activeFile, setActiveFile] = useState("/Src/main.c");
   const [selectedChip, setSelectedChip] = useState<Chip>(chips[0]);
   const [projectName, setProjectName] = useState("embedkit_project");
-  const [compileResult, setCompileResult] = useState<CompileResult | null>(
+  const [inspectionResult, setInspectionResult] = useState<CompileResult | null>(
     null,
   );
-  const [isCompiling, setIsCompiling] = useState(false);
+  const [isInspecting, setIsInspecting] = useState(false);
   const [showOutput, setShowOutput] = useState(true);
   const [activeToolPanel, setActiveToolPanel] = useState<'architecture' | 'map' | 'build' | null>(null);
   const [runtimeTrace, setRuntimeTrace] = useState<RuntimeTraceAnalysis | null>(null);
@@ -910,7 +850,7 @@ export default function EditorPage() {
       if (detectedChip) setSelectedChip(detectedChip);
       setImportError("");
       setAiReport("");
-      setCompileResult(null);
+      setInspectionResult(null);
     } catch (reason) {
       setImportError(reason instanceof ProjectImportError ? reason.message : `工程工作区保存失败：${reason instanceof Error ? reason.message : String(reason)}`);
     }
@@ -924,13 +864,13 @@ export default function EditorPage() {
     }
   };
 
-  const handleCompile = async () => {
-    setIsCompiling(true);
+  const handleInspect = async () => {
+    setIsInspecting(true);
     setTimeout(() => {
-      setCompileResult(
-        inspectProject(files, projectSummary?.chip || selectedChip.name),
+      setInspectionResult(
+        inspectProjectStructure(files, projectSummary?.chip || selectedChip.name),
       );
-      setIsCompiling(false);
+      setIsInspecting(false);
     }, 1500);
   };
 
@@ -1110,13 +1050,13 @@ export default function EditorPage() {
             {projectArchitecture && <button onClick={() => setActiveToolPanel(value => value === 'architecture' ? null : 'architecture')} className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs ${activeToolPanel === 'architecture' ? "bg-cyan-500/20 text-cyan-300" : "bg-[#0d1117] text-gray-300 hover:text-white"}`}><Network size={13} />程序框架</button>}
             {mapFile && mapAnalysis && <button onClick={() => setActiveToolPanel(value => value === 'map' ? null : 'map')} className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs ${activeToolPanel === 'map' ? "bg-purple-500/20 text-purple-300" : "bg-[#0d1117] text-gray-300 hover:text-white"}`}><BookOpen size={13} />MAP 分析</button>}
             <button
-              onClick={handleCompile}
-              disabled={isCompiling || !projectSummary}
+              onClick={handleInspect}
+              disabled={isInspecting || !projectSummary}
               className="flex shrink-0 items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white
                 bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors disabled:opacity-50"
             >
               <Play size={14} fill="currentColor" />
-              {isCompiling ? "检查中..." : "检查代码"}
+              {isInspecting ? "检查中..." : "结构检查"}
             </button>
             {(projectSummary?.agentBuildSystem || projectSummary?.buildKind === "unknown") ? <button onClick={() => setActiveToolPanel(value => value === 'build' ? null : 'build')} className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs ${activeToolPanel === 'build' ? "bg-green-500/20 text-green-300" : "bg-[#0d1117] text-gray-300 hover:text-white"}`}><Play size={13} />{projectSummary.agentBuildSystem ? `${projectSummary.toolchain} 构建` : "高级构建设置"}</button> : projectSummary && <span className="shrink-0 rounded-lg border border-[#30363d] px-2.5 py-1.5 text-[10px] text-gray-500">{projectSummary.toolchain} 管理构建</span>}
             <button
@@ -1180,7 +1120,7 @@ export default function EditorPage() {
               <ProjectSummaryPanel summary={projectSummary} onFindingSelect={handleFindingSelect} />
               <AiReportPanel report={aiReport} analyzing={analyzing} />
               <div className="h-52 shrink-0 border-t border-[#30363d]">
-                <OutputPanel result={compileResult} />
+                <OutputPanel result={inspectionResult} />
               </div>
             </div>
           )}
