@@ -43,8 +43,8 @@ import { saveEditorWorkspace } from "../features/project/workspaceSaveController
 import { importProjectFiles, ProjectImportError } from "../features/project/projectImportController";
 import { associateLegacyProjectWorkspace, recordProjectSourceRevision } from "../features/project/projectRevisionController";
 import { resolveBuildDiagnosticFile, resolveMapModuleFile } from "../features/project/sourceNavigationController";
-import { detectProjectBuild, type AgentBuildSystem, type ProjectBuildConfidence, type ProjectBuildKind } from "../features/project/projectBuildDetection";
 import { analyzeProjectRisks, type ProjectFinding } from "../features/project/projectRiskAnalysis";
+import { summarizeProject, type ProjectSummary } from "../features/project/projectSummary";
 
 const defaultFiles: FileNode[] = [
   {
@@ -312,103 +312,6 @@ function inspectProject(files: FileNode[], chipName: string): CompileResult {
     success: errors.length === 0,
     output,
     size: files.reduce((total, file) => total + file.content.length, 0),
-  };
-}
-
-interface ProjectSummary {
-  chip: string;
-  toolchain: string;
-  sdk: string;
-  projectType: string;
-  peripherals: string[];
-  files: number;
-  sourceFiles: number;
-  headerFiles: number;
-  totalLines: number;
-  entryPoints: string[];
-  buildFiles: string[];
-  findings: ProjectFinding[];
-  buildKind: ProjectBuildKind;
-  buildConfidence: ProjectBuildConfidence;
-  buildEvidence: string[];
-  agentBuildSystem?: AgentBuildSystem;
-}
-
-function summarizeProject(files: FileNode[]): ProjectSummary {
-  const content = files
-    .map((file) => `${file.name}\n${file.content}`)
-    .join("\n");
-  const modelPattern =
-    /\b(?:STM32[A-Z0-9]+|ESP32(?:-[A-Z0-9]+)*|nRF\d+[A-Z0-9]*|LPC\d+[A-Z0-9]*|GD32[A-Z0-9]+|CH32[A-Z0-9]+|ATmega\w+|ATSAMD\w+|PIC\d+[A-Z0-9]*|RP20\w+|MIMXRT\w+|MK\d+[A-Z0-9]*)\b/gi;
-  const candidates = [...content.matchAll(modelPattern)].map(
-    (match) => match[0],
-  );
-  const counts = candidates.reduce<Record<string, number>>((all, item) => {
-    const key = item.toUpperCase();
-    all[key] = (all[key] || 0) + 1;
-    return all;
-  }, {});
-  const chip =
-    Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] ||
-    "未识别（可手动确认）";
-  const detectedBuild = detectProjectBuild(files), toolchain = detectedBuild.label;
-  const sdk = /esp-idf|freertos|zephyr|stm32cube|hal_|cmsis|rt-thread|threadx|mbed os/i.test(content)
-    ? content.match(/esp-idf|FreeRTOS|Zephyr|STM32Cube|CMSIS|RT-Thread|ThreadX|Mbed OS/i)?.[0] ||
-      "SDK/框架"
-    : "未识别";
-  const peripheralNames = [
-    "UART",
-    "USART",
-    "SPI",
-    "I2C",
-    "CAN",
-    "USB",
-    "ADC",
-    "DAC",
-    "DMA",
-    "GPIO",
-    "TIM",
-    "Ethernet",
-    "BLE",
-    "Wi-Fi",
-  ];
-  const sourceFiles = files.filter((file) => /\.(c|cc|cpp)$/i.test(file.name)),
-    headerFiles = files.filter((file) => /\.(h|hpp)$/i.test(file.name));
-  return {
-    chip,
-    toolchain,
-    sdk,
-    projectType: detectedBuild.kind === 'keil' || detectedBuild.kind === 'iar' ? "厂商 IDE 工程" : detectedBuild.kind === 'unknown' ? 'C/C++ 源码' : `${detectedBuild.label} 工程`,
-    peripherals: peripheralNames.filter((name) =>
-      new RegExp(`\\b${name}\\b`, "i").test(content),
-    ),
-    files: files.length,
-    sourceFiles: sourceFiles.length,
-    headerFiles: headerFiles.length,
-    totalLines: files.reduce(
-      (total, file) => total + file.content.split(/\r?\n/).length,
-      0,
-    ),
-    entryPoints: sourceFiles
-      .filter((file) =>
-        /\bmain\s*\(/.test(stripCCommentsAndStrings(file.content)),
-      )
-      .map((file) => file.path),
-    buildFiles: files
-      .filter(
-        (file) =>
-          file.name === "Makefile" ||
-          file.name === "CMakeLists.txt" ||
-          file.name === "CMakePresets.json" ||
-          ["platformio.ini", "Kconfig", "prj.conf", "sdkconfig", "SConstruct"].includes(file.name) ||
-          /\.(uvprojx|uvoptx|ewp|eww|sct|icf|ld|ioc)$/i.test(file.name),
-      )
-      .map((file) => file.path),
-    findings: analyzeProjectRisks(files),
-    buildKind: detectedBuild.kind,
-    buildConfidence: detectedBuild.confidence,
-    buildEvidence: detectedBuild.evidence,
-    agentBuildSystem: detectedBuild.agentBuildSystem,
   };
 }
 
