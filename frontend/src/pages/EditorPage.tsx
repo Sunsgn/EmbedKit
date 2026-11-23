@@ -28,9 +28,6 @@ import {
 import { AI_PROVIDERS, type AiConfig } from "../types/ai";
 import {
   copyLegacyWorkspaceToProject,
-  createProjectRevisionId,
-  createWorkspaceFingerprint,
-  saveProjectWorkspace,
 } from "../services/workspaceStorage";
 import ProjectBuildPanel from "../features/project/ProjectBuildPanel";
 import MapAnalysisPanel from "../features/project/MapAnalysisPanel";
@@ -48,6 +45,7 @@ import { exportProjectAnalysisRun } from "../services/projectAnalysisSnapshot";
 import { analysisRunSavedMessage, mergeAnalysisRunHistory, saveCompletedAnalysisRun } from "../features/project/analysisRunController";
 import { loadEditorWorkspace } from "../features/project/workspaceController";
 import { saveEditorWorkspace } from "../features/project/workspaceSaveController";
+import { importProjectFiles, ProjectImportError } from "../features/project/projectImportController";
 
 const defaultFiles: FileNode[] = [
   {
@@ -1171,89 +1169,24 @@ export default function EditorPage() {
   const handleImportFiles = async (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
-    const raw = Array.from(event.target.files ?? []);
-    if (raw.some((file) => /\.zip$/i.test(file.name))) {
-      setImportError(
-        "暂不支持直接解析 ZIP。请解压后选择工程目录，或多选工程文件。",
-      );
-      event.target.value = "";
-      return;
-    }
-    const selected = raw.filter(
-      (file) =>
-        /\.(c|cc|cpp|h|hpp|s|S|ld|sct|icf|ioc|uvprojx|uvoptx|ewp|eww|mk|txt|md|map|hex|cmake|json|yml|yaml|toml|ini|conf|config|dts|dtsi|overlay|py)$/i.test(
-          file.name,
-        ) ||
-        file.name === "Makefile" ||
-        file.name === "CMakeLists.txt" ||
-        ["Kconfig", "sdkconfig", "SConstruct"].includes(file.name),
-    );
-    if (!selected.length) {
-      setImportError(
-        "没有找到可分析的工程文件，请选择 C/C++、Makefile、CMake、Keil 或 IAR 文件。",
-      );
-      event.target.value = "";
-      return;
-    }
-    if (selected.some((file) => file.size > (/\.map$/i.test(file.name) ? 20 : 2) * 1024 * 1024)) {
-      setImportError("源码和配置文件单个不能超过 2 MB，MAP 文件不能超过 20 MB。");
-      event.target.value = "";
-      return;
-    }
-    if (
-      selected.reduce((total, file) => total + file.size, 0) >
-      50 * 1024 * 1024
-    ) {
-      setImportError("可分析文件总大小不能超过 50 MB。");
-      event.target.value = "";
-      return;
-    }
-    const imported = await Promise.all(
-      selected.map(async (file) => {
-        const ext = file.name.split(".").pop()?.toLowerCase() || "text";
-        const language: FileNode["language"] =
-          ext === "h" || ext === "hpp"
-            ? "h"
-            : ext === "cpp" || ext === "cc"
-              ? "cpp"
-              : ext === "c"
-                ? "c"
-                : ext === "cmake" || file.name === "Makefile"
-                  ? "makefile"
-                  : "text";
-        return {
-          name: file.name,
-          path: `/${file.webkitRelativePath || file.name}`,
-          content: await file.text(),
-          language,
-          size: file.size,
-          lastModified: file.lastModified,
-        };
-      }),
-    );
-    const nextActiveFile = imported.find((file) => /\.(c|cpp)$/i.test(file.name))?.path || imported[0].path;
-    const nextProjectName = engineeringProject?.name ?? selected[0].webkitRelativePath?.split("/")[0] ?? "imported_project";
-    if (requestedProjectId && engineeringProject) {
-      try {
-        const fingerprint = await createWorkspaceFingerprint(imported), nextImportedAt = new Date().toISOString();
-        const nextRevisionId = await createProjectRevisionId(requestedProjectId, fingerprint);
-        await saveProjectWorkspace({ schemaVersion: 1, projectId: requestedProjectId, revisionId: nextRevisionId, name: engineeringProject.name, files: imported, activeFile: nextActiveFile, importedAt: nextImportedAt, sourceFingerprint: fingerprint });
-        await recordProjectRevision(engineeringProject, nextRevisionId, fingerprint, nextImportedAt);
-        setRevisionId(nextRevisionId); setSourceFingerprint(fingerprint); setImportedAt(nextImportedAt); setWorkspaceMessage('源码已关联到当前工程，并创建可追溯修订。'); setLegacyWorkspaceAvailable(false);
-      } catch (reason) {
-        setImportError(`工程工作区保存失败：${reason instanceof Error ? reason.message : String(reason)}`); event.target.value = ""; return;
+    try {
+      const imported = await importProjectFiles({ files: Array.from(event.target.files ?? []), requestedProjectId, engineeringProject, recordRevision: recordProjectRevision });
+      if (imported.association) {
+        setRevisionId(imported.association.revisionId); setSourceFingerprint(imported.association.sourceFingerprint); setImportedAt(imported.association.importedAt); setWorkspaceMessage('源码已关联到当前工程，并创建可追溯修订。'); setLegacyWorkspaceAvailable(false);
       }
+      setFiles(imported.files);
+      setActiveFile(imported.activeFile);
+      setProjectName(imported.projectName);
+      const summary = summarizeProject(imported.files);
+      setProjectLoaded(true);
+      const detectedChip = chips.find((chip) => chip.name.toUpperCase() === summary.chip || summary.chip.includes(chip.name.toUpperCase()));
+      if (detectedChip) setSelectedChip(detectedChip);
+      setImportError("");
+      setAiReport("");
+      setCompileResult(null);
+    } catch (reason) {
+      setImportError(reason instanceof ProjectImportError ? reason.message : `工程工作区保存失败：${reason instanceof Error ? reason.message : String(reason)}`);
     }
-    setFiles(imported);
-    setActiveFile(nextActiveFile);
-    setProjectName(nextProjectName);
-    const summary = summarizeProject(imported);
-    setProjectLoaded(true);
-    const detectedChip = chips.find((chip) => chip.name.toUpperCase() === summary.chip || summary.chip.includes(chip.name.toUpperCase()));
-    if (detectedChip) setSelectedChip(detectedChip);
-    setImportError("");
-    setAiReport("");
-    setCompileResult(null);
     event.target.value = "";
   };
 
