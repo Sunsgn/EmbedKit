@@ -18,6 +18,7 @@ import { registerBuildArtifactRoutes } from './routes/build-artifacts.js';
 import { registerBuildRoutes } from './routes/build.js';
 import { registerEnvironmentRoutes } from './routes/environment.js';
 import { registerFileAnalysisRoutes } from './routes/files-analysis.js';
+import { registerNetworkSessionRoutes } from './routes/network-sessions.js';
 import { registerPartRoutes } from './routes/parts.js';
 import { registerSerialSessionRoutes } from './routes/serial-sessions.js';
 import { registerSerialSystemRoutes } from './routes/serial-system.js';
@@ -726,6 +727,22 @@ registerSerialSessionRoutes(agentRouter, {
   persistSessions: persistSerialSessions,
   closeSession: closeSerialSession,
   removeSession: id => serialSessions.delete(id),
+});
+registerNetworkSessionRoutes(agentRouter, {
+  jsonResponse: jsonRes,
+  readJsonBody: readJSONBody,
+  status: () => ({ available: true, protocols: ['tcp', 'udp'], modes: ['client', 'server'], activeSessions: networkSessions.size, maxSessions: MAX_NETWORK_SESSIONS }),
+  listSessions: () => [...networkSessions.values()],
+  getSession: id => networkSessions.get(id),
+  createSession: body => createNetworkSession(body.type, body.host, body.port, body.localPort, body.mode, body.connectTimeoutMs, body.frameMode, body.frameGapMs),
+  publicSession: publicNetworkSession,
+  decodePayload: decodeNetworkPayload,
+  writeTcp: writeTcpPayload,
+  sendUdp: sendUdpPayload,
+  pushEvent: pushNetworkEvent,
+  persistSessions: persistNetworkSessions,
+  closeSession: closeNetworkSession,
+  removeSession: id => networkSessions.delete(id),
 });
 
 async function persistSerialSessions() {
@@ -1892,80 +1909,6 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (await agentRouter.dispatch({ req, res, requestUrl, pathname })) return;
-
-  if (pathname === '/api/network/status' && req.method === 'GET') {
-    jsonRes(res, 200, { available: true, protocols: ['tcp', 'udp'], modes: ['client', 'server'], activeSessions: networkSessions.size, maxSessions: MAX_NETWORK_SESSIONS });
-    return;
-  }
-
-  if (pathname === '/api/network/sessions' && req.method === 'GET') {
-    jsonRes(res, 200, { sessions: [...networkSessions.values()].map(session => publicNetworkSession(session)) });
-    return;
-  }
-
-  if (pathname === '/api/network/sessions' && req.method === 'POST') {
-    try {
-      const body = await readJSONBody(req);
-      const session = createNetworkSession(body.type, body.host, body.port, body.localPort, body.mode, body.connectTimeoutMs, body.frameMode, body.frameGapMs);
-      await persistNetworkSessions();
-      jsonRes(res, 201, publicNetworkSession(session));
-    } catch (error) {
-      jsonRes(res, 400, { error: error.message });
-    }
-    return;
-  }
-
-  const networkMatch = pathname.match(/^\/api\/network\/sessions\/([0-9a-f-]+)(?:\/(send))?$/i);
-  if (networkMatch) {
-    const session = networkSessions.get(networkMatch[1]);
-    if (!session) { jsonRes(res, 404, { error: 'Network session not found' }); return; }
-    if (networkMatch[2] === 'send' && req.method === 'POST') {
-      try {
-        if (session.state !== 'connected') throw new Error('Network session is not connected');
-        const body = await readJSONBody(req);
-        const payload = decodeNetworkPayload(body.data, body.encoding);
-        let targets = [];
-        if (session.type === 'tcp' && session.mode === 'client') {
-          await writeTcpPayload(session.socket, payload); targets = [`${session.host}:${session.port}`];
-        }
-        else if (session.type === 'tcp') {
-          if (!session.clients.size) throw new Error('No TCP client is connected');
-          const requestedPeer = String(body.peer || '*');
-          const selected = requestedPeer === '*' ? [...session.clients.entries()] : [[requestedPeer, session.clients.get(requestedPeer)]];
-          if (selected.some(([, client]) => !client)) throw new Error('Selected TCP client is no longer connected');
-          await Promise.all(selected.map(([, client]) => writeTcpPayload(client, payload)));
-          targets = selected.map(([peer]) => peer);
-          for (const peer of targets) { const evidence = session.peers.get(peer); if (evidence) { evidence.txBytes += payload.length; evidence.lastSeenAt = new Date().toISOString(); } }
-        } else if (session.mode === 'client') { await sendUdpPayload(session.socket, payload); targets = [`${session.host}:${session.port}`]; }
-        else {
-          if (!session.lastPeer) throw new Error('No UDP peer has sent data yet');
-          const requestedPeer = String(body.peer || `${session.lastPeer.address}:${session.lastPeer.port}`), evidence = session.peers.get(requestedPeer);
-          if (!evidence) throw new Error('Selected UDP peer is unavailable');
-          await sendUdpPayload(session.socket, payload, evidence); targets = [requestedPeer]; evidence.txBytes += payload.length; evidence.lastSeenAt = new Date().toISOString();
-        }
-        pushNetworkEvent(session, 'tx', payload);
-        if (session.mode === 'server') session.events[session.events.length - 1].peer = targets.length === 1 ? targets[0] : `${targets.length} peers`;
-        jsonRes(res, 200, { sent: payload.length, targets });
-      } catch (error) {
-        jsonRes(res, 400, { error: error.message });
-      }
-      return;
-    }
-    if (!networkMatch[2] && req.method === 'GET') {
-      const after = Math.max(0, Number(requestUrl.searchParams.get('after') || 0));
-      jsonRes(res, 200, publicNetworkSession(session, Number.isFinite(after) ? after : 0));
-      return;
-    }
-    if (!networkMatch[2] && req.method === 'DELETE') {
-      closeNetworkSession(session);
-      networkSessions.delete(session.id);
-      await persistNetworkSessions();
-      jsonRes(res, 200, { closed: true });
-      return;
-    }
-    jsonRes(res, 405, { error: 'Unsupported operation for network session' });
-    return;
-  }
 
   if (pathname === '/api/chip-details') {
     const chipName = requestUrl.searchParams.get('chip');
