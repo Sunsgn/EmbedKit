@@ -7,7 +7,7 @@ export const agentPaths = Object.freeze({
   environmentInstallations: AGENT_ROUTES.environmentInstallations.path,
   environmentInstallManifests: AGENT_ROUTES.environmentInstallManifests.path,
   environmentInstallJobs: AGENT_ROUTES.environmentInstallJobs.path,
-  environmentInstallJob: (id: string) => `/api/environment/install-jobs/${segment(id)}`,
+  environmentInstallJob: (id: string) => AGENT_ROUTES.environmentInstallJob.path.replace(':jobId', segment(id)),
   fileSelect: AGENT_ROUTES.fileSelect.path,
   fileSelection: (id: string) => `/api/files/selections/${segment(id)}`,
   fileChunk: (id: string, offset: number, length: number) => `/api/files/selections/${segment(id)}/chunk?offset=${segment(offset)}&length=${segment(length)}`,

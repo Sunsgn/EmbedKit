@@ -309,6 +309,20 @@ test('detects installed development software with bounded structured results', a
   assert.ok(result.installations.every(item => typeof item.durationMs === 'number' && item.rawVersion.length <= 500));
 });
 
+test('returns structured installation job route errors after route extraction', async () => {
+  const missingId = '00000000-0000-0000-0000-000000000000';
+  const missing = await fetch(`${agentBaseUrl}/api/environment/install-jobs/${missingId}`);
+  assert.equal(missing.status, 404);
+  const missingError = await missing.json();
+  assert.equal(missingError.code, 'NOT_FOUND');
+  assert.equal(missingError.message, 'Installation job not found');
+  const unsupported = await fetch(`${agentBaseUrl}/api/environment/install-jobs/${missingId}`, { method: 'POST' });
+  assert.equal(unsupported.status, 404);
+  const unsupportedError = await unsupported.json();
+  assert.equal(unsupportedError.code, 'NOT_FOUND');
+  assert.equal(unsupportedError.message, 'Installation job not found');
+});
+
 test('installs a pinned portable tool only inside a user-selected directory and verifies it', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'embedkit-install-root-')), archiveBytes = Buffer.from('controlled-test-archive'), executableName = process.platform === 'win32' ? 'node.exe' : 'node';
   const manifest = { id: 'test-node-1.0.0', softwareId: 'test.node', capabilityId: 'test.node', name: 'Test Node', version: '1.0.0', platform: process.platform, architecture: process.arch, sourceUrl: 'https://github.com/example/test/releases/download/v1/test.zip', officialPage: 'https://github.com/example/test', sha256: createHash('sha256').update(archiveBytes).digest('hex'), byteLength: archiveBytes.length, license: 'MIT', requiresLicenseAcceptance: false, archive: 'zip', installSubdirectory: 'test-node/1.0.0', expectedExecutable: executableName, verificationArgs: ['--version'], verifiedAt: '2026-10-14' };
@@ -322,6 +336,10 @@ test('installs a pinned portable tool only inside a user-selected directory and 
     job = await waitForInstallJob(job);
     assert.equal(job.state, 'passed', JSON.stringify(job, null, 2)); assert.equal(job.progress, 100); assert.equal(job.installation.capabilityId, 'test.node');
     assert.equal((await stat(join(directory, 'test-node', '1.0.0', executableName))).isFile(), true);
+    assert.equal((await fetch(`${agentBaseUrl}/api/environment/install-jobs/${job.id}`, { method: 'DELETE' })).status, 409);
+    const unsupported = await fetch(`${agentBaseUrl}/api/environment/install-jobs/${job.id}`, { method: 'POST' });
+    assert.equal(unsupported.status, 405);
+    assert.equal((await unsupported.json()).code, 'METHOD_NOT_ALLOWED');
   } finally {
     configureInstallManifestRegistry(null); configureSoftwareInstallerAdapter(null); configureFilePickerAdapter(null); await rm(directory, { recursive: true, force: true });
   }

@@ -8,6 +8,7 @@ describe('agent route builders', () => {
   });
 
   it('encodes dynamic identifiers and query values', () => {
+    expect(agentPaths.environmentInstallJob('job/id')).toBe('/api/environment/install-jobs/job%2Fid');
     expect(agentPaths.serialSession('unsafe/id', 4)).toBe('/api/serial/sessions/unsafe%2Fid?after=4');
     expect(agentPaths.elfLookup('analysis 1', '0x0800+4')).toContain('analysis%201/lookup?address=0x0800%2B4');
   });

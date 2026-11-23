@@ -14,6 +14,7 @@ import { analyzeElf, lookupElfAddress, parseElfAddress } from './elf.js';
 import { AGENT_PROTOCOL_VERSION, listAgentCapabilities, validateAgentContract } from '../contracts/agent-api.js';
 import { createHttpBoundary } from './server/http.js';
 import { AgentRouter } from './server/router.js';
+import { registerEnvironmentRoutes } from './routes/environment.js';
 import { registerFileAnalysisRoutes } from './routes/files-analysis.js';
 import { registerPartRoutes } from './routes/parts.js';
 
@@ -667,6 +668,18 @@ registerFileAnalysisRoutes(agentRouter, {
   analyzeElf: analyzeSelectedElf,
   lookupElf: lookupAnalyzedElf,
   disassembleElf: disassembleAnalyzedElf,
+});
+registerEnvironmentRoutes(agentRouter, {
+  jsonResponse: jsonRes,
+  detectInstallations: detectDevelopmentSoftware,
+  listInstallManifests: () => ({ schemaVersion: 1, manifests: compatibleInstallManifests() }),
+  startInstallJob: async req => startInstallJob(await readJSONBody(req)),
+  getInstallJob: id => installJobs.get(id),
+  publicInstallJob,
+  cancelInstallJob: job => {
+    job.cancelRequested = true;
+    job.request?.destroy(new Error('Installation cancelled'));
+  },
 });
 
 async function persistSerialSessions() {
@@ -1833,33 +1846,6 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (await agentRouter.dispatch({ req, res, requestUrl, pathname })) return;
-
-  if (pathname === '/api/environment/installations' && req.method === 'GET') {
-    try { jsonRes(res, 200, await detectDevelopmentSoftware()); }
-    catch (error) { jsonRes(res, 500, { error: error.message }); }
-    return;
-  }
-
-  if (pathname === '/api/environment/install-manifests' && req.method === 'GET') {
-    try { jsonRes(res, 200, { schemaVersion: 1, manifests: compatibleInstallManifests() }); }
-    catch (error) { jsonRes(res, 500, { error: error.message }); }
-    return;
-  }
-
-  if (pathname === '/api/environment/install-jobs' && req.method === 'POST') {
-    try { jsonRes(res, 202, await startInstallJob(await readJSONBody(req))); }
-    catch (error) { jsonRes(res, 400, { error: error.message }); }
-    return;
-  }
-
-  const installJobMatch = pathname.match(/^\/api\/environment\/install-jobs\/([0-9a-f-]+)$/i);
-  if (installJobMatch) {
-    const job = installJobs.get(installJobMatch[1]);
-    if (!job) { jsonRes(res, 404, { error: 'Installation job not found' }); return; }
-    if (req.method === 'GET') { jsonRes(res, 200, publicInstallJob(job)); return; }
-    if (req.method === 'DELETE') { if (job.state !== 'running') { jsonRes(res, 409, { error: 'Installation job is not running' }); return; } job.cancelRequested = true; job.request?.destroy(new Error('Installation cancelled')); jsonRes(res, 202, publicInstallJob(job)); return; }
-    jsonRes(res, 405, { error: 'Unsupported operation for installation job' }); return;
-  }
 
   if (pathname === '/api/build/detect' && req.method === 'POST') {
     try { const body = await readJSONBody(req); jsonRes(res, 200, await detectBuildEnvironment(body.rootPath)); }
