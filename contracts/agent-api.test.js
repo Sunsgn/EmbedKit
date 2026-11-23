@@ -13,3 +13,7 @@ test('platform-specific capability is only advertised where implemented', () => 
   assert.equal(listAgentCapabilities('linux').includes(AGENT_CAPABILITIES.SERIAL_DRIVER_INSTALLATION), false);
   assert.equal(listAgentCapabilities('win32').includes(AGENT_CAPABILITIES.SERIAL_DRIVER_INSTALLATION), true);
 });
+
+test('shared routes stay inside the versioned API or restricted proxy namespaces', () => {
+  assert.ok(Object.values(AGENT_ROUTES).every(route => route.path.startsWith('/api/') || route.path.startsWith('/proxy/')));
+});

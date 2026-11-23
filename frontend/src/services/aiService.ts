@@ -1,4 +1,5 @@
 import { AI_PROVIDERS, type AiConfig } from '../types/ai';
+import { agentPaths } from '../application/agent/routes';
 
 const SYSTEM_PROMPT = `你是一个通用嵌入式工程分析助手。你必须依据用户提供的真实工程文件、编译配置、SDK信息和官方资料进行判断，不得把未知平台臆测成STM32或ESP32。
 请用中文回答用户的问题。回答时注意：
@@ -10,7 +11,7 @@ const SYSTEM_PROMPT = `你是一个通用嵌入式工程分析助手。你必须
 export const LOCAL_PROXY_BASE = (import.meta.env.VITE_LOCAL_PROXY_URL || 'http://127.0.0.1:9999').replace(/\/+$/, '');
 
 export function localProxyUrl(target: string): string {
-  return `${LOCAL_PROXY_BASE}/proxy/${target}`;
+  return `${LOCAL_PROXY_BASE}${agentPaths.aiProxy(target)}`;
 }
 
 const AI_CONFIG_KEY = 'embedkit-ai-config';
@@ -48,7 +49,7 @@ export interface LocalServer {
 
 export async function detectLocalServers(): Promise<LocalServer[]> {
   try {
-    const res = await fetch(`${LOCAL_PROXY_BASE}/api/servers`);
+    const res = await fetch(`${LOCAL_PROXY_BASE}${agentPaths.aiServers}`);
     if (!res.ok) return [];
     const data = await res.json();
     return data.servers || [];
@@ -59,7 +60,7 @@ export async function detectLocalServers(): Promise<LocalServer[]> {
 
 export async function fetchLocalModels(serverName: string): Promise<Array<{ id: string; name: string; size?: string }>> {
   try {
-    const res = await fetch(`${LOCAL_PROXY_BASE}/api/models?server=${encodeURIComponent(serverName)}`);
+    const res = await fetch(`${LOCAL_PROXY_BASE}${agentPaths.aiModels}?server=${encodeURIComponent(serverName)}`);
     if (!res.ok) return [];
     const data = await res.json();
     return data.models || [];

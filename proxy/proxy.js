@@ -14,6 +14,7 @@ import { analyzeElf, lookupElfAddress, parseElfAddress } from './elf.js';
 import { AGENT_PROTOCOL_VERSION, listAgentCapabilities, validateAgentContract } from '../contracts/agent-api.js';
 import { createHttpBoundary } from './server/http.js';
 import { AgentRouter } from './server/router.js';
+import { registerAiServiceRoutes } from './routes/ai-services.js';
 import { registerBuildArtifactRoutes } from './routes/build-artifacts.js';
 import { registerBuildRoutes } from './routes/build.js';
 import { registerEnvironmentRoutes } from './routes/environment.js';
@@ -659,6 +660,7 @@ const agentRouter = new AgentRouter().register({
   id: 'agent.status', method: 'GET', path: '/api/agent/status',
   handler: async ({ res }) => jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildJobs.size, capabilities: listAgentCapabilities(process.platform) }),
 });
+registerAiServiceRoutes(agentRouter, { jsonResponse: jsonRes, detectServers, proxyRequest });
 registerPartRoutes(agentRouter, { jsonResponse: jsonRes, discoverDocuments: discoverOfficialPartDocuments, readDocument: readOfficialPartDocument, readPartDetails: getChipDetails, maxDocumentResults: PART_DOCUMENT_MAX_RESULTS });
 registerFileAnalysisRoutes(agentRouter, {
   jsonResponse: jsonRes,
@@ -1919,32 +1921,6 @@ const server = http.createServer(async (req, res) => {
     const details = await getChipDetails(chipName);
     jsonRes(res, 200, details);
     return;
-  }
-
-  if (pathname === '/api/servers') {
-    const servers = await detectServers();
-    jsonRes(res, 200, { servers });
-    return;
-  }
-
-  if (pathname === '/api/models') {
-    const serverName = requestUrl.searchParams.get('server');
-    const servers = await detectServers();
-    const matched = servers.find(s => s.name.toLowerCase() === serverName?.toLowerCase());
-    if (matched) {
-      jsonRes(res, 200, { models: matched.models, server: matched.name });
-    } else {
-      jsonRes(res, 404, { error: `Server "${serverName}" not found` });
-    }
-    return;
-  }
-
-  if (pathname.startsWith('/proxy/')) {
-    const targetUrl = pathname.slice(7);
-    if (targetUrl) {
-      await proxyRequest(req, res, targetUrl);
-      return;
-    }
   }
 
   const targetUrl = requestUrl.searchParams.get('target');

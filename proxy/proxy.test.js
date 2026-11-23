@@ -79,6 +79,14 @@ test('rejects arbitrary, private-network, and credentialed targets', () => {
   assert.throws(() => validateProxyTarget('http://user:secret@localhost:11434/api'), /credential-free/);
 });
 
+test('keeps the extracted AI proxy route behind the existing target allowlist', async () => {
+  const response = await fetch(`${agentBaseUrl}/proxy/https://example.com/api`);
+  assert.equal(response.status, 403);
+  const error = await response.json();
+  assert.equal(error.code, 'FORBIDDEN');
+  assert.match(error.message, /not allowed/);
+});
+
 test('validates network debugging targets', () => {
   assert.deepEqual(validateHostAndPort('192.168.1.20', 9000), { host: '192.168.1.20', port: 9000 });
   assert.throws(() => validateHostAndPort('bad host', 9000), /Invalid target host/);

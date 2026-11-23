@@ -85,6 +85,15 @@ export const AGENT_ROUTES = Object.freeze({
   networkSessionUnsupportedGet: route('network.session-unsupported-get', 'GET', '/api/network/sessions/:sessionId/:operation', AGENT_CAPABILITIES.TCP_CLIENT),
   networkSessionUnsupportedPost: route('network.session-unsupported-post', 'POST', '/api/network/sessions/:sessionId/:operation', AGENT_CAPABILITIES.TCP_CLIENT),
   networkSessionUnsupportedDelete: route('network.session-unsupported-delete', 'DELETE', '/api/network/sessions/:sessionId/:operation', AGENT_CAPABILITIES.TCP_CLIENT),
+  aiServers: route('ai.servers', 'GET', '/api/servers'),
+  aiServersPostCompatibility: route('ai.servers-post-compatibility', 'POST', '/api/servers'),
+  aiServersDeleteCompatibility: route('ai.servers-delete-compatibility', 'DELETE', '/api/servers'),
+  aiModels: route('ai.models', 'GET', '/api/models'),
+  aiModelsPostCompatibility: route('ai.models-post-compatibility', 'POST', '/api/models'),
+  aiModelsDeleteCompatibility: route('ai.models-delete-compatibility', 'DELETE', '/api/models'),
+  aiProxyGet: route('ai.proxy-get', 'GET', '/proxy/:target'),
+  aiProxyPost: route('ai.proxy-post', 'POST', '/proxy/:target'),
+  aiProxyDelete: route('ai.proxy-delete', 'DELETE', '/proxy/:target'),
   partSources: route('parts.sources', 'GET', '/api/parts/sources', AGENT_CAPABILITIES.PART_SOURCE_STATUS, { timeoutMs: 3_000 }),
   partDetails: route('parts.details', 'GET', '/api/component-details', AGENT_CAPABILITIES.PART_DETAILS_ONLINE, { timeoutMs: 12_000 }),
   partDocuments: route('parts.documents', 'GET', '/api/parts/documents', AGENT_CAPABILITIES.PART_DOCUMENT_DISCOVERY, { timeoutMs: 30_000 }),
@@ -101,7 +110,7 @@ export function validateAgentContract() {
   const routeIds = new Set();
   for (const definition of Object.values(AGENT_ROUTES)) {
     if (routeIds.has(definition.id)) throw new Error(`Duplicate Agent route id: ${definition.id}`);
-    if (!definition.path.startsWith('/api/')) throw new Error(`Agent route must start with /api/: ${definition.id}`);
+    if (!definition.path.startsWith('/api/') && !definition.path.startsWith('/proxy/')) throw new Error(`Agent route must start with /api/ or /proxy/: ${definition.id}`);
     if (definition.capability && !Object.values(AGENT_CAPABILITIES).includes(definition.capability)) throw new Error(`Unknown Agent capability: ${definition.capability}`);
     routeIds.add(definition.id);
   }
