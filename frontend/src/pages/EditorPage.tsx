@@ -43,6 +43,7 @@ import { inspectProjectStructure } from "../features/project/projectStructureIns
 import { runProjectAiAnalysis } from "../features/project/projectAiAnalysisController";
 import { buildProjectAnalysisReport } from "../features/project/projectAnalysisReport";
 import { downloadBrowserText } from "../services/browserDownload";
+import { addProjectFile, deleteProjectFile, updateProjectFileContent } from "../features/project/projectFileController";
 
 const defaultFiles: FileNode[] = [
   {
@@ -667,6 +668,7 @@ export default function EditorPage() {
   const [selectedMapPath, setSelectedMapPath] = useState("");
   const [projectLoaded, setProjectLoaded] = useState(false);
   const [importError, setImportError] = useState("");
+  const [fileError, setFileError] = useState("");
   const [exportError, setExportError] = useState("");
   const [aiReport, setAiReport] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
@@ -716,7 +718,7 @@ export default function EditorPage() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      setWorkspaceReady(false); setProjectLoaded(false); setRuntimeTrace(null); setEngineeringProject(null); setRevisionId(''); setSourceFingerprint(''); setImportedAt(''); setLegacyWorkspaceAvailable(false); setWorkspaceMessage(''); setAnalysisRuns([]); setSelectedAnalysisId('');
+      setWorkspaceReady(false); setProjectLoaded(false); setRuntimeTrace(null); setEngineeringProject(null); setRevisionId(''); setSourceFingerprint(''); setImportedAt(''); setLegacyWorkspaceAvailable(false); setWorkspaceMessage(''); setAnalysisRuns([]); setSelectedAnalysisId(''); setFileError(''); setExportError('');
       const loaded = await loadEditorWorkspace(requestedProjectId);
       if (cancelled) return;
       if (loaded.mode === 'project') {
@@ -770,37 +772,21 @@ export default function EditorPage() {
 
   const handleEditorChange = useCallback(
     (value: string | undefined) => {
-      if (value !== undefined) {
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.path === activeFile ? { ...f, content: value } : f,
-          ),
-        );
-      }
+      if (value !== undefined) setFiles(prev => updateProjectFileContent(prev, activeFile, value));
     },
     [activeFile],
   );
 
   const handleAddFile = () => {
     const name = prompt("File name:");
-    if (name) {
-      const ext = name.split(".").pop() || "c";
-      const lang: FileNode["language"] =
-        ext === "h"
-          ? "h"
-          : ext === "cpp"
-            ? "cpp"
-            : ext === "toml"
-              ? "toml"
-              : "c";
-      const newFile: FileNode = {
-        name,
-        path: `/${name}`,
-        content: "",
-        language: lang,
-      };
-      setFiles((prev) => [...prev, newFile]);
-      setActiveFile(newFile.path);
+    if (name === null) return;
+    try {
+      const result = addProjectFile(files, name);
+      setFiles(result.files);
+      setActiveFile(result.activeFile);
+      setFileError("");
+    } catch (reason) {
+      setFileError(`新建文件失败：${reason instanceof Error ? reason.message : String(reason)}`);
     }
   };
 
@@ -847,6 +833,7 @@ export default function EditorPage() {
       const detectedChip = chips.find((chip) => chip.name.toUpperCase() === summary.chip || summary.chip.includes(chip.name.toUpperCase()));
       if (detectedChip) setSelectedChip(detectedChip);
       setImportError("");
+      setFileError("");
       setAiReport("");
       setInspectionResult(null);
     } catch (reason) {
@@ -856,10 +843,10 @@ export default function EditorPage() {
   };
 
   const handleDeleteFile = (path: string) => {
-    setFiles((prev) => prev.filter((f) => f.path !== path));
-    if (activeFile === path) {
-      setActiveFile(files[0]?.path || "");
-    }
+    const result = deleteProjectFile(files, activeFile, path);
+    setFiles(result.files);
+    setActiveFile(result.activeFile);
+    if (result.removed) setFileError("");
   };
 
   const handleInspect = async () => {
@@ -1014,7 +1001,7 @@ export default function EditorPage() {
           </div>
         </div>
 
-        {exportError && <div role="alert" className="shrink-0 border-b border-red-500/30 bg-red-500/5 px-4 py-2 text-[10px] text-red-300">{exportError}</div>}
+        {(fileError || exportError) && <div role="alert" className="shrink-0 border-b border-red-500/30 bg-red-500/5 px-4 py-2 text-[10px] text-red-300">{fileError || exportError}</div>}
 
         {requestedProjectId && (
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[#30363d] bg-cyan-500/5 px-4 py-2 text-[10px]">
