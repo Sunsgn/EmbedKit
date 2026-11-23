@@ -19,6 +19,7 @@ import { registerBuildRoutes } from './routes/build.js';
 import { registerEnvironmentRoutes } from './routes/environment.js';
 import { registerFileAnalysisRoutes } from './routes/files-analysis.js';
 import { registerPartRoutes } from './routes/parts.js';
+import { registerSerialSessionRoutes } from './routes/serial-sessions.js';
 import { registerSerialSystemRoutes } from './routes/serial-system.js';
 
 const PORT = process.env.EMBEDKIT_PROXY_PORT || 9999;
@@ -712,6 +713,19 @@ registerSerialSystemRoutes(agentRouter, {
   listPorts: listSerialPorts,
   scanDrivers: scanSerialDriverDevices,
   installDriver: installSelectedSerialDriver,
+});
+registerSerialSessionRoutes(agentRouter, {
+  jsonResponse: jsonRes,
+  readJsonBody: readJSONBody,
+  listSessions: () => [...serialSessions.values()],
+  getSession: id => serialSessions.get(id),
+  createSession: createSerialSession,
+  publicSession: publicSerialSession,
+  decodePayload: decodeNetworkPayload,
+  pushEvent: pushSerialEvent,
+  persistSessions: persistSerialSessions,
+  closeSession: closeSerialSession,
+  removeSession: id => serialSessions.delete(id),
 });
 
 async function persistSerialSessions() {
@@ -1878,48 +1892,6 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (await agentRouter.dispatch({ req, res, requestUrl, pathname })) return;
-
-  if (pathname === '/api/serial/sessions') {
-    if (req.method === 'GET') { jsonRes(res, 200, { sessions: [...serialSessions.values()].map(session => publicSerialSession(session)) }); return; }
-    if (req.method === 'POST') {
-      try { const body = await readJSONBody(req), { session, reused } = await createSerialSession(body); jsonRes(res, reused ? 200 : 201, { ...publicSerialSession(session), reused }); }
-      catch (error) { jsonRes(res, 400, { error: error.message }); }
-      return;
-    }
-  }
-
-  const serialMatch = pathname.match(/^\/api\/serial\/sessions\/([0-9a-f-]+)(?:\/(send|signals|config))?$/i);
-  if (serialMatch) {
-    const session = serialSessions.get(serialMatch[1]);
-    if (!session) { jsonRes(res, 404, { error: 'Serial session not found' }); return; }
-    if (serialMatch[2] === 'send' && req.method === 'POST') {
-      try { if (session.state !== 'connected' || !session.port.isOpen) throw new Error('Serial session is not connected'); const body = await readJSONBody(req), payload = decodeNetworkPayload(body.data, body.encoding); await new Promise((resolve, reject) => session.port.write(payload, error => error ? reject(error) : session.port.drain(drainError => drainError ? reject(drainError) : resolve()))); pushSerialEvent(session, 'tx', payload); jsonRes(res, 200, { sent: payload.length }); }
-      catch (error) { jsonRes(res, 400, { error: error.message }); }
-      return;
-    }
-    if (serialMatch[2] === 'signals' && req.method === 'POST') {
-      try { const body = await readJSONBody(req); if (typeof body.dtr === 'boolean') session.dtr = body.dtr; if (typeof body.rts === 'boolean') session.rts = body.rts; await new Promise((resolve, reject) => session.port.set({ dtr: session.dtr, rts: session.rts }, error => error ? reject(error) : resolve())); pushSerialEvent(session, 'system', `控制信号 DTR=${session.dtr ? 'ON' : 'OFF'} RTS=${session.rts ? 'ON' : 'OFF'}`); await persistSerialSessions(); jsonRes(res, 200, { dtr: session.dtr, rts: session.rts }); }
-      catch (error) { jsonRes(res, 400, { error: error.message }); }
-      return;
-    }
-    if (serialMatch[2] === 'config' && req.method === 'POST') {
-      try {
-        if (session.state !== 'connected' || !session.port.isOpen) throw new Error('Serial session is not connected');
-        const body = await readJSONBody(req), baudRate = Number(body.baudRate);
-        if (!Number.isInteger(baudRate) || baudRate < 50 || baudRate > 12000000) throw new Error('Invalid serial baud rate');
-        await new Promise((resolve, reject) => session.port.update({ baudRate }, error => error ? reject(error) : resolve()));
-        session.baudRate = baudRate;
-        pushSerialEvent(session, 'system', `波特率已切换为 ${baudRate}`);
-        await persistSerialSessions();
-        jsonRes(res, 200, { baudRate });
-      } catch (error) { jsonRes(res, 400, { error: error.message }); }
-      return;
-    }
-    if (!serialMatch[2] && req.method === 'GET') { const after = Math.max(0, Number(requestUrl.searchParams.get('after') || 0)); jsonRes(res, 200, publicSerialSession(session, Number.isFinite(after) ? after : 0)); return; }
-    if (!serialMatch[2] && req.method === 'DELETE') { await closeSerialSession(session); serialSessions.delete(session.id); await persistSerialSessions(); jsonRes(res, 200, { closed: true }); return; }
-    jsonRes(res, 405, { error: 'Unsupported operation for serial session' });
-    return;
-  }
 
   if (pathname === '/api/network/status' && req.method === 'GET') {
     jsonRes(res, 200, { available: true, protocols: ['tcp', 'udp'], modes: ['client', 'server'], activeSessions: networkSessions.size, maxSessions: MAX_NETWORK_SESSIONS });
