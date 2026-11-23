@@ -26,9 +26,6 @@ import {
   streamAiResponse,
 } from "../services/aiService";
 import { AI_PROVIDERS, type AiConfig } from "../types/ai";
-import {
-  copyLegacyWorkspaceToProject,
-} from "../services/workspaceStorage";
 import ProjectBuildPanel from "../features/project/ProjectBuildPanel";
 import MapAnalysisPanel from "../features/project/MapAnalysisPanel";
 import { analyzeMap } from "../utils/mapAnalyzer";
@@ -37,8 +34,6 @@ import { analyzeProjectArchitecture } from "../utils/projectArchitecture";
 import { analyzeProgramBehavior } from "../utils/programBehavior";
 import type { RuntimeTraceAnalysis } from "../utils/runtimeTrace";
 import { clearRuntimeTrace, loadRuntimeTrace, saveRuntimeTrace } from "../services/runtimeTraceStorage";
-import { saveProjectRevision } from "../services/productStorage";
-import { PROJECT_REVISION_SCHEMA_VERSION } from "../types/lifecycle";
 import type { EngineeringProject } from "../types/product";
 import type { ProjectAnalysisRun } from "../types/projectAnalysis";
 import { exportProjectAnalysisRun } from "../services/projectAnalysisSnapshot";
@@ -46,6 +41,7 @@ import { analysisRunSavedMessage, mergeAnalysisRunHistory, saveCompletedAnalysis
 import { loadEditorWorkspace } from "../features/project/workspaceController";
 import { saveEditorWorkspace } from "../features/project/workspaceSaveController";
 import { importProjectFiles, ProjectImportError } from "../features/project/projectImportController";
+import { associateLegacyProjectWorkspace, recordProjectSourceRevision } from "../features/project/projectRevisionController";
 
 const defaultFiles: FileNode[] = [
   {
@@ -1138,17 +1134,15 @@ export default function EditorPage() {
   };
 
   const recordProjectRevision = async (project: EngineeringProject, nextRevisionId: string, fingerprint: string, capturedAt: string) => {
-    const source = project.source?.kind === 'local-directory' ? 'directory' : project.source?.kind === 'archive' ? 'archive' : 'manual';
-    await saveProjectRevision({ schemaVersion: PROJECT_REVISION_SCHEMA_VERSION, id: nextRevisionId, projectId: project.id, source, capturedAt, label: `${project.name} 源码导入`, sourceSha256: fingerprint, dirty: false });
+    await recordProjectSourceRevision({ project, revisionId: nextRevisionId, sourceFingerprint: fingerprint, capturedAt });
   };
 
   const associateLegacyWorkspace = async () => {
     if (!requestedProjectId || !engineeringProject) return;
     setWorkspaceMessage('正在复制旧工作区，不会删除原数据…');
     try {
-      const workspace = await copyLegacyWorkspaceToProject(requestedProjectId, engineeringProject.name);
+      const workspace = await associateLegacyProjectWorkspace(requestedProjectId, engineeringProject);
       if (!workspace) { setLegacyWorkspaceAvailable(false); setWorkspaceMessage('没有可关联的旧工作区'); return; }
-      await recordProjectRevision(engineeringProject, workspace.revisionId, workspace.sourceFingerprint, workspace.importedAt);
       setFiles(workspace.files); setActiveFile(workspace.activeFile); setProjectName(engineeringProject.name); setRevisionId(workspace.revisionId); setSourceFingerprint(workspace.sourceFingerprint); setImportedAt(workspace.importedAt); setProjectLoaded(true); setLegacyWorkspaceAvailable(false); setWorkspaceMessage('旧工作区已复制并关联；原工作区仍保留，可安全回退。');
     } catch (reason) { setWorkspaceMessage(`关联失败：${reason instanceof Error ? reason.message : String(reason)}`); }
   };
