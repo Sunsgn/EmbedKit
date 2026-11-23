@@ -41,13 +41,14 @@ import { analyzeMap } from "../utils/mapAnalyzer";
 import ProjectArchitecturePanel from "../features/project/ProjectArchitecturePanel";
 import { analyzeProjectArchitecture } from "../utils/projectArchitecture";
 import { analyzeProgramBehavior } from "../utils/programBehavior";
-import { staticCoverage, type RuntimeTraceAnalysis } from "../utils/runtimeTrace";
+import type { RuntimeTraceAnalysis } from "../utils/runtimeTrace";
 import { clearRuntimeTrace, loadRuntimeTrace, saveRuntimeTrace } from "../services/runtimeTraceStorage";
-import { listEngineeringProjects, listProjectAnalysisRuns, saveProjectAnalysisRun, saveProjectRevision } from "../services/productStorage";
+import { listEngineeringProjects, listProjectAnalysisRuns, saveProjectRevision } from "../services/productStorage";
 import { PROJECT_REVISION_SCHEMA_VERSION } from "../types/lifecycle";
 import type { EngineeringProject } from "../types/product";
 import type { ProjectAnalysisRun } from "../types/projectAnalysis";
-import { createCompletedProjectAnalysisRun, exportProjectAnalysisRun } from "../services/projectAnalysisSnapshot";
+import { exportProjectAnalysisRun } from "../services/projectAnalysisSnapshot";
+import { analysisRunSavedMessage, mergeAnalysisRunHistory, saveCompletedAnalysisRun } from "../features/project/analysisRunController";
 
 const defaultFiles: FileNode[] = [
   {
@@ -1167,12 +1168,9 @@ export default function EditorPage() {
     if (!requestedProjectId || !revisionId || !sourceFingerprint || !projectArchitecture || !programBehavior || !projectSummary || savingAnalysis) return;
     setSavingAnalysis(true); setWorkspaceMessage('正在生成确定性分析证据…');
     try {
-      const inputFingerprint = await createWorkspaceFingerprint(files);
-      const runtimeCoverage = runtimeTrace ? staticCoverage(projectArchitecture.flows.flatMap(flow => flow.steps.filter(step => step.internal).map(step => step.name)), runtimeTrace) : null;
-      const run = createCompletedProjectAnalysisRun({ projectId: requestedProjectId, projectRevisionId: revisionId, sourceFingerprint, inputFingerprint, architecture: projectArchitecture, behavior: programBehavior, findings: projectSummary.findings, runtimeEvents: runtimeTrace?.events.length ?? 0, runtimeRate: runtimeCoverage?.rate });
-      await saveProjectAnalysisRun(run);
-      setAnalysisRuns(current => [run, ...current.filter(item => item.id !== run.id)].slice(0, 1000)); setSelectedAnalysisId(run.id);
-      setWorkspaceMessage(`分析证据已保存：${run.findings.length} 项结论，调用解析率 ${(run.coverage.resolvedRate * 100).toFixed(0)}%。`);
+      const run = await saveCompletedAnalysisRun({ projectId: requestedProjectId, projectRevisionId: revisionId, sourceFingerprint, files, architecture: projectArchitecture, behavior: programBehavior, findings: projectSummary.findings, runtimeTrace });
+      setAnalysisRuns(current => mergeAnalysisRunHistory(current, run)); setSelectedAnalysisId(run.id);
+      setWorkspaceMessage(analysisRunSavedMessage(run));
     } catch (reason) {
       setWorkspaceMessage(`分析证据保存失败：${reason instanceof Error ? reason.message : String(reason)}`);
     } finally { setSavingAnalysis(false); }
