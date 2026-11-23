@@ -14,6 +14,7 @@ import { analyzeElf, lookupElfAddress, parseElfAddress } from './elf.js';
 import { AGENT_PROTOCOL_VERSION, listAgentCapabilities, validateAgentContract } from '../contracts/agent-api.js';
 import { createHttpBoundary } from './server/http.js';
 import { AgentRouter } from './server/router.js';
+import { registerBuildRoutes } from './routes/build.js';
 import { registerEnvironmentRoutes } from './routes/environment.js';
 import { registerFileAnalysisRoutes } from './routes/files-analysis.js';
 import { registerPartRoutes } from './routes/parts.js';
@@ -679,6 +680,21 @@ registerEnvironmentRoutes(agentRouter, {
   cancelInstallJob: job => {
     job.cancelRequested = true;
     job.request?.destroy(new Error('Installation cancelled'));
+  },
+});
+registerBuildRoutes(agentRouter, {
+  jsonResponse: jsonRes,
+  readJsonBody: readJSONBody,
+  detectEnvironment: detectBuildEnvironment,
+  listJobs: () => [...buildJobs.values()],
+  startJob: startBuildJob,
+  getJob: id => buildJobs.get(id),
+  publicJob: publicBuildJob,
+  stopJob: job => {
+    if (job.child && job.state === 'running') {
+      job.state = 'stopping';
+      job.child.kill();
+    }
   },
 });
 
@@ -1847,21 +1863,6 @@ const server = http.createServer(async (req, res) => {
 
   if (await agentRouter.dispatch({ req, res, requestUrl, pathname })) return;
 
-  if (pathname === '/api/build/detect' && req.method === 'POST') {
-    try { const body = await readJSONBody(req); jsonRes(res, 200, await detectBuildEnvironment(body.rootPath)); }
-    catch (error) { jsonRes(res, 400, { error: error.message }); }
-    return;
-  }
-
-  if (pathname === '/api/build/jobs') {
-    if (req.method === 'GET') { jsonRes(res, 200, { jobs: [...buildJobs.values()].map(job => publicBuildJob(job)) }); return; }
-    if (req.method === 'POST') {
-      try { jsonRes(res, 201, publicBuildJob(await startBuildJob(await readJSONBody(req)))); }
-      catch (error) { jsonRes(res, 400, { error: error.message }); }
-      return;
-    }
-  }
-
   const buildArtifactMatch = pathname.match(/^\/api\/build\/jobs\/([0-9a-f-]+)\/artifacts\/(\d+)\/select$/i);
   if (buildArtifactMatch) {
     if (req.method !== 'POST') { jsonRes(res, 405, { error: 'Build artifact authorization requires POST' }); return; }
@@ -1879,16 +1880,6 @@ const server = http.createServer(async (req, res) => {
     if (!job) { jsonRes(res, 404, { error: 'Build job not found' }); return; }
     try { jsonRes(res, 200, await hashBuildArtifact(job, buildArtifactHashMatch[2])); }
     catch (error) { jsonRes(res, 400, { error: error.message }); }
-    return;
-  }
-
-  const buildMatch = pathname.match(/^\/api\/build\/jobs\/([0-9a-f-]+)$/i);
-  if (buildMatch) {
-    const job = buildJobs.get(buildMatch[1]);
-    if (!job) { jsonRes(res, 404, { error: 'Build job not found' }); return; }
-    if (req.method === 'GET') { const after = Math.max(0, Number(requestUrl.searchParams.get('after') || 0)); jsonRes(res, 200, publicBuildJob(job, Number.isFinite(after) ? after : 0)); return; }
-    if (req.method === 'DELETE') { if (job.child && job.state === 'running') { job.state = 'stopping'; job.child.kill(); } jsonRes(res, 200, publicBuildJob(job)); return; }
-    jsonRes(res, 405, { error: 'Unsupported operation for build job' });
     return;
   }
 

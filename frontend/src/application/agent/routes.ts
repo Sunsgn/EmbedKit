@@ -14,7 +14,7 @@ export const agentPaths = Object.freeze({
   projectScan: AGENT_ROUTES.projectScan.path,
   buildDetect: AGENT_ROUTES.buildDetect.path,
   buildJobs: AGENT_ROUTES.buildJobs.path,
-  buildJob: (id: string, after?: number) => `/api/build/jobs/${segment(id)}${after === undefined ? '' : `?after=${segment(after)}`}`,
+  buildJob: (id: string, after?: number) => `${AGENT_ROUTES.buildJob.path.replace(':jobId', segment(id))}${after === undefined ? '' : `?after=${segment(after)}`}`,
   buildArtifactSelect: (jobId: string, index: number) => `/api/build/jobs/${segment(jobId)}/artifacts/${segment(index)}/select`,
   buildArtifactHash: (jobId: string, index: number) => `/api/build/jobs/${segment(jobId)}/artifacts/${segment(index)}/hash`,
   serialPorts: AGENT_ROUTES.serialPorts.path,

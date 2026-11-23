@@ -469,6 +469,14 @@ test('runs and reports a build job lifecycle without invoking a shell', async ()
   for (let attempt = 0; attempt < 30 && current.state === 'running'; attempt += 1) { await new Promise(resolveWait => setTimeout(resolveWait, 20)); current = await (await fetch(`${agentBaseUrl}/api/build/jobs/${created.id}`)).json(); }
   assert.equal(current.state, 'failed');
   assert.ok(current.events.some(event => /does-not-exist|ENOENT/i.test(event.text)));
+  const listed = await (await fetch(`${agentBaseUrl}/api/build/jobs`)).json();
+  assert.ok(listed.jobs.some(job => job.id === created.id));
+  const unsupported = await fetch(`${agentBaseUrl}/api/build/jobs/${created.id}`, { method: 'POST' });
+  assert.equal(unsupported.status, 405);
+  assert.equal((await unsupported.json()).code, 'METHOD_NOT_ALLOWED');
+  const missing = await fetch(`${agentBaseUrl}/api/build/jobs/00000000-0000-0000-0000-000000000000`, { method: 'POST' });
+  assert.equal(missing.status, 404);
+  assert.equal((await missing.json()).code, 'NOT_FOUND');
 });
 
 test('authorizes only unchanged artifacts discovered inside a completed build directory', async () => {
