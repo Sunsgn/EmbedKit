@@ -2,8 +2,7 @@ import http from 'http';
 import https from 'https';
 import { SerialPort } from 'serialport';
 import { spawn } from 'child_process';
-import { appendFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'fs/promises';
-import { dirname, join, resolve } from 'path';
+import { join } from 'path';
 import { URL, pathToFileURL } from 'url';
 import { AGENT_PROTOCOL_VERSION, listAgentCapabilities, validateAgentContract } from '../contracts/agent-api.js';
 import { createHttpBoundary } from './server/http.js';
@@ -18,6 +17,7 @@ import { createSerialSessionService, receiveSerialData, validateSerialOptions } 
 import { createNetworkSessionService, decodeNetworkPayload, validateHostAndPort } from './server/network-session-service.js';
 import { createSoftwareEnvironmentService, extractSoftwareVersion, validateArchiveEntries, validateInstallManifest } from './server/software-environment-service.js';
 import { classifySerialDriverDevice, createSerialDriverService, extractUsbHardwareIdentity, parsePnpUtilProblemDevices } from './server/serial-driver-service.js';
+import { createAgentLogger } from './server/agent-logger.js';
 import { registerAiServiceRoutes } from './routes/ai-services.js';
 import { registerBuildArtifactRoutes } from './routes/build-artifacts.js';
 import { registerBuildRoutes } from './routes/build.js';
@@ -58,7 +58,6 @@ const PART_DOCUMENT_MAX_HTML_BYTES = 2 * 1024 * 1024;
 const PART_DOCUMENT_MAX_PDF_BYTES = 50 * 1024 * 1024;
 const PART_DOCUMENT_MAX_RESULTS = 24;
 const PART_DOCUMENT_CACHE_TTL_MS = 10 * 60 * 1000;
-let agentLoggingInstalled = false, logWriteQueue = Promise.resolve();
 const systemSerialAdapter = {
   list: () => SerialPort.list(),
   create: options => new SerialPort(options),
@@ -112,28 +111,7 @@ async function scanSelectedProject(selectionId, options) {
   return scanProjectDirectory(selection.path, options);
 }
 
-function installAgentLogging() {
-  if (agentLoggingInstalled) return;
-  agentLoggingInstalled = true;
-  for (const level of ['log', 'warn', 'error']) {
-    const original = console[level].bind(console);
-    console[level] = (...values) => {
-      original(...values);
-      const line = `${new Date().toISOString()} [${level.toUpperCase()}] ${values.map(value => value instanceof Error ? value.stack || value.message : typeof value === 'string' ? value : JSON.stringify(value)).join(' ')}\n`;
-      logWriteQueue = logWriteQueue.then(async () => {
-        await mkdir(dirname(AGENT_LOG_FILE), { recursive: true });
-        const size = await stat(AGENT_LOG_FILE).then(value => value.size).catch(() => 0);
-        if (size + Buffer.byteLength(line) > AGENT_LOG_MAX_BYTES) {
-          await rm(`${AGENT_LOG_FILE}.3`, { force: true });
-          await rename(`${AGENT_LOG_FILE}.2`, `${AGENT_LOG_FILE}.3`).catch(() => undefined);
-          await rename(`${AGENT_LOG_FILE}.1`, `${AGENT_LOG_FILE}.2`).catch(() => undefined);
-          await rename(AGENT_LOG_FILE, `${AGENT_LOG_FILE}.1`).catch(() => undefined);
-        }
-        await appendFile(AGENT_LOG_FILE, line, 'utf8');
-      }).catch(() => undefined);
-    };
-  }
-}
+const agentLogger = createAgentLogger({ file: AGENT_LOG_FILE, maxBytes: AGENT_LOG_MAX_BYTES });
 const allowedOrigins = new Set((process.env.EMBEDKIT_ALLOWED_ORIGINS || 'http://localhost:3000,http://127.0.0.1:3000,https://sunsgn.github.io')
   .split(',').map(value => value.trim()).filter(Boolean));
 const allowedTargets = new Set((process.env.EMBEDKIT_ALLOWED_TARGETS || [
@@ -806,7 +784,7 @@ const server = http.createServer(async (req, res) => {
 
 export function startServer({ detectAi = true, restoreSerial = true, restoreNetwork = restoreSerial, host = HOST, port = PORT } = {}) {
   validateAgentContract();
-  installAgentLogging();
+  agentLogger.install();
   return server.listen(port, host, async () => {
     const address = server.address();
     const listeningHost = typeof address === 'object' && address ? address.address : host;
