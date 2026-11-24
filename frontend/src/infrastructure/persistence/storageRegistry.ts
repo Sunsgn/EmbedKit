@@ -37,6 +37,7 @@ export const STORAGE_REGISTRY = [
   { id: 'build-analysis-records', engine: 'localStorage', location: 'embedkit.build-analysis-records', schemaVersion: 1, owner: 'build-analysis', backup: 'portable', maxBytes: 4 * MIB, shape: 'array', healthCheck: true },
   { id: 'part-selection-records', engine: 'localStorage', location: 'embedkit.part-selection-records', schemaVersion: 1, owner: 'resource-center', backup: 'portable', maxBytes: 4 * MIB, shape: 'array' },
   { id: 'knowledge-experiences', engine: 'localStorage', location: 'embedkit.knowledge-experiences', schemaVersion: 1, owner: 'resource-center', backup: 'portable', maxBytes: 4 * MIB, shape: 'object', healthCheck: true },
+  { id: 'extension-registry', engine: 'localStorage', location: 'embedkit.extension-registry.v1', schemaVersion: 1, owner: 'extension-center', backup: 'portable', maxBytes: 512 * 1024, maxRecords: 64, shape: 'array', healthCheck: true },
 
   { id: 'ai-config', engine: 'localStorage', location: 'embedkit-ai-config', schemaVersion: 1, owner: 'ai-assistant', backup: 'excluded', exclusionReason: 'AI 端点配置可能包含敏感信息' },
   { id: 'project-local-bindings', engine: 'localStorage', location: 'embedkit.project-local-bindings', schemaVersion: 1, owner: 'project-analysis', backup: 'excluded', exclusionReason: '包含本机绝对路径' },

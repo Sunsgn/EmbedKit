@@ -10,6 +10,7 @@ describe('storage registry', () => {
   it('derives backup and health policy from the same registry', () => {
     expect(PORTABLE_LOCAL_STORAGE_KEYS).toContain('embedkit.automation.suites');
     expect(PORTABLE_LOCAL_STORAGE_KEYS).not.toContain('embedkit-ai-config');
-    expect(STORAGE_HEALTH_RULES).toHaveLength(10);
+    expect(PORTABLE_LOCAL_STORAGE_KEYS).toContain('embedkit.extension-registry.v1');
+    expect(STORAGE_HEALTH_RULES).toHaveLength(11);
   });
 });

@@ -49,6 +49,14 @@ describe('workspace backup', () => {
     expect(localStorage.getItem('embedkit.part-selection-records')).toBe('[]');
   });
 
+  it('backs up the bounded extension registry without executable code', async () => {
+    const value = backup() as WorkspaceBackup & { local: Record<string, unknown> };
+    value.local['embedkit.extension-registry.v1'] = [{ schemaVersion: 1, id: 'vendor.map-parser', name: 'Parser', version: '1.0.0', apiVersion: 1, description: 'Metadata only', scope: 'Vendor MAP', compatibility: '>=1 <2', capabilities: [{ id: 'map.vendor', kind: 'map-format' }], testSamples: ['fixture.map'], fallbackBehavior: 'Retain raw input' }];
+    const parsed = parseWorkspaceBackup(JSON.stringify(value));
+    await applyWorkspaceBackup(parsed, localStorage, async () => undefined);
+    expect(localStorage.getItem('embedkit.extension-registry.v1')).toContain('vendor.map-parser');
+  });
+
   it('validates and restores the versioned local engineering experience library', async () => {
     const value = backup() as WorkspaceBackup & { local: Record<string, unknown> };
     value.local['embedkit.knowledge-experiences'] = { schema: 'embedkit.knowledge-experiences', version: 1, exportedAt: '2026-11-12T00:00:00.000Z', records: [{ schemaVersion: 1, id: 'uart-1', title: 'UART 超时', symptom: '接收停止', context: '', applicability: '', possibleCauses: [], diagnosticSteps: [], resolutionSteps: [], rollbackSteps: [], retestSteps: [], evidenceReferences: [], status: 'draft', createdAt: '2026-11-12T00:00:00.000Z', updatedAt: '2026-11-12T00:00:00.000Z' }] };
