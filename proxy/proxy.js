@@ -1,5 +1,4 @@
 import http from 'http';
-import https from 'https';
 import { SerialPort } from 'serialport';
 import { spawn } from 'child_process';
 import { join } from 'path';
@@ -19,6 +18,7 @@ import { createSoftwareEnvironmentService, extractSoftwareVersion, validateArchi
 import { classifySerialDriverDevice, createSerialDriverService, extractUsbHardwareIdentity, parsePnpUtilProblemDevices } from './server/serial-driver-service.js';
 import { createAgentLogger } from './server/agent-logger.js';
 import { createPartDocumentService, extractOfficialDocuments } from './server/part-document-service.js';
+import { createPartDetailService } from './server/part-detail-service.js';
 import { registerAiServiceRoutes } from './routes/ai-services.js';
 import { registerBuildArtifactRoutes } from './routes/build-artifacts.js';
 import { registerBuildRoutes } from './routes/build.js';
@@ -186,6 +186,7 @@ const partDocumentService = createPartDocumentService({
   maxResults: PART_DOCUMENT_MAX_RESULTS,
   cacheTtlMs: PART_DOCUMENT_CACHE_TTL_MS,
 });
+const partDetailService = createPartDetailService();
 const softwareEnvironmentService = createSoftwareEnvironmentService({
   stateFile: SOFTWARE_INSTALLATION_STATE_FILE,
   getDirectorySelection: fileSelectionService.getSelection,
@@ -243,7 +244,7 @@ const agentRouter = new AgentRouter().register({
   handler: async ({ res }) => jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessionService.size(), networkSessions: networkSessionService.size(), buildJobs: buildService.size(), capabilities: listAgentCapabilities(process.platform) }),
 });
 registerAiServiceRoutes(agentRouter, { jsonResponse: jsonRes, detectServers, proxyRequest });
-registerPartRoutes(agentRouter, { jsonResponse: jsonRes, discoverDocuments: partDocumentService.discover, readDocument: partDocumentService.read, readPartDetails: getChipDetails, maxDocumentResults: PART_DOCUMENT_MAX_RESULTS });
+registerPartRoutes(agentRouter, { jsonResponse: jsonRes, discoverDocuments: partDocumentService.discover, readDocument: partDocumentService.read, readPartDetails: partDetailService.lookup, maxDocumentResults: PART_DOCUMENT_MAX_RESULTS });
 registerFileAnalysisRoutes(agentRouter, {
   jsonResponse: jsonRes,
   selectPath: async req => fileSelectionService.selectPath(await readJSONBody(req)),
@@ -320,283 +321,6 @@ registerNetworkSessionRoutes(agentRouter, {
   closeSession: networkSessionService.closeSession,
   removeSession: networkSessionService.removeSession,
 });
-
-function fetchHTML(urlStr, timeoutMs = 8000) {
-  return new Promise((resolve, reject) => {
-    const url = new URL(urlStr);
-    const client = url.protocol === 'https:' ? https : http;
-    const req = client.get(urlStr, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-      },
-    }, (res) => {
-      let data = '';
-      res.on('data', (chunk) => data += chunk);
-      res.on('end', () => resolve(data));
-    });
-    req.on('error', reject);
-    req.setTimeout(timeoutMs, () => {
-      req.destroy();
-      reject(new Error(`Timeout after ${timeoutMs}ms for ${urlStr}`));
-    });
-  });
-}
-
-function fetchSnapEDAJSON(urlStr, timeoutMs = 10000) {
-  return new Promise((resolve, reject) => {
-    const url = new URL(urlStr);
-    const req = https.get(urlStr, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-        'Accept': 'application/json',
-        'Referer': 'https://www.snapeda.com/',
-        'Origin': 'https://www.snapeda.com',
-      },
-    }, (res) => {
-      let data = '';
-      res.on('data', (chunk) => data += chunk);
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { reject(new Error(`Invalid JSON from SnapEDA: ${data.substring(0, 100)}`)); }
-      });
-    });
-    req.on('error', reject);
-    req.setTimeout(timeoutMs, () => {
-      req.destroy();
-      reject(new Error(`Timeout after ${timeoutMs}ms for SnapEDA: ${urlStr}`));
-    });
-  });
-}
-
-async function getSnapEDASpecs(chipName) {
-  const result = {
-    productName: '',
-    productFamily: '',
-    description: '',
-    specs: {},
-    features: [],
-    hierarchy: [],
-    stUrl: '',
-    datasheetUrl: '',
-    productUrl: '',
-    manufacturer: '',
-    source: 'SnapEDA/Mouser',
-  };
-
-  try {
-    const suggestions = await fetchSnapEDAJSON(`https://www.snapeda.com/api/v1/search_autocomplete?q=${chipName}`);
-    if (!Array.isArray(suggestions) || suggestions.length === 0) {
-      return null;
-    }
-
-    const partNames = [chipName, ...suggestions.filter(s => s.startsWith(chipName))];
-    let partData = null;
-
-    for (const partName of partNames) {
-      const data = await fetchSnapEDAJSON(`https://www.snapeda.com/api/get_mouser_info_api?part_name=${partName}`);
-      if (data && data.ManufacturerPartNumber) {
-        partData = data;
-        break;
-      }
-    }
-
-    if (!partData) {
-      return null;
-    }
-
-    result.productName = partData.ManufacturerPartNumber;
-    result.productFamily = partData.Category || '';
-    result.manufacturer = partData.Manufacturer || '';
-    result.description = partData.Description || '';
-    result.specs = {
-      manufacturer: partData.Manufacturer || '',
-      category: partData.Category || '',
-      price: partData.Price || '',
-      stock: partData.AvailabilityInStock || 'N/A',
-      rohs: partData.ROHSStatus || '',
-      lifecycle: partData.LifecycleStatus || '',
-    };
-
-    if (partData.DataSheetUrl) {
-      result.stUrl = partData.DataSheetUrl;
-      result.datasheetUrl = partData.DataSheetUrl;
-    }
-
-    if (partData.ProductAttributes) {
-      const seen = new Set();
-      partData.ProductAttributes.forEach(attr => {
-        const key = attr.AttributeName;
-        if (!seen.has(key)) {
-          result.specs[key.toLowerCase()] = attr.AttributeValue;
-          seen.add(key);
-        }
-      });
-    }
-
-    const desc = partData.Description || '';
-    const clockMatch = desc.match(/(\d+)\s*MHz/);
-    if (clockMatch) result.specs.maxClock = `${clockMatch[1]} MHz`;
-    const flashMatch = desc.match(/(\d+)\s*[Kk](?:bytes?)?\s*Flash/i);
-    if (flashMatch) result.specs.flashMemory = `${flashMatch[1]} KB Flash`;
-    const sramMatch = desc.match(/(\d+)\s*[Kk](?:bytes?)?\s*RAM/i);
-    if (sramMatch) result.specs.sram = `${sramMatch[1]} KB RAM`;
-
-    const mouserUrl = partData.ProductDetailUrl;
-    if (mouserUrl) {
-      result.mouserUrl = mouserUrl;
-    }
-
-    if (partData.SuggestedReplacement && partData.SuggestedReplacement.length > 0) {
-      result.alternatives = partData.SuggestedReplacement.slice(0, 5);
-    }
-
-    return result;
-  } catch (e) {
-    console.log(`SnapEDA lookup failed: ${e.message}`);
-    return null;
-  }
-}
-
-function parseSTProduct(html) {
-  const result = {
-    productName: '',
-    productFamily: '',
-    description: '',
-    specs: {},
-    features: [],
-    hierarchy: [],
-    stUrl: '',
-  };
-
-  // Extract meta description
-  const metaDesc = html.match(/<meta name="description" content="([^"]+)"/)?.[1];
-  if (metaDesc) result.description = metaDesc.replace(/&[^;]+;/g, ' ');
-
-  // Extract from window.digitalData
-  const dataMatch = html.match(/window\.digitalData\s*=\s*({[\s\S]*?});/);
-  if (dataMatch) {
-    try {
-      const digitalData = JSON.parse(dataMatch[1]);
-      const prod = digitalData.product?.[0]?.productInfo;
-      if (prod) {
-        result.productName = prod.productName || '';
-        result.specs = { ...prod };
-        const tree = prod.tree || {};
-        result.productFamily = tree.level4 || tree.level3 || '';
-      }
-    } catch (e) {}
-  }
-
-  // Extract JSON-LD breadcrumbs
-  const jsonLdScripts = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g);
-  if (jsonLdScripts) {
-    jsonLdScripts.forEach(script => {
-      const json = script.replace(/<script[^>]*>|<\/script>/g, '').trim();
-      try {
-        const data = JSON.parse(json);
-        if (data.itemListElement) {
-          data.itemListElement.forEach(item => {
-            result.hierarchy.push({ name: item.item?.['@type'] === 'WebPage' ? item.name : item.name, url: item.item });
-          });
-        }
-      } catch (e) {}
-    });
-  }
-
-  // Extract from st-stage-product__copy (short product description)
-  const copyMatch = html.match(/<span class="st-stage-product__copy">([\s\S]*?)<\/span>/);
-  if (copyMatch) {
-    result.shortDescription = copyMatch[1].replace(/&[^;]+;/g, ' ').replace(/\s+/g, ' ').trim();
-  }
-
-  // Extract from og:description
-  const ogDescMatch = html.match(/<meta property="og:description" content="([^"]+)"/);
-  if (ogDescMatch) {
-    result.ogDescription = ogDescMatch[1].replace(/&[^;]+;/g, ' ');
-  }
-
-  // Extract main product description from overview text
-  const overviewIdx = html.indexOf('st-overview');
-  if (overviewIdx > 0) {
-    const overviewSection = html.slice(overviewIdx, overviewIdx + 3000);
-    const textMatch = overviewSection.match(/>([^<]{50,})</);
-    if (textMatch && !result.description) {
-      result.description = textMatch[1].replace(/&[^;]+;/g, ' ').replace(/\s+/g, ' ').trim();
-    }
-  }
-
-  // Fallback: extract from og:description
-  if (!result.description && result.ogDescription) {
-    result.description = result.ogDescription;
-  }
-
-  // Extract "All features" section
-  const featuresIdx = html.indexOf('All features');
-  if (featuresIdx > 0) {
-    const section = html.slice(featuresIdx, featuresIdx + 5000);
-    const text = section.replace(/<[^>]*>/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-    const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0 && l !== 'All features');
-    result.features = lines.slice(0, 40);
-  }
-
-  // Extract key specs from description and features
-  const clockMatch = html.match(/(\d+)\s*MHz/);
-  if (clockMatch) result.specs.maxClock = `${clockMatch[1]} MHz`;
-
-  const flashMatch = html.match(/(\d+)\s*Kbytes?\s*of\s*Flash/i);
-  if (flashMatch) result.specs.flashMemory = `${flashMatch[1]} KB Flash`;
-
-  const sramMatch = html.match(/(\d+)\s*Kbytes?\s*of\s*SRAM/i);
-  if (sramMatch) result.specs.sram = `${sramMatch[1]} KB SRAM`;
-
-  const voltageMatch = html.match(/([\d.]+)\s*to\s*([\d.]+)\s*V/i);
-  if (voltageMatch) result.specs.voltageRange = `${voltageMatch[1]}-${voltageMatch[2]} V`;
-
-  const adcMatch = html.match(/(\d+)x\s*(\d+)-bit.*ADC/i);
-  if (adcMatch) result.specs.adc = `${adcMatch[1]}x ${adcMatch[2]}-bit ADC`;
-
-  return result;
-}
-
-async function getChipDetails(chipName) {
-  const rule = detectManufacturer(chipName);
-  const productUrl = rule ? rule.productUrl(chipName) : null;
-  const snapResult = await getSnapEDASpecs(chipName);
-  if (snapResult && snapResult.description && snapResult.description !== 'N/A') {
-    if (productUrl) snapResult.productUrl = productUrl;
-    return snapResult;
-  }
-
-  return {
-    error: `No data found for ${chipName}`,
-    productUrl: productUrl || `https://www.snapeda.com/search?q=${encodeURIComponent(chipName)}`,
-    source: 'Unavailable',
-  };
-}
-
-function generateStUrlCandidates(name) {
-  return [name.toLowerCase()];
-}
-
-function detectManufacturer(name) {
-  const n = name.toUpperCase();
-  const manufacturerRules = [
-    { name: 'STMicroelectronics', prefixes: ['STM32', 'STM8'], productUrl: q => `https://www.st.com/en/microcontrollers-microprocessors/${generateStUrlCandidates(q)[0]}.html` },
-    { name: 'Texas Instruments', prefixes: ['MSP430', 'LM4F', 'TM4C'], productUrl: q => `https://www.ti.com/product/${q}` },
-    { name: 'Espressif', prefixes: ['ESP'], productUrl: q => `https://www.espressif.com/en/products/socs/details/${q.toLowerCase()}` },
-    { name: 'Raspberry Pi', prefixes: ['RP2'], productUrl: q => `https://www.raspberrypi.com/documentation/microcontrollers/${q.toLowerCase()}.html` },
-  ];
-  for (const rule of manufacturerRules) {
-    for (const prefix of rule.prefixes) {
-      if (n.startsWith(prefix.toUpperCase())) {
-        return rule;
-      }
-    }
-  }
-  return null;
-}
 
 const server = http.createServer(async (req, res) => {
   const requestUrl = new URL(req.url, `http://${req.headers.host}`);
