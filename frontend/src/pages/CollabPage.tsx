@@ -9,8 +9,9 @@ import type { EngineeringProject } from '../types/product';
 export default function CollabPage() {
   const navigate = useNavigate();
   const [projects, setProjects] = useState<EngineeringProject[]>([]), [selected, setSelected] = useState<string[]>([]), [loading, setLoading] = useState(true), [error, setError] = useState('');
-  const refresh = () => { setLoading(true); setError(''); void listEngineeringProjects().then(value => { setProjects(value); setSelected(current => current.filter(id => value.some(project => project.id === id))); }).catch(reason => setError(reason instanceof Error ? reason.message : String(reason))).finally(() => setLoading(false)); };
-  useEffect(refresh, []);
+  const applyProjects = (value: EngineeringProject[]) => { setProjects(value); setSelected(current => current.filter(id => value.some(project => project.id === id))); };
+  const refresh = () => { setLoading(true); setError(''); void listEngineeringProjects().then(applyProjects).catch(reason => setError(reason instanceof Error ? reason.message : String(reason))).finally(() => setLoading(false)); };
+  useEffect(() => { let active = true; void listEngineeringProjects().then(value => { if (active) applyProjects(value); }).catch(reason => { if (active) setError(reason instanceof Error ? reason.message : String(reason)); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, []);
   const chosen = useMemo(() => projects.filter(project => selected.includes(project.id)), [projects, selected]);
   const toggle = (id: string) => setSelected(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
   const exportHandoff = () => { if (chosen.length) downloadBrowserText(createCollaborationHandoff(chosen), `embedkit-collaboration-handoff-${new Date().toISOString().slice(0, 10)}.json`, 'application/json;charset=utf-8'); };
