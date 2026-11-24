@@ -1,0 +1,11 @@
+import { describe, expect, it } from 'vitest';
+import { exportExtensionRegistry, loadExtensionRegistry, normalizeExtensionManifest, parseExtensionManifestFile, removeExtensionManifest, saveExtensionManifest } from './extensionRegistry';
+
+const manifest = { schemaVersion: 1, id: 'vendor.map-parser', name: 'Vendor MAP Parser', version: '1.2.0', apiVersion: 1, description: 'Parses one documented MAP dialect.', scope: 'Vendor toolchain 3.x MAP files', compatibility: '>=1 <2', capabilities: [{ id: 'map.vendor-v3', kind: 'map-format' }], testSamples: ['fixtures/vendor-v3.map'], fallbackBehavior: 'Return unknown format and retain raw input.' };
+const storage = () => { const values = new Map<string, string>(); return { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value) }; };
+
+describe('extension registry', () => {
+  it('validates the versioned capability and safe fallback contract', () => { expect(normalizeExtensionManifest(manifest)).toMatchObject({ id: 'vendor.map-parser', capabilities: [{ kind: 'map-format' }] }); expect(() => normalizeExtensionManifest({ ...manifest, apiVersion: 2 })).toThrow(/不兼容/); expect(() => normalizeExtensionManifest({ ...manifest, testSamples: [] })).toThrow(/测试样本/); });
+  it('isolates damaged entries and replaces manifests by stable id', () => { const store = storage(); saveExtensionManifest(normalizeExtensionManifest(manifest), store); saveExtensionManifest(normalizeExtensionManifest({ ...manifest, version: '1.3.0' }), store); expect(loadExtensionRegistry(store)).toHaveLength(1); expect(loadExtensionRegistry(store)[0].version).toBe('1.3.0'); expect(removeExtensionManifest(manifest.id, store)).toEqual([]); store.setItem('embedkit.extension-registry.v1', '[{"bad":true}]'); expect(loadExtensionRegistry(store)).toEqual([]); });
+  it('rejects malformed files and exports an auditable envelope', () => { expect(() => parseExtensionManifestFile('{bad')).toThrow(/JSON/); expect(JSON.parse(exportExtensionRegistry([normalizeExtensionManifest(manifest)], '2026-01-01T00:00:00.000Z'))).toMatchObject({ schema: 'embedkit.extension-registry', version: 1, extensions: [{ id: 'vendor.map-parser' }] }); });
+});
