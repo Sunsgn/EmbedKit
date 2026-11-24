@@ -43,7 +43,6 @@ import {
 } from "../services/productStorage";
 import {
   createTestRunEvidence,
-  TEST_RUN_OBSERVED_LIMIT,
 } from "../services/testRunEvidence";
 import { downloadBrowserText } from "../services/browserDownload";
 import { listBuildAnalysisRecords } from "../services/buildAnalysisRecords";
@@ -52,16 +51,14 @@ import { createCommunicationSessionRecords, type ArchivedCommunicationEvidence }
 import { compareTestRuns, type RunComparisonOutcome } from "../services/testRunComparison";
 import { createConfigurationFingerprint } from "../services/configurationFingerprint";
 import { clearSerialTestSessionHandoff, readSerialTestSessionHandoff, type SerialTestSessionHandoff } from "../services/testSessionHandoff";
-import type { TestRunRecord, TestStepRun } from "../types/product";
+import type { TestRunRecord } from "../types/product";
 import { formatHex, parseHexBytes } from "../utils/embeddedTools";
 import {
   applySharedFlowChannel,
   cleanupFlowResources,
   moveFlowStep as reorderFlowStep,
-  orderedFlowSteps,
   removeFlowStep,
   requiredFlowChannels,
-  resolvedFlowStep,
   sharedFlowChannel,
   stepUsesChannel,
 } from "../utils/testFlow";
@@ -72,9 +69,9 @@ import {
 } from "../utils/testRetryPolicy";
 import { applyLineEnding, createAtNetworkCase, createTestStep as createStep, isLineEnding, resolveFlowVariables as resolveVariables, type Channel, type FlowVariable, type Incoming, type LineEnding, type NetworkConfig, type RunLog, type SerialConnectionConfig, type SerialRuntime, type StepStage, type StepStatus, type StepType, type TestCase, type TestStep, type TestSuite } from "../features/test-automation/domain";
 import { loadSerialConfigs, loadTestSuites as loadSuites, saveSerialConfigs, saveTestSuites } from "../features/test-automation/persistence";
-import { executeStepWithRetry } from "../features/test-automation/executionController";
 import { assignRuntimeVariable, captureResponseVariable, evaluateIncomingResponse } from "../features/test-automation/responseEvaluation";
 import { createPortableTestRunJsonReport, createTestRunCsvReport, createTestRunHtmlReport, createTestRunJunitReport } from "../features/test-automation/testRunReports";
+import { runTestCaseEngine } from "../features/test-automation/runCaseEngine";
 
 interface FirmwareChoice {
   id: string;
@@ -137,7 +134,7 @@ const lineEndingLabels: Record<LineEnding, string> = {
   lf: "仅换行（LF）",
 };
 const sleep = (ms: number) =>
-  new Promise((resolve) => window.setTimeout(resolve, ms));
+  new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 
 export default function TestAutomationPage() {
   const [suites, setSuites] = useState<TestSuite[]>(loadSuites);
@@ -717,12 +714,7 @@ export default function TestAutomationPage() {
       ...item,
     }));
     const started = Date.now(),
-      startedAt = new Date(started).toISOString(),
-      stepRuns: TestStepRun[] = [];
-    let passed = 0,
-      failed = 0,
-      haltMain = false,
-      aborted = false;
+      startedAt = new Date(started).toISOString();
     addRunLog("info", `开始执行：${selectedCase.name}`);
     const requiredChannels = requiredFlowChannels(selectedCase);
     for (const channel of requiredChannels)
@@ -746,186 +738,28 @@ export default function TestAutomationPage() {
           startedAt,
         });
     }
-    for (const step of orderedFlowSteps(selectedCase.steps)) {
-      const stage = step.stage ?? "test";
-      if ((haltMain || stopRequested.current) && stage !== "teardown") {
-        aborted ||= stopRequested.current;
-        setStatuses((previous) => ({ ...previous, [step.id]: "skipped" }));
-        stepRuns.push({
-          id: step.id,
-          name: step.name,
-          type: step.type,
-          channel: step.channel,
-          status: "skipped",
-          startedAt: new Date().toISOString(),
-          finishedAt: new Date().toISOString(),
-          durationMs: 0,
-          retries: 0,
-        });
-        continue;
-      }
-      executingTeardown.current = stage === "teardown";
-      const executionStep = resolvedFlowStep(selectedCase, step),
-        stepStarted = Date.now(),
-        stepStartedAt = new Date(stepStarted).toISOString();
-      let attempts = 0,
-        observedEvidence = "";
-      setStatuses((previous) => ({ ...previous, [step.id]: "running" }));
-      addRunLog(
-        "info",
-        `${stageLabels[stage]} · ${typeLabels[step.type]}：${step.name}`,
-      );
-      try {
-        const execution = await executeStepWithRetry(
-          step,
-          async () => {
-            let attemptEvidence = "";
-            if (stopRequested.current && stage !== "teardown")
-              throw new Error("执行已停止");
-            if (executionStep.type === "command") {
-              cursors.current[executionStep.channel] = incoming.current.length;
-              await sendData(executionStep);
-              const response = await waitForInput(
-                executionStep,
-                true,
-                executionStep.expected || "OK",
-                executionStep.failurePattern || "ERROR|FAIL",
-              );
-              attemptEvidence = response;
-              captureResponse(executionStep, response);
-            } else if (executionStep.type === "send")
-              await sendData(executionStep);
-            else if (executionStep.type === "delay")
-              await sleep(Math.max(0, executionStep.durationMs));
-            else if (executionStep.type === "wait-online")
-              await ensureChannel(executionStep.channel);
-            else if (executionStep.type === "clear-buffer") {
-              incoming.current = incoming.current.filter(
-                (item) => item.channel !== executionStep.channel,
-              );
-              cursors.current = {};
-            } else if (executionStep.type === "set-variable") {
-              const value = resolveVariables(
-                  executionStep.data,
-                  runtimeVariables.current,
-                );
-              runtimeVariables.current = assignRuntimeVariable(executionStep.captureName || "VARIABLE", value, runtimeVariables.current);
-            } else if (executionStep.type === "manual") {
-              if (
-                !(await requestManualConfirmation(
-                  executionStep.data || executionStep.name,
-                ))
-              )
-                throw new Error("人工确认未通过");
-            } else
-              attemptEvidence = await waitForInput(
-                executionStep,
-                executionStep.type === "match",
-              );
-            return attemptEvidence;
-          },
-          {
-            shouldStop: () => stopRequested.current && stage !== "teardown",
-            sleep,
-            onAttempt: (attempt) => { attempts = attempt; },
-            onRetry: ({ failedAttempt, delayMs }) =>
-            addRunLog(
-              "info",
-              `${step.name} · 第 ${failedAttempt + 1} 次失败，${delayMs ? `${delayMs} ms 后` : "立即"}重新执行完整步骤`,
-            ),
-            onTimeLimit: (limitMs) => addRunLog("info", `${step.name} · 已达到总持续时间 ${Math.round(limitMs / 1000)} 秒，停止重试`),
-          },
-        );
-        attempts = execution.attempts;
-        observedEvidence = execution.value;
-        const finished = Date.now();
-        stepRuns.push({
-          id: step.id,
-          name: step.name,
-          type: step.type,
-          channel: executionStep.channel,
-          status: "passed",
-          startedAt: stepStartedAt,
-          finishedAt: new Date(finished).toISOString(),
-          durationMs: finished - stepStarted,
-          retries: attempts,
-          evidence:
-            executionStep.type === "manual"
-              ? {
-                  source: "manual-confirmation",
-                  observed: "操作人员确认通过",
-                }
-              : {
-                  source: observedEvidence
-                    ? "device-response"
-                    : "runtime",
-                  ...(executionStep.expected
-                    ? { expected: executionStep.expected }
-                    : {}),
-                  ...(observedEvidence
-                    ? { observed: observedEvidence }
-                    : {}),
-                },
-        });
-        setStatuses((previous) => ({ ...previous, [step.id]: "passed" }));
-        addRunLog("pass", `${step.name} · 通过`);
-        passed += 1;
-      } catch (reason) {
-        const message =
-            reason instanceof Error ? reason.message : String(reason),
-          finished = Date.now();
-        stepRuns.push({
-          id: step.id,
-          name: step.name,
-          type: step.type,
-          channel: executionStep.channel,
-          status: "failed",
-          startedAt: stepStartedAt,
-          finishedAt: new Date(finished).toISOString(),
-          durationMs: finished - stepStarted,
-          retries: attempts,
-          error: message,
-          evidence: {
-            source:
-              executionStep.type === "manual"
-                ? "manual-confirmation"
-                : observedEvidence ||
-                    incoming.current.some(
-                      (item) => item.channel === executionStep.channel,
-                    )
-                  ? "device-response"
-                  : "runtime",
-            ...(executionStep.expected || executionStep.type === "match"
-              ? {
-                  expected:
-                    executionStep.expected || executionStep.data || "",
-                }
-              : {}),
-            observed:
-              executionStep.type === "manual"
-                ? "操作人员确认未通过"
-                : incoming.current
-                    .filter((item) => item.channel === executionStep.channel)
-                    .slice(-20)
-                    .map((item) =>
-                      executionStep.hex ? item.hex : item.text,
-                    )
-                    .join(executionStep.hex ? " " : "")
-                    .slice(-TEST_RUN_OBSERVED_LIMIT),
-            timeoutMs: executionStep.timeoutMs,
-          },
-        });
-        setStatuses((previous) => ({ ...previous, [step.id]: "failed" }));
-        addRunLog("fail", `${step.name} · ${message}`);
-        failed += 1;
-        if (stopRequested.current) {
-          aborted = true;
-          haltMain = true;
-        } else if (step.onFailure !== "continue") haltMain = true;
-        else addRunLog("info", `${step.name} · 按配置继续后续步骤`);
-      }
-      executingTeardown.current = false;
-    }
+    const executionResult = await runTestCaseEngine(selectedCase, {
+      shouldStop: () => stopRequested.current,
+      sendData,
+      waitForInput,
+      ensureChannel,
+      clearInput: channel => {
+        incoming.current = incoming.current.filter(item => item.channel !== channel);
+        cursors.current = {};
+      },
+      markInputCursor: channel => { cursors.current[channel] = incoming.current.length; },
+      captureResponse,
+      setVariable: (name, value) => { runtimeVariables.current = assignRuntimeVariable(name, value, runtimeVariables.current); },
+      getVariables: () => runtimeVariables.current,
+      manualConfirm: requestManualConfirmation,
+      observedInput: step => incoming.current.filter(item => item.channel === step.channel).slice(-20).map(item => step.hex ? item.hex : item.text).join(step.hex ? " " : ""),
+      hasInput: channel => incoming.current.some(item => item.channel === channel),
+      sleep,
+      setStatus: (stepId, value) => setStatuses(previous => ({ ...previous, [stepId]: value })),
+      setTeardownActive: value => { executingTeardown.current = value; },
+      log: addRunLog,
+    });
+    let { passed, failed, aborted, stepRuns } = executionResult;
     const communicationEvidence = [...sessionEvidence.current.values()].map(item => ({ ...item })),
       communications = communicationEvidence.map(({ startedAt: _startedAt, ...item }) => item),
       cleanupStarted = Date.now(),
