@@ -1,7 +1,9 @@
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { collectLocalModulePaths } from './portable-module-graph.mjs';
 
 const root = resolve(import.meta.dirname, '..');
+const projectRoot = resolve(root, '..');
 const options = Object.fromEntries(process.argv.slice(2).map(value => value.split('=', 2)));
 const platform = options['--platform'] || process.platform;
 const arch = options['--arch'] || process.arch;
@@ -12,7 +14,13 @@ if (!existsSync(join(root, 'node_modules', 'serialport', 'package.json'))) throw
 
 rmSync(output, { recursive: true, force: true });
 mkdirSync(join(output, 'runtime'), { recursive: true });
-for (const file of ['proxy.js', 'elf.js', 'dwarf.js', 'websocket-loopback.js', 'package.json', 'README.md']) copyFileSync(join(root, file), join(output, file));
+for (const file of collectLocalModulePaths(projectRoot, ['proxy/proxy.js', 'proxy/websocket-loopback.js'])) {
+  const target = join(output, file);
+  mkdirSync(dirname(target), { recursive: true });
+  copyFileSync(join(projectRoot, file), target);
+}
+for (const file of ['package.json', 'README.md']) copyFileSync(join(root, file), join(output, file));
+writeFileSync(join(output, 'proxy.js'), "import { startServer } from './proxy/proxy.js';\nstartServer();\n");
 cpSync(join(root, 'node_modules'), join(output, 'node_modules'), { recursive: true });
 
 const runtimeName = platform === 'win32' ? 'node.exe' : 'node';
