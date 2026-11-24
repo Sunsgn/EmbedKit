@@ -1,7 +1,5 @@
 import http from 'http';
 import https from 'https';
-import net from 'net';
-import dgram from 'dgram';
 import { SerialPort } from 'serialport';
 import { createHash, randomUUID } from 'crypto';
 import { spawn } from 'child_process';
@@ -20,6 +18,7 @@ import { scanProjectDirectory } from './server/project-scanner.js';
 import { createFileSelectionService } from './server/file-selection-service.js';
 import { createElfAnalysisService } from './server/elf-analysis-service.js';
 import { createSerialSessionService, receiveSerialData, validateSerialOptions } from './server/serial-session-service.js';
+import { createNetworkSessionService, decodeNetworkPayload, validateHostAndPort } from './server/network-session-service.js';
 import { registerAiServiceRoutes } from './routes/ai-services.js';
 import { registerBuildArtifactRoutes } from './routes/build-artifacts.js';
 import { registerBuildRoutes } from './routes/build.js';
@@ -463,7 +462,6 @@ const proxyRequest = createForwardProxy({
   jsonResponse: jsonRes,
 });
 
-const networkSessions = new Map();
 const installJobs = new Map();
 const fileSelectionService = createFileSelectionService({
   picker: systemFilePickerAdapter,
@@ -479,6 +477,15 @@ const serialSessionService = createSerialSessionService({
   maxSessions: MAX_SERIAL_SESSIONS,
   maxEvents: MAX_NETWORK_EVENTS,
 });
+const networkSessionService = createNetworkSessionService({
+  stateFile: NETWORK_STATE_FILE,
+  maxSessions: MAX_NETWORK_SESSIONS,
+  maxEvents: MAX_NETWORK_EVENTS,
+  maxPeers: MAX_NETWORK_PEERS,
+  maxFrameBytes: MAX_NETWORK_FRAME_BYTES,
+  defaultConnectTimeoutMs: DEFAULT_NETWORK_CONNECT_TIMEOUT_MS,
+  defaultFrameGapMs: DEFAULT_NETWORK_FRAME_GAP_MS,
+});
 const buildService = createBuildService({
   createSelection: fileSelectionService.createSelection,
   maxHashJobs: MAX_ARTIFACT_HASH_JOBS,
@@ -488,12 +495,13 @@ const buildService = createBuildService({
 export { createBuildCommand, parseBuildDiagnostic };
 export { scanProjectDirectory };
 export { receiveSerialData, validateSerialOptions };
+export { decodeNetworkPayload, validateHostAndPort };
 export const authorizeBuildArtifact = (job, indexValue) => buildService.authorizeArtifact(job, indexValue);
 export const hashBuildArtifact = (job, indexValue) => buildService.hashArtifact(job, indexValue);
 
 const agentRouter = new AgentRouter().register({
   id: 'agent.status', method: 'GET', path: '/api/agent/status',
-  handler: async ({ res }) => jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessionService.size(), networkSessions: networkSessions.size, buildJobs: buildService.size(), capabilities: listAgentCapabilities(process.platform) }),
+  handler: async ({ res }) => jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessionService.size(), networkSessions: networkSessionService.size(), buildJobs: buildService.size(), capabilities: listAgentCapabilities(process.platform) }),
 });
 registerAiServiceRoutes(agentRouter, { jsonResponse: jsonRes, detectServers, proxyRequest });
 registerPartRoutes(agentRouter, { jsonResponse: jsonRes, discoverDocuments: discoverOfficialPartDocuments, readDocument: readOfficialPartDocument, readPartDetails: getChipDetails, maxDocumentResults: PART_DOCUMENT_MAX_RESULTS });
@@ -563,245 +571,19 @@ registerSerialSessionRoutes(agentRouter, {
 registerNetworkSessionRoutes(agentRouter, {
   jsonResponse: jsonRes,
   readJsonBody: readJSONBody,
-  status: () => ({ available: true, protocols: ['tcp', 'udp'], modes: ['client', 'server'], activeSessions: networkSessions.size, maxSessions: MAX_NETWORK_SESSIONS }),
-  listSessions: () => [...networkSessions.values()],
-  getSession: id => networkSessions.get(id),
-  createSession: body => createNetworkSession(body.type, body.host, body.port, body.localPort, body.mode, body.connectTimeoutMs, body.frameMode, body.frameGapMs),
-  publicSession: publicNetworkSession,
+  status: () => ({ available: true, protocols: ['tcp', 'udp'], modes: ['client', 'server'], activeSessions: networkSessionService.size(), maxSessions: networkSessionService.maxSessions }),
+  listSessions: networkSessionService.listSessions,
+  getSession: networkSessionService.getSession,
+  createSession: body => networkSessionService.createSession(body.type, body.host, body.port, body.localPort, body.mode, body.connectTimeoutMs, body.frameMode, body.frameGapMs),
+  publicSession: networkSessionService.publicSession,
   decodePayload: decodeNetworkPayload,
-  writeTcp: writeTcpPayload,
-  sendUdp: sendUdpPayload,
-  pushEvent: pushNetworkEvent,
-  persistSessions: persistNetworkSessions,
-  closeSession: closeNetworkSession,
-  removeSession: id => networkSessions.delete(id),
+  writeTcp: networkSessionService.writeTcp,
+  sendUdp: networkSessionService.sendUdp,
+  pushEvent: networkSessionService.pushEvent,
+  persistSessions: networkSessionService.persist,
+  closeSession: networkSessionService.closeSession,
+  removeSession: networkSessionService.removeSession,
 });
-
-async function persistNetworkSessions() {
-  const sessions = [...networkSessions.values()].filter(session => session.state !== 'closed').map(({ type, mode, host, port, localPort, connectTimeoutMs, frameMode, frameGapMs }) => ({ type, mode, host, port, localPort, connectTimeoutMs, frameMode, frameGapMs }));
-  try { await mkdir(dirname(NETWORK_STATE_FILE), { recursive: true }); await writeFile(NETWORK_STATE_FILE, JSON.stringify({ version: 1, sessions }, null, 2), 'utf8'); }
-  catch (error) { console.warn(`Unable to save network sessions: ${error.message}`); }
-}
-
-async function restoreNetworkSessions() {
-  let saved;
-  try { saved = JSON.parse(await readFile(NETWORK_STATE_FILE, 'utf8')); }
-  catch (error) { if (error.code !== 'ENOENT') console.warn(`Unable to read saved network sessions: ${error.message}`); return; }
-  if (!Array.isArray(saved?.sessions)) return;
-  for (const options of saved.sessions.slice(0, MAX_NETWORK_SESSIONS)) {
-    try { const session = createNetworkSession(options.type, options.host, options.port, options.localPort, options.mode, options.connectTimeoutMs, options.frameMode, options.frameGapMs); pushNetworkEvent(session, 'system', '已自动恢复上次网络会话'); }
-    catch (error) { console.warn(`Unable to restore network session ${options?.type || ''} ${options?.host || ''}:${options?.port || ''}: ${error.message}`); }
-  }
-  await persistNetworkSessions();
-}
-
-export function validateHostAndPort(host, port) {
-  if (typeof host !== 'string' || !host.trim() || host.length > 255 || /[\s/\\]/.test(host)) throw new Error('Invalid target host');
-  const parsedPort = Number(port);
-  if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) throw new Error('Port must be between 1 and 65535');
-  return { host: host.trim(), port: parsedPort };
-}
-
-function pushNetworkEvent(session, direction, bufferOrText) {
-  const buffer = Buffer.isBuffer(bufferOrText) ? bufferOrText : null;
-  session.lastEventId += 1;
-  session.events.push({
-    id: session.lastEventId,
-    timestamp: new Date().toISOString(),
-    direction,
-    text: buffer ? buffer.toString('utf8') : String(bufferOrText),
-    hex: buffer ? buffer.toString('hex').match(/.{1,2}/g)?.join(' ').toUpperCase() || '' : '',
-    byteLength: buffer?.length || Buffer.byteLength(String(bufferOrText)),
-  });
-  if (session.events.length > MAX_NETWORK_EVENTS) {
-    const removed = session.events.length - MAX_NETWORK_EVENTS;
-    session.events.splice(0, removed);
-    session.droppedEvents += removed;
-  }
-  if (direction === 'tx' && buffer) session.txBytes += buffer.length;
-}
-
-function publicNetworkSession(session, after = 0) {
-  return {
-    id: session.id,
-    type: session.type,
-    mode: session.mode,
-    host: session.host,
-    port: session.port,
-    localPort: session.localPort,
-    localAddress: session.localAddress,
-    state: session.state,
-    rxBytes: session.rxBytes,
-    txBytes: session.txBytes,
-    clientCount: session.clients?.size || 0,
-    peers: [...session.peers.values()].map(peer => ({ ...peer })).slice(-MAX_NETWORK_PEERS),
-    droppedEvents: session.droppedEvents,
-    firstEventId: session.events[0]?.id ?? session.lastEventId + 1,
-    connectTimeoutMs: session.connectTimeoutMs,
-    frameMode: session.frameMode,
-    frameGapMs: session.frameGapMs,
-    events: session.events.filter(event => event.id > after),
-  };
-}
-
-function closeNetworkSession(session, reason = '会话已关闭') {
-  if (!session || session.state === 'closed') return;
-  session.state = 'closed';
-  flushAllNetworkReceive(session);
-  if (session.type === 'tcp' && session.mode === 'server') { for (const client of session.clients.values()) client.destroy(); try { session.socket.close(); } catch { /* not listening */ } }
-  else if (session.type === 'tcp') session.socket.destroy();
-  else { try { session.socket.close(); } catch { /* already closed */ } }
-  pushNetworkEvent(session, 'system', reason);
-}
-
-function writeTcpPayload(socket, payload) {
-  return new Promise((resolveWrite, reject) => {
-    if (!socket?.writable) { reject(new Error('TCP target is not writable')); return; }
-    socket.write(payload, error => error ? reject(error) : resolveWrite());
-  });
-}
-
-function sendUdpPayload(socket, payload, peer) {
-  return new Promise((resolveSend, reject) => {
-    const callback = error => error ? reject(error) : resolveSend();
-    if (peer) socket.send(payload, peer.port, peer.address, callback);
-    else socket.send(payload, callback);
-  });
-}
-
-function trimNetworkPeers(session) {
-  while (session.peers.size > MAX_NETWORK_PEERS) {
-    const removable = [...session.peers.entries()].find(([, peer]) => !peer.connected)?.[0] ?? session.peers.keys().next().value;
-    session.peers.delete(removable);
-  }
-}
-
-function pushNetworkReceiveFrame(session, buffer, peer) {
-  if (!buffer.length) return;
-  pushNetworkEvent(session, 'rx', buffer);
-  if (peer) session.events[session.events.length - 1].peer = peer;
-}
-
-function flushNetworkReceive(session, peer = '') {
-  const frame = session.rxBuffers.get(peer);
-  if (!frame?.length) return;
-  session.rxBuffers.delete(peer);
-  pushNetworkReceiveFrame(session, frame, peer || undefined);
-}
-
-function clearNetworkReceiveTimer(session, peer) {
-  const timer = session.rxTimers.get(peer);
-  if (timer) clearTimeout(timer);
-  session.rxTimers.delete(peer);
-}
-
-function flushAllNetworkReceive(session) {
-  for (const peer of [...session.rxTimers.keys()]) clearNetworkReceiveTimer(session, peer);
-  for (const peer of [...session.rxBuffers.keys()]) flushNetworkReceive(session, peer);
-}
-
-function receiveNetworkData(session, data, peer = '') {
-  session.rxBytes += data.length;
-  if (session.type === 'udp' || session.frameMode === 'raw' || session.frameMode === 'chunk') { pushNetworkReceiveFrame(session, data, peer || undefined); return; }
-  const existing = session.rxBuffers.get(peer) ?? Buffer.alloc(0);
-  session.rxBuffers.set(peer, Buffer.concat([existing, data]));
-  if (session.frameMode === 'auto' || session.frameMode === 'line') {
-    for (;;) {
-      const buffered = session.rxBuffers.get(peer) ?? Buffer.alloc(0), cr = buffered.indexOf(13), lf = buffered.indexOf(10);
-      const at = cr < 0 ? lf : lf < 0 ? cr : Math.min(cr, lf);
-      if (at < 0) break;
-      let end = at + 1;
-      if (buffered[at] === 13 && buffered[end] === 10) end += 1;
-      if (end > MAX_NETWORK_FRAME_BYTES) {
-        session.rxBuffers.set(peer, buffered.subarray(MAX_NETWORK_FRAME_BYTES));
-        pushNetworkReceiveFrame(session, buffered.subarray(0, MAX_NETWORK_FRAME_BYTES), peer || undefined);
-        pushNetworkEvent(session, 'system', `接收缓存达到 ${MAX_NETWORK_FRAME_BYTES} 字节，已强制分帧`);
-        continue;
-      }
-      session.rxBuffers.set(peer, buffered.subarray(end));
-      pushNetworkReceiveFrame(session, buffered.subarray(0, end), peer || undefined);
-    }
-  }
-  let buffered = session.rxBuffers.get(peer) ?? Buffer.alloc(0);
-  while (buffered.length >= MAX_NETWORK_FRAME_BYTES) {
-    pushNetworkReceiveFrame(session, buffered.subarray(0, MAX_NETWORK_FRAME_BYTES), peer || undefined);
-    buffered = buffered.subarray(MAX_NETWORK_FRAME_BYTES); session.rxBuffers.set(peer, buffered);
-    pushNetworkEvent(session, 'system', `接收缓存达到 ${MAX_NETWORK_FRAME_BYTES} 字节，已强制分帧`);
-  }
-  clearNetworkReceiveTimer(session, peer);
-  if ((session.frameMode === 'auto' || session.frameMode === 'idle') && buffered.length) session.rxTimers.set(peer, setTimeout(() => { session.rxTimers.delete(peer); flushNetworkReceive(session, peer); }, session.frameGapMs));
-}
-
-function createNetworkSession(type, host, port, localPort, mode = 'client', connectTimeoutMs = DEFAULT_NETWORK_CONNECT_TIMEOUT_MS, frameMode = 'raw', frameGapMs = DEFAULT_NETWORK_FRAME_GAP_MS) {
-  if (!['tcp', 'udp'].includes(type)) throw new Error('Only TCP and UDP sessions are supported');
-  if (!['client', 'server'].includes(mode)) throw new Error('Mode must be client or server');
-  if (networkSessions.size >= MAX_NETWORK_SESSIONS) throw new Error(`At most ${MAX_NETWORK_SESSIONS} network sessions may be open`);
-  const target = validateHostAndPort(host, port);
-  const bindPort = type === 'udp' && mode === 'client' ? Number(localPort || 0) : 0;
-  if (!Number.isInteger(bindPort) || bindPort < 0 || bindPort > 65535) throw new Error('Local port must be between 0 and 65535');
-  const boundedConnectTimeoutMs = Math.max(1000, Math.min(120_000, Number(connectTimeoutMs) || DEFAULT_NETWORK_CONNECT_TIMEOUT_MS));
-  const selectedFrameMode = String(frameMode || 'raw'), boundedFrameGapMs = Number(frameGapMs ?? DEFAULT_NETWORK_FRAME_GAP_MS);
-  if (!['raw', 'chunk', 'auto', 'line', 'idle'].includes(selectedFrameMode)) throw new Error('Invalid network frame mode');
-  if (!Number.isFinite(boundedFrameGapMs) || boundedFrameGapMs < 5 || boundedFrameGapMs > 2000) throw new Error('Network frame gap must be between 5 and 2000 ms');
-  const id = randomUUID();
-  const session = { id, type, mode, ...target, localPort: bindPort, connectTimeoutMs: boundedConnectTimeoutMs, frameMode: type === 'udp' ? 'chunk' : selectedFrameMode, frameGapMs: boundedFrameGapMs, localAddress: '', state: 'connecting', events: [], droppedEvents: 0, lastEventId: 0, rxBytes: 0, txBytes: 0, socket: null, clients: new Map(), peers: new Map(), lastPeer: null, rxBuffers: new Map(), rxTimers: new Map() };
-  networkSessions.set(id, session);
-  pushNetworkEvent(session, 'system', mode === 'server' ? `正在监听 ${type.toUpperCase()} ${target.host}:${target.port}` : `正在连接 ${type.toUpperCase()} ${target.host}:${target.port}`);
-
-  if (type === 'tcp' && mode === 'client') {
-    const socket = net.createConnection({ host: target.host, port: target.port });
-    session.socket = socket;
-    socket.setNoDelay(true);
-    const connectTimer = setTimeout(() => socket.destroy(new Error(`TCP connection timed out after ${boundedConnectTimeoutMs}ms`)), boundedConnectTimeoutMs);
-    socket.on('connect', () => { clearTimeout(connectTimer); session.state = 'connected'; session.localAddress = `${socket.localAddress}:${socket.localPort}`; pushNetworkEvent(session, 'system', `已连接 ${target.host}:${target.port}`); });
-    socket.on('data', data => receiveNetworkData(session, data));
-    socket.on('error', error => { clearTimeout(connectTimer); session.state = 'error'; pushNetworkEvent(session, 'system', `TCP 错误：${error.message}`); });
-    socket.on('close', () => { clearTimeout(connectTimer); clearNetworkReceiveTimer(session, ''); flushNetworkReceive(session); if (session.state !== 'closed') { session.state = 'closed'; pushNetworkEvent(session, 'system', 'TCP 连接已断开'); } });
-  } else if (type === 'tcp') {
-    const server = net.createServer(socket => {
-      if (session.clients.size >= MAX_NETWORK_PEERS) { pushNetworkEvent(session, 'system', `已拒绝客户端：最多允许 ${MAX_NETWORK_PEERS} 个连接`); socket.destroy(); return; }
-      const peer = `${socket.remoteAddress}:${socket.remotePort}`, connectedAt = new Date().toISOString();
-      session.clients.set(peer, socket); session.peers.set(peer, { id: peer, address: socket.remoteAddress, port: socket.remotePort, connected: true, connectedAt, lastSeenAt: connectedAt, rxBytes: 0, txBytes: 0 }); trimNetworkPeers(session);
-      pushNetworkEvent(session, 'system', `客户端已连接 ${peer}`);
-      socket.setNoDelay(true);
-      socket.on('data', data => { const evidence = session.peers.get(peer); if (evidence) { evidence.rxBytes += data.length; evidence.lastSeenAt = new Date().toISOString(); } receiveNetworkData(session, data, peer); });
-      socket.on('error', error => pushNetworkEvent(session, 'system', `客户端 ${peer} 错误：${error.message}`));
-      socket.on('close', () => { clearNetworkReceiveTimer(session, peer); flushNetworkReceive(session, peer); session.clients.delete(peer); const evidence = session.peers.get(peer); if (evidence) { evidence.connected = false; evidence.lastSeenAt = new Date().toISOString(); } pushNetworkEvent(session, 'system', `客户端已断开 ${peer}`); });
-    });
-    session.socket = server;
-    server.on('error', error => { session.state = 'error'; pushNetworkEvent(session, 'system', `TCP 监听错误：${error.message}`); });
-    server.on('close', () => { if (session.state !== 'closed') session.state = 'closed'; });
-    server.listen(target.port, target.host, () => { const address = server.address(); session.state = 'connected'; session.localAddress = typeof address === 'object' && address ? `${address.address}:${address.port}` : `${target.host}:${target.port}`; pushNetworkEvent(session, 'system', `TCP 服务端正在监听 ${session.localAddress}`); });
-  } else if (mode === 'client') {
-    const socket = dgram.createSocket('udp4');
-    session.socket = socket;
-    socket.on('message', (data, info) => { const peer = `${info.address}:${info.port}`, now = new Date().toISOString(), evidence = session.peers.get(peer) ?? { id: peer, address: info.address, port: info.port, connected: true, connectedAt: now, lastSeenAt: now, rxBytes: 0, txBytes: 0 }; evidence.rxBytes += data.length; evidence.lastSeenAt = now; session.peers.set(peer, evidence); trimNetworkPeers(session); receiveNetworkData(session, data, peer); });
-    socket.on('error', error => { session.state = 'error'; pushNetworkEvent(session, 'system', `UDP 错误：${error.message}`); });
-    socket.on('close', () => { session.state = 'closed'; });
-    socket.bind(bindPort, '0.0.0.0', () => {
-      socket.connect(target.port, target.host, () => { const address = socket.address(); session.state = 'connected'; session.localAddress = `${address.address}:${address.port}`; pushNetworkEvent(session, 'system', `UDP 已就绪，目标 ${target.host}:${target.port}`); });
-    });
-  } else {
-    const socket = dgram.createSocket('udp4');
-    session.socket = socket;
-    socket.on('message', (data, info) => { session.lastPeer = info; const peer = `${info.address}:${info.port}`, now = new Date().toISOString(), evidence = session.peers.get(peer) ?? { id: peer, address: info.address, port: info.port, connected: true, connectedAt: now, lastSeenAt: now, rxBytes: 0, txBytes: 0 }; evidence.rxBytes += data.length; evidence.lastSeenAt = now; session.peers.set(peer, evidence); trimNetworkPeers(session); receiveNetworkData(session, data, peer); });
-    socket.on('error', error => { session.state = 'error'; pushNetworkEvent(session, 'system', `UDP 监听错误：${error.message}`); });
-    socket.on('close', () => { session.state = 'closed'; });
-    socket.bind(target.port, target.host, () => { const address = socket.address(); session.state = 'connected'; session.localAddress = `${address.address}:${address.port}`; pushNetworkEvent(session, 'system', `UDP 服务端正在监听 ${session.localAddress}`); });
-  }
-  return session;
-}
-
-export function decodeNetworkPayload(data, encoding) {
-  if (typeof data !== 'string') throw new Error('Data must be a string');
-  if (encoding === 'text') return Buffer.from(data, 'utf8');
-  if (encoding === 'hex') {
-    const normalized = data.replace(/0x/gi, '').replace(/[\s,;:_-]+/g, '');
-    if (!normalized || !/^[0-9a-f]+$/i.test(normalized) || normalized.length % 2) throw new Error('Invalid HEX payload');
-    return Buffer.from(normalized, 'hex');
-  }
-  throw new Error('Encoding must be text or hex');
-}
 
 function fetchHTML(urlStr, timeoutMs = 8000) {
   return new Promise((resolve, reject) => {
@@ -1286,7 +1068,7 @@ export function startServer({ detectAi = true, restoreSerial = true, restoreNetw
     const listeningPort = typeof address === 'object' && address ? address.port : port;
     console.log(`\n✅ EmbedKit local proxy running on http://${listeningHost}:${listeningPort}`);
     if (restoreSerial) await serialSessionService.restore();
-    if (restoreNetwork) await restoreNetworkSessions();
+    if (restoreNetwork) await networkSessionService.restore();
     if (!detectAi) return;
     const servers = await detectServers();
     if (servers.length > 0) {
