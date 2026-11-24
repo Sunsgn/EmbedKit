@@ -2,15 +2,12 @@ import { useState } from 'react';
 import { AlertTriangle, CheckCircle2, DatabaseBackup, Download, FileUp, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
 import { applyWorkspaceBackup, createWorkspaceBackup, exportProductData, parseWorkspaceBackup, previewWorkspaceBackup, WORKSPACE_BACKUP_MAX_BYTES, type WorkspaceBackup, type WorkspaceBackupPreview } from '../services/workspaceBackup';
 import { clearStillBrokenSettings, inspectStorageHealth, type StorageHealthReason } from '../services/storageHealth';
+import { downloadBrowserText } from '../services/browserDownload';
 
 const downloadJson = (name: string, value: unknown) => {
   const content = JSON.stringify(value, null, 2);
   if (new TextEncoder().encode(content).byteLength > WORKSPACE_BACKUP_MAX_BYTES) throw new Error('工作区备份超过 16 MiB，请先删除不需要的历史测试记录');
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
-  link.download = name;
-  link.click();
-  URL.revokeObjectURL(link.href);
+  downloadBrowserText(content, name, 'application/json;charset=utf-8');
 };
 
 export default function DataManagementPage() {

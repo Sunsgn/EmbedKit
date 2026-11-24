@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, Download, ExternalLink, RefreshCw, Server, ShieldCheck, TriangleAlert, WifiOff } from 'lucide-react';
 import { AgentClientError, AGENT_PROTOCOL_VERSION, getAgentStatus, type AgentStatus } from '../services/agentClient';
 import { LOCAL_PROXY_BASE } from '../services/aiService';
+import { downloadBrowserText } from '../services/browserDownload';
 
 type AgentState = 'checking' | 'online' | 'offline' | 'incompatible' | 'error';
 const RELEASES_URL = 'https://github.com/sunsgn/EmbedKit/releases/latest';
@@ -29,8 +30,7 @@ const capabilityLabels: Record<string, string> = {
 };
 
 function saveJson(name: string, value: unknown) {
-  const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json;charset=utf-8' }));
-  const link = document.createElement('a'); link.href = url; link.download = name; link.click(); URL.revokeObjectURL(url);
+  downloadBrowserText(JSON.stringify(value, null, 2), name, 'application/json;charset=utf-8');
 }
 
 export default function LocalAgentPage() {
