@@ -3,6 +3,9 @@ import { Braces, Check, Clock3, Download, FileUp, Pause, Pencil, Play, Plus, Rad
 import { COMMUNICATION_CAPTURE_MAX_BYTES, createCommunicationCapture, writePendingCommunicationCapture, type CaptureEventInput } from '../services/communicationCapture';
 import { mayMergeSerialReceive } from '../services/serialDisplay';
 import { BROWSER_SERIAL_SETTINGS_KEY as settingsKey, browserSerialPortName as portName, drainBrowserSerialBuffer as drainRuntimeBuffer, filterBrowserSerialEntries as visibleEntries, formatBrowserSerialTime as now, isBrowserSerialChooserCancellation as isPortChooserCancellation, isRecoverableBrowserSerialReadError as isRecoverableSerialReadError, loadBrowserSerialSettings as loadSettings, openBrowserSerialPort as openPort, parseBrowserSerialHex as parseHex, unescapeBrowserSerialText as unescapeText } from '../features/communication/browserSerialModel';
+import { loadCommunicationShortcutLimit as loadShortcutLimit, loadCommunicationShortcuts as loadShortcuts, saveCommunicationShortcutLimit, saveCommunicationShortcuts } from '../features/communication/communicationShortcuts';
+import { createBrowserSerialCsvLog, createBrowserSerialRawRx, createBrowserSerialTextLog } from '../features/communication/browserSerialExport';
+import { downloadBrowserBlob, downloadBrowserText } from '../services/browserDownload';
 import { formatHex as hex } from '../utils/embeddedTools';
 
 type Parity = 'none' | 'even' | 'odd';
@@ -22,11 +25,6 @@ interface RawCapture { events: CaptureEventInput[]; byteLength: number; truncate
 
 const MAX_ENTRIES = 5000;
 const MAX_MERGED_RX_BYTES = 64 * 1024;
-const shortcutsKey = 'embedkit.serial.shortcuts';
-const shortcutLimitKey = 'embedkit.serial.shortcut-limit';
-function loadShortcuts(): Shortcut[] { try { return JSON.parse(localStorage.getItem(shortcutsKey) || 'null') as Shortcut[] || []; } catch { return []; } }
-function loadShortcutLimit() { const value = Number(localStorage.getItem(shortcutLimitKey) || 20); return Number.isFinite(value) ? Math.max(1, Math.min(100, Math.round(value))) : 20; }
-
 export default function SerialPage() {
   const [initial] = useState(loadSettings);
   const [sessions, setSessions] = useState<Session[]>([]), [activeId, setActiveId] = useState<number | null>(null), [adding, setAdding] = useState(false);
@@ -61,8 +59,8 @@ export default function SerialPage() {
   useEffect(() => { gapRef.current = Math.max(5, Math.min(2000, Number(frameGap) || 30)); }, [frameGap]);
   useEffect(() => { lengthRef.current = Math.max(1, Math.min(4096, Number(frameLength) || 1)); }, [frameLength]);
   useEffect(() => { localStorage.setItem(settingsKey, JSON.stringify({ version: 3, baud, lineEnding, frameMode, frameGap, frameLength, rxHex, leftRxHex, rightRxHex, txHex })); }, [baud, frameGap, frameLength, frameMode, leftRxHex, lineEnding, rightRxHex, rxHex, txHex]);
-  useEffect(() => { localStorage.setItem(shortcutsKey, JSON.stringify(shortcuts)); }, [shortcuts]);
-  useEffect(() => { localStorage.setItem(shortcutLimitKey, String(shortcutLimit)); }, [shortcutLimit]);
+  useEffect(() => { saveCommunicationShortcuts(shortcuts.map(shortcut => ({ ...shortcut, intervalMs: shortcut.intervalMs ?? 1000 }))); }, [shortcuts]);
+  useEffect(() => { saveCommunicationShortcutLimit(shortcutLimit); }, [shortcutLimit]);
 
   const append = useCallback((id: number, text: string, direction: Direction, bytes?: Uint8Array) => update(id, (s) => {
     const incoming = bytes ? [...bytes] : undefined, receivedAt = Date.now();
@@ -221,8 +219,8 @@ export default function SerialPage() {
   const activeDisplayHex = splitView ? activeId === rightPaneId ? rightRxHex : leftRxHex : rxHex;
   const shown = useMemo(() => visibleEntries(leftPane, filter, leftDisplayHex, showRx, showTx), [filter, leftDisplayHex, leftPane, showRx, showTx]);
   const secondaryShown = useMemo(() => visibleEntries(rightPane, filter, rightDisplayHex, showRx, showTx), [filter, rightDisplayHex, rightPane, showRx, showTx]);
-  const save = (format: 'txt' | 'csv') => { if (!active?.entries.length) return; const content = format === 'csv' ? ['timestamp,port,direction,length,data', ...active.entries.map((e) => [e.timestamp, `"${active.name}"`, e.direction, e.bytes?.length ?? new TextEncoder().encode(e.text).length, `"${(e.bytes ? hex(e.bytes) : e.text).replace(/"/g, '""')}"`].join(','))].join('\n') : active.entries.map((e) => `[${e.timestamp}] [${active.name}] [${e.direction.toUpperCase()}] ${e.bytes && activeDisplayHex ? hex(e.bytes) : e.text}`).join('\n'); const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' })); const a = document.createElement('a'); a.href = url; a.download = `serial-${active.id}.${format}`; a.click(); URL.revokeObjectURL(url); };
-  const saveRaw = () => { if (!active) return; const capture = rawCaptures.current.get(active.id); const bytes = capture?.events.filter((event) => event.direction === 'rx').flatMap((event) => ((event.hex ?? '').match(/[\dA-F]{2}/gi) ?? []).map((value) => Number.parseInt(value, 16))) ?? []; if (!bytes.length) return; const url = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' })); const a = document.createElement('a'); a.href = url; a.download = `serial-${active.id}-rx.bin`; a.click(); URL.revokeObjectURL(url); };
+  const save = (format: 'txt' | 'csv') => { if (!active?.entries.length) return; const content = format === 'csv' ? createBrowserSerialCsvLog(active) : createBrowserSerialTextLog(active, activeDisplayHex); downloadBrowserText(content, `serial-${active.id}.${format}`, format === 'csv' ? 'text/csv;charset=utf-8' : 'text/plain;charset=utf-8'); };
+  const saveRaw = () => { if (!active) return; const bytes = createBrowserSerialRawRx(rawCaptures.current.get(active.id)?.events ?? []); if (bytes.length) downloadBrowserBlob(new Blob([bytes.slice().buffer], { type: 'application/octet-stream' }), `serial-${active.id}-rx.bin`); };
   const analyzeRx = () => {
     if (!active) return;
     try {

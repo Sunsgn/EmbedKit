@@ -26,3 +26,12 @@ export function loadCommunicationShortcuts(storage: Pick<Storage, 'getItem'> = l
 export function loadCommunicationShortcutLimit(storage: Pick<Storage, 'getItem'> = localStorage) {
   return Math.max(1, Math.min(100, Number(storage.getItem(COMMUNICATION_SHORTCUT_LIMIT_KEY)) || 20));
 }
+
+export function saveCommunicationShortcuts(shortcuts: CommunicationShortcut[], storage: Pick<Storage, 'setItem'> = localStorage) {
+  const bounded = shortcuts.slice(0, 100).map(item => ({ ...item, name: item.name.slice(0, 200), value: item.value.slice(0, 65_536), intervalMs: Math.max(100, Math.min(60_000, Number(item.intervalMs) || 1_000)) }));
+  storage.setItem(COMMUNICATION_SHORTCUTS_KEY, JSON.stringify(bounded));
+}
+
+export function saveCommunicationShortcutLimit(limit: number, storage: Pick<Storage, 'setItem'> = localStorage) {
+  storage.setItem(COMMUNICATION_SHORTCUT_LIMIT_KEY, String(Math.max(1, Math.min(100, Math.round(limit) || 20))));
+}
