@@ -2,13 +2,13 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, BookOpen, Boxes, CheckCircle, Cpu, ExternalLink, FileText, FileUp, Filter, FolderTree, History, Info, Layers, Lightbulb, Loader2, PackageSearch, ReplaceAll, Search, ShoppingCart, Tag, Trash2 } from 'lucide-react';
 import { chips } from '../data/chips';
 import { components } from '../data/components';
-import { LOCAL_PROXY_BASE } from '../services/aiService';
 import KnowledgeSourcePanel from '../features/resources/KnowledgeSourcePanel';
 import FunctionalSelectionCenter from '../features/resources/FunctionalSelectionCenter';
 import FunctionSolutionRecords from '../features/resources/FunctionSolutionRecords';
 import { buildOfficialDocumentLinks, documentAccessLabel, mergeDiscoveredDocuments, type PartDocumentDiscoveryInput, type PartDocumentLink } from '../features/resources/partDocumentDiscovery';
-import { discoverPartDocuments, type DiscoveredPartDocument } from '../services/partSources';
+import { discoverPartDocuments, lookupOnlinePart, type DiscoveredPartDocument, type OnlinePartDetails } from '../services/partSources';
 import { deleteLocalPartDocument, importLocalPartDocument, listLocalPartDocuments, type LocalPartDocumentRecord } from '../services/partDocumentLibrary';
+import { buildPartSearchLinks, describeTypicalPartUse, filterPartCatalog, findExactPart, supportsPartDocumentation, type PartCatalogItem, type PartSearchLink } from '../features/resources/partCatalogModel';
 import type { FunctionSolution } from '../types';
 
 const PartDocumentWorkspace = lazy(() => import('../features/resources/PartDocumentWorkspace'));
@@ -24,7 +24,7 @@ const resourceModeLabels: Record<Exclude<ResourceMode, 'home'>, string> = {
   records: '我的资料与记录',
 };
 
-interface CatalogItem {
+interface CatalogItem extends PartCatalogItem {
   id: string;
   name: string;
   manufacturer: string;
@@ -39,27 +39,7 @@ interface CatalogItem {
   isChip?: boolean;
 }
 
-type LinkType = 'datasheet' | 'cad' | 'alternative' | 'distributor';
-interface PartLink {
-  name: string;
-  source: string;
-  description: string;
-  link: string;
-  type: LinkType;
-}
-interface OnlineDetails {
-  productName?: string;
-  productFamily?: string;
-  manufacturer?: string;
-  description?: string;
-  specs?: Record<string, string>;
-  features?: string[];
-  stUrl?: string;
-  productUrl?: string;
-  datasheetUrl?: string;
-  source?: string;
-  error?: string;
-}
+type PartLink = PartSearchLink;
 
 const chipItems: CatalogItem[] = chips.map((chip) => ({
   id: `chip-${chip.id}`,
@@ -85,105 +65,6 @@ const catalog: CatalogItem[] = [...chipItems, ...components];
 const categories = [...new Set(catalog.map((item) => item.category))];
 const manufacturers = [...new Set(catalog.map((item) => item.manufacturer))].sort((a, b) => a.localeCompare(b));
 
-function buildLinks(query: string): PartLink[] {
-  const q = encodeURIComponent(query.trim());
-  return [
-    {
-      name: `${query} 数据手册`,
-      source: 'AllDatasheet',
-      description: '按完整型号查询 PDF 数据手册',
-      link: `https://www.alldatasheet.com/view.jsp?Searchword=${q}`,
-      type: 'datasheet',
-    },
-    {
-      name: `${query} 技术资料`,
-      source: 'Datasheet Archive',
-      description: '元器件数据手册与历史型号检索',
-      link: `https://www.datasheetarchive.com/?q=${q}`,
-      type: 'datasheet',
-    },
-    {
-      name: `${query} 符号与封装`,
-      source: 'SnapMagic',
-      description: '查询原理图符号、PCB 封装与 3D 模型',
-      link: `https://www.snapeda.com/search/?q=${q}`,
-      type: 'cad',
-    },
-    {
-      name: `${query} CAD 模型`,
-      source: 'Ultra Librarian',
-      description: '查询封装、符号及 3D 模型',
-      link: `https://www.ultralibrarian.com/search?query=${q}`,
-      type: 'cad',
-    },
-    {
-      name: `${query} 替代型号`,
-      source: '半导小芯',
-      description: '查询参数相近器件与国产替代型号',
-      link: `https://www.semiee.com/search?searchModel=${q}`,
-      type: 'alternative',
-    },
-    {
-      name: `${query} 交叉参考`,
-      source: 'Findchips',
-      description: '比较型号、库存及交叉参考信息',
-      link: `https://www.findchips.com/search/${q}`,
-      type: 'alternative',
-    },
-    {
-      name: `${query} 库存与价格`,
-      source: 'Octopart',
-      description: '聚合多个授权分销商的库存和价格',
-      link: `https://octopart.com/search?q=${q}`,
-      type: 'distributor',
-    },
-    {
-      name: `${query} 国内采购`,
-      source: '立创商城',
-      description: '查询参数、数据手册、库存和价格',
-      link: `https://so.szlcsc.com/global.html?k=${q}`,
-      type: 'distributor',
-    },
-    {
-      name: `${query} 授权采购`,
-      source: 'DigiKey',
-      description: '查询可订购型号、参数和库存',
-      link: `https://www.digikey.cn/zh/products/result?keywords=${q}`,
-      type: 'distributor',
-    },
-    {
-      name: `${query} 授权采购`,
-      source: 'Mouser',
-      description: '查询元器件参数、生命周期和库存',
-      link: `https://www.mouser.cn/c/?q=${q}`,
-      type: 'distributor',
-    },
-  ];
-}
-
-function searchText(item: CatalogItem) {
-  return [item.name, item.manufacturer, item.category, item.subcategory, item.description, item.package, ...item.tags, ...Object.keys(item.parameters), ...Object.values(item.parameters)].join(' ').toLowerCase();
-}
-
-function normalizedModel(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-function typicalUse(item: CatalogItem) {
-  if (!item.isChip) return item.description;
-  const text = `${item.name} ${item.subcategory} ${item.tags.join(' ')}`.toUpperCase();
-  if (/ESP|WIFI|BLUETOOTH|BLE/.test(text)) return '适合物联网终端、无线传感器、智能家居、设备联网和边缘控制。';
-  if (/NRF/.test(text)) return '适合低功耗蓝牙设备、可穿戴设备、无线传感器和遥控器。';
-  if (/IMX|CORTEX-A/.test(text)) return '适合嵌入式 Linux、图形界面、边缘网关和高性能人机交互。';
-  if (/RP2|AVR|ATMEGA|ATTINY/.test(text)) return '适合入门开发、教育实验、简单控制器和低成本原型。';
-  if (/CAN|ETH|STM32|GD32|CH32|CORTEX-M/.test(text)) return '适合工业控制、仪器仪表、电机控制、数据采集和通信网关。';
-  return '适合通用嵌入式控制、外设驱动、数据采集和实时任务处理。';
-}
-
-function hasChipDocumentation(item: CatalogItem) {
-  return item.isChip || !['无源器件', '连接器'].includes(item.category);
-}
-
 export default function ChipLibPage() {
   const [mode, setMode] = useState<ResourceMode>(() => {
     const stored = localStorage.getItem('embedkit.resources-mode');
@@ -196,15 +77,10 @@ export default function ChipLibPage() {
   useEffect(() => localStorage.setItem('embedkit.resources-mode', mode), [mode]);
   const query = search.trim();
   const filtered = useMemo(() => {
-    const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
-    return catalog.filter((item) => (!tokens.length || tokens.every((token) => searchText(item).includes(token))) && (!category || item.category === category) && (!manufacturer || item.manufacturer === manufacturer));
+    return filterPartCatalog(catalog, query, category, manufacturer);
   }, [category, manufacturer, query]);
-  const links = useMemo(() => (query.length >= 2 ? buildLinks(query) : []), [query]);
-  const exactMatch = useMemo(() => {
-    if (query.length < 2) return null;
-    const model = normalizedModel(query);
-    return catalog.find((item) => normalizedModel(item.name) === model) ?? (filtered.length === 1 ? filtered[0] : null);
-  }, [filtered, query]);
+  const links = useMemo(() => buildPartSearchLinks(query), [query]);
+  const exactMatch = useMemo(() => findExactPart(catalog, filtered, query), [filtered, query]);
 
   return (
     <div className="h-full overflow-y-auto p-4 scrollbar-thin lg:p-6">
@@ -360,7 +236,7 @@ function ResourceDirectoryHome({ onOpen }: { onOpen: (mode: ResourceMode) => voi
 }
 
 function QueryDetails({ query, localItem }: { query: string; localItem: CatalogItem | null }) {
-  const [details, setDetails] = useState<OnlineDetails | null>(null);
+  const [details, setDetails] = useState<OnlinePartDetails | null>(null);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -371,10 +247,7 @@ function QueryDetails({ query, localItem }: { query: string; localItem: CatalogI
       setFailed(false);
       setDetails(null);
       try {
-        const response = await fetch(`${LOCAL_PROXY_BASE}/api/component-details?part=${encodeURIComponent(query)}`, { signal: controller.signal });
-        const data = (await response.json()) as OnlineDetails;
-        if (!response.ok || data.error) setFailed(true);
-        else setDetails(data);
+        setDetails(await lookupOnlinePart(query, controller.signal));
       } catch {
         if (!controller.signal.aborted) setFailed(true);
       } finally {
@@ -405,10 +278,10 @@ function QueryDetails({ query, localItem }: { query: string; localItem: CatalogI
           </div>
           <div className="mt-4 rounded-lg border border-green-500/15 bg-green-500/5 p-3">
             <h3 className="text-xs font-semibold text-green-400">典型用途</h3>
-            <p className="mt-1 text-sm leading-6 text-gray-300">{typicalUse(localItem)}</p>
+            <p className="mt-1 text-sm leading-6 text-gray-300">{describeTypicalPartUse(localItem)}</p>
           </div>
         </div>
-        {hasChipDocumentation(localItem) && <ChipManuals input={{ model: localItem.name, manufacturer: localItem.manufacturer, category: localItem.category, isMcu: localItem.isChip, datasheetUrl: localItem.datasheetUrl, referenceUrl: localItem.reference && /\.pdf(?:$|[?#])/i.test(localItem.reference) ? localItem.reference : undefined, productUrl: localItem.reference && !/\.pdf(?:$|[?#])/i.test(localItem.reference) ? localItem.reference : undefined }} />}
+        {supportsPartDocumentation(localItem) && <ChipManuals input={{ model: localItem.name, manufacturer: localItem.manufacturer, category: localItem.category, isMcu: localItem.isChip, datasheetUrl: localItem.datasheetUrl, referenceUrl: localItem.reference && /\.pdf(?:$|[?#])/i.test(localItem.reference) ? localItem.reference : undefined, productUrl: localItem.reference && !/\.pdf(?:$|[?#])/i.test(localItem.reference) ? localItem.reference : undefined }} />}
         <div className="p-5">
           <h3 className="mb-1 text-xs font-semibold text-gray-300">关键使用参数</h3>
           <p className="mb-3 text-[11px] text-gray-600">用于初步选型；最终设计请核对对应温度等级、封装后缀及最新版数据手册。</p>
@@ -461,7 +334,7 @@ function QueryDetails({ query, localItem }: { query: string; localItem: CatalogI
           <p className="mt-1 text-sm leading-6 text-gray-300">{details.description || '请结合数据手册确认器件功能和推荐应用。'}</p>
         </div>
       </div>
-      <ChipManuals input={{ model: details.productName || query, manufacturer: onlineManufacturer, category: details.productFamily, datasheetUrl: details.datasheetUrl || details.stUrl, productUrl: details.productUrl }} />
+      <ChipManuals input={{ model: details.productName || query, manufacturer: onlineManufacturer, category: details.productFamily, datasheetUrl: details.datasheetUrl, productUrl: details.productUrl }} />
       {Object.keys(specs).length > 0 && (
         <div className="p-5">
           <h3 className="mb-3 text-xs font-semibold text-gray-400">重要参数</h3>

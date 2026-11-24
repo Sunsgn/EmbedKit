@@ -4,7 +4,7 @@ import { agentPaths } from '../application/agent/routes';
 
 export interface PartSourceCapability { id: string; name: string; kind: 'manufacturer' | 'distributor' | 'aggregator' | 'user-import'; state: 'configured' | 'unavailable'; capabilities: string[]; dataScope: string; authoritative: boolean }
 export interface PartSourceStatus { schemaVersion: 1; sources: PartSourceCapability[]; limits: { queryLength: number; automaticPdfDownload: boolean; parametricSearch: boolean; documentResults?: number } }
-export interface OnlinePartDetails { query: string; productName: string; manufacturer?: string; description: string; specs: Record<string, string>; features: string[]; source: string; productUrl?: string; datasheetUrl?: string }
+export interface OnlinePartDetails { query: string; productName: string; productFamily?: string; manufacturer?: string; description: string; specs: Record<string, string>; features: string[]; source: string; productUrl?: string; datasheetUrl?: string }
 export interface DiscoveredPartDocument { kind: PartDocumentKind; title: string; url: string; sourceName: string; authoritative: true; scope: 'exact-model' | 'family'; discoveredFrom: string }
 export interface PartDocumentDiscoveryResult { schemaVersion: 1; model: string; manufacturer: string; documents: DiscoveredPartDocument[]; failures: Array<{ code: string; message: string; url?: string }>; discoveredAt: string; limits?: { maxDocuments: number; maxPages: number; cacheSeconds: number } }
 
@@ -25,7 +25,7 @@ export async function lookupOnlinePart(model: string, signal?: AbortSignal): Pro
   const specs: Record<string, string> = {};
   if (raw.specs && typeof raw.specs === 'object' && !Array.isArray(raw.specs)) for (const [key, value] of Object.entries(raw.specs).slice(0, 64)) { const label = text(key, 120), detail = text(value, 500); if (label && detail) specs[label] = detail; }
   const features = Array.isArray(raw.features) ? raw.features.slice(0, 40).map(value => text(value, 500)).filter(Boolean) : [];
-  return { query, productName: text(raw.productName, 200) || query, manufacturer: text(raw.manufacturer, 200) || text(specs.manufacturer, 200) || undefined, description: text(raw.description, 2000) || '在线来源未提供器件描述。', specs, features, source: text(raw.source, 120) || '在线聚合来源', productUrl: safeUrl(raw.productUrl), datasheetUrl: safeUrl(raw.datasheetUrl ?? raw.stUrl) };
+  return { query, productName: text(raw.productName, 200) || query, productFamily: text(raw.productFamily, 200) || undefined, manufacturer: text(raw.manufacturer, 200) || text(specs.manufacturer, 200) || undefined, description: text(raw.description, 2000) || '在线来源未提供器件描述。', specs, features, source: text(raw.source, 120) || '在线聚合来源', productUrl: safeUrl(raw.productUrl), datasheetUrl: safeUrl(raw.datasheetUrl ?? raw.stUrl) };
 }
 
 export async function discoverPartDocuments(input: { model: string; manufacturer?: string; productUrl?: string }, signal?: AbortSignal): Promise<PartDocumentDiscoveryResult> {
