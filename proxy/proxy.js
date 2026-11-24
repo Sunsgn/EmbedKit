@@ -19,6 +19,7 @@ import { createBuildService, createBuildCommand, parseBuildDiagnostic } from './
 import { scanProjectDirectory } from './server/project-scanner.js';
 import { createFileSelectionService } from './server/file-selection-service.js';
 import { createElfAnalysisService } from './server/elf-analysis-service.js';
+import { createSerialSessionService, receiveSerialData, validateSerialOptions } from './server/serial-session-service.js';
 import { registerAiServiceRoutes } from './routes/ai-services.js';
 import { registerBuildArtifactRoutes } from './routes/build-artifacts.js';
 import { registerBuildRoutes } from './routes/build.js';
@@ -64,7 +65,6 @@ const systemSerialAdapter = {
   list: () => SerialPort.list(),
   create: options => new SerialPort(options),
 };
-let serialAdapter = systemSerialAdapter;
 const serialDriverRegistry = [
   { id: 'wch-usb-serial', vendorId: '1A86', name: 'WCH USB 转串口驱动', vendor: '南京沁恒微电子', officialPage: 'https://www.wch-ic.com/downloads/CH341SER_ZIP.html', sourceType: 'manufacturer', verifiedAt: '2026-11-19' },
   { id: 'silabs-cp210x', vendorId: '10C4', name: 'CP210x USB 转 UART VCP 驱动', vendor: 'Silicon Labs', officialPage: 'https://www.silabs.com/developer-tools/usb-to-uart-bridge-vcp-drivers', sourceType: 'manufacturer', verifiedAt: '2026-11-19' },
@@ -308,9 +308,7 @@ const systemFilePickerAdapter = {
 };
 
 export function configureSerialAdapter(adapter) {
-  if (adapter == null) { serialAdapter = systemSerialAdapter; return; }
-  if (typeof adapter.list !== 'function' || typeof adapter.create !== 'function') throw new Error('Serial adapter must provide list() and create()');
-  serialAdapter = adapter;
+  serialSessionService.configureAdapter(adapter || systemSerialAdapter);
 }
 
 export function configureSerialDriverAdapter(adapter) {
@@ -466,9 +464,7 @@ const proxyRequest = createForwardProxy({
 });
 
 const networkSessions = new Map();
-const serialSessions = new Map();
 const installJobs = new Map();
-let restoringSerialSessions = false;
 const fileSelectionService = createFileSelectionService({
   picker: systemFilePickerAdapter,
   maxSelections: MAX_FILE_SELECTIONS,
@@ -477,6 +473,12 @@ const fileSelectionService = createFileSelectionService({
   ttlMs: FILE_SELECTION_TTL_MS,
 });
 const elfAnalysisService = createElfAnalysisService({ getSelection: fileSelectionService.getSelection });
+const serialSessionService = createSerialSessionService({
+  adapter: systemSerialAdapter,
+  stateFile: SERIAL_STATE_FILE,
+  maxSessions: MAX_SERIAL_SESSIONS,
+  maxEvents: MAX_NETWORK_EVENTS,
+});
 const buildService = createBuildService({
   createSelection: fileSelectionService.createSelection,
   maxHashJobs: MAX_ARTIFACT_HASH_JOBS,
@@ -485,12 +487,13 @@ const buildService = createBuildService({
 
 export { createBuildCommand, parseBuildDiagnostic };
 export { scanProjectDirectory };
+export { receiveSerialData, validateSerialOptions };
 export const authorizeBuildArtifact = (job, indexValue) => buildService.authorizeArtifact(job, indexValue);
 export const hashBuildArtifact = (job, indexValue) => buildService.hashArtifact(job, indexValue);
 
 const agentRouter = new AgentRouter().register({
   id: 'agent.status', method: 'GET', path: '/api/agent/status',
-  handler: async ({ res }) => jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessions.size, networkSessions: networkSessions.size, buildJobs: buildService.size(), capabilities: listAgentCapabilities(process.platform) }),
+  handler: async ({ res }) => jsonRes(res, 200, { available: true, name: 'EmbedKit Local Agent', version: AGENT_VERSION, protocolVersion: AGENT_PROTOCOL_VERSION, uptimeSeconds: Math.floor(process.uptime()), serialSessions: serialSessionService.size(), networkSessions: networkSessions.size, buildJobs: buildService.size(), capabilities: listAgentCapabilities(process.platform) }),
 });
 registerAiServiceRoutes(agentRouter, { jsonResponse: jsonRes, detectServers, proxyRequest });
 registerPartRoutes(agentRouter, { jsonResponse: jsonRes, discoverDocuments: discoverOfficialPartDocuments, readDocument: readOfficialPartDocument, readPartDetails: getChipDetails, maxDocumentResults: PART_DOCUMENT_MAX_RESULTS });
@@ -539,23 +542,23 @@ registerBuildArtifactRoutes(agentRouter, {
 registerSerialSystemRoutes(agentRouter, {
   jsonResponse: jsonRes,
   readJsonBody: readJSONBody,
-  status: () => ({ available: true, activeSessions: serialSessions.size, maxSessions: MAX_SERIAL_SESSIONS }),
-  listPorts: listSerialPorts,
+  status: () => ({ available: true, activeSessions: serialSessionService.size(), maxSessions: serialSessionService.maxSessions }),
+  listPorts: serialSessionService.listPorts,
   scanDrivers: scanSerialDriverDevices,
   installDriver: installSelectedSerialDriver,
 });
 registerSerialSessionRoutes(agentRouter, {
   jsonResponse: jsonRes,
   readJsonBody: readJSONBody,
-  listSessions: () => [...serialSessions.values()],
-  getSession: id => serialSessions.get(id),
-  createSession: createSerialSession,
-  publicSession: publicSerialSession,
+  listSessions: serialSessionService.listSessions,
+  getSession: serialSessionService.getSession,
+  createSession: serialSessionService.createSession,
+  publicSession: serialSessionService.publicSession,
   decodePayload: decodeNetworkPayload,
-  pushEvent: pushSerialEvent,
-  persistSessions: persistSerialSessions,
-  closeSession: closeSerialSession,
-  removeSession: id => serialSessions.delete(id),
+  pushEvent: serialSessionService.pushEvent,
+  persistSessions: serialSessionService.persist,
+  closeSession: serialSessionService.closeSession,
+  removeSession: serialSessionService.removeSession,
 });
 registerNetworkSessionRoutes(agentRouter, {
   jsonResponse: jsonRes,
@@ -574,31 +577,6 @@ registerNetworkSessionRoutes(agentRouter, {
   removeSession: id => networkSessions.delete(id),
 });
 
-async function persistSerialSessions() {
-  const sessions = [...serialSessions.values()].filter(session => session.state === 'connected').map(({ path, baudRate, dataBits, stopBits, parity, flowControl, dtr, rts, frameMode, frameGapMs }) => ({ path, baudRate, dataBits, stopBits, parity, flowControl, dtr, rts, frameMode, frameGapMs }));
-  try { await mkdir(dirname(SERIAL_STATE_FILE), { recursive: true }); await writeFile(SERIAL_STATE_FILE, JSON.stringify({ version: 1, sessions }, null, 2), 'utf8'); }
-  catch (error) { console.warn(`Unable to save serial sessions: ${error.message}`); }
-}
-
-async function restoreSerialSessions() {
-  let saved;
-  try { saved = JSON.parse(await readFile(SERIAL_STATE_FILE, 'utf8')); }
-  catch (error) { if (error.code !== 'ENOENT') console.warn(`Unable to read saved serial sessions: ${error.message}`); return; }
-  if (!Array.isArray(saved?.sessions)) return;
-  let failures = 0;
-  restoringSerialSessions = true;
-  for (const options of saved.sessions.slice(0, MAX_SERIAL_SESSIONS)) {
-    let restored = false, lastError;
-    for (let attempt = 1; attempt <= 8 && !restored; attempt += 1) {
-      try { const { session } = await createSerialSession(options); pushSerialEvent(session, 'system', '已自动恢复上次串口会话'); restored = true; }
-      catch (error) { lastError = error; if (attempt < 8) await new Promise(resolve => setTimeout(resolve, 500)); }
-    }
-    if (!restored) { failures += 1; console.warn(`Unable to restore serial session ${options?.path || ''}: ${lastError?.message || 'unknown error'}`); }
-  }
-  restoringSerialSessions = false;
-  if (!failures) await persistSerialSessions();
-}
-
 async function persistNetworkSessions() {
   const sessions = [...networkSessions.values()].filter(session => session.state !== 'closed').map(({ type, mode, host, port, localPort, connectTimeoutMs, frameMode, frameGapMs }) => ({ type, mode, host, port, localPort, connectTimeoutMs, frameMode, frameGapMs }));
   try { await mkdir(dirname(NETWORK_STATE_FILE), { recursive: true }); await writeFile(NETWORK_STATE_FILE, JSON.stringify({ version: 1, sessions }, null, 2), 'utf8'); }
@@ -615,99 +593,6 @@ async function restoreNetworkSessions() {
     catch (error) { console.warn(`Unable to restore network session ${options?.type || ''} ${options?.host || ''}:${options?.port || ''}: ${error.message}`); }
   }
   await persistNetworkSessions();
-}
-
-export function validateSerialOptions(options = {}) {
-  const path = String(options.path || '').trim();
-  if (!path || path.length > 260 || /[\r\n\0]/.test(path)) throw new Error('Invalid serial port path');
-  const baudRate = Number(options.baudRate ?? 115200), dataBits = Number(options.dataBits ?? 8), stopBits = Number(options.stopBits ?? 1);
-  const parity = options.parity || 'none', flowControl = options.flowControl || 'none';
-  const frameMode = options.frameMode || 'auto', frameGapMs = Number(options.frameGapMs ?? 30);
-  if (!Number.isInteger(baudRate) || baudRate < 50 || baudRate > 12000000) throw new Error('Invalid serial baud rate');
-  if (![5, 6, 7, 8].includes(dataBits)) throw new Error('Serial data bits must be 5, 6, 7 or 8');
-  if (![1, 1.5, 2].includes(stopBits)) throw new Error('Serial stop bits must be 1, 1.5 or 2');
-  if (!['none', 'even', 'odd', 'mark', 'space'].includes(parity)) throw new Error('Invalid serial parity');
-  if (!['none', 'hardware'].includes(flowControl)) throw new Error('Invalid serial flow control');
-  if (!['auto', 'line', 'idle', 'raw'].includes(frameMode)) throw new Error('Invalid serial frame mode');
-  if (!Number.isFinite(frameGapMs) || frameGapMs < 5 || frameGapMs > 2000) throw new Error('Serial frame gap must be between 5 and 2000 ms');
-  return { path, baudRate, dataBits, stopBits, parity, flowControl, dtr: options.dtr !== false, rts: options.rts === true, frameMode, frameGapMs };
-}
-
-function pushSerialEvent(session, direction, bufferOrText) {
-  const buffer = Buffer.isBuffer(bufferOrText) ? bufferOrText : null;
-  session.lastEventId += 1;
-  session.events.push({ id: session.lastEventId, timestamp: new Date().toISOString(), direction, text: buffer ? buffer.toString('utf8') : String(bufferOrText), hex: buffer ? buffer.toString('hex').match(/.{1,2}/g)?.join(' ').toUpperCase() || '' : '', byteLength: buffer?.length || Buffer.byteLength(String(bufferOrText)) });
-  if (session.events.length > MAX_NETWORK_EVENTS) session.events.splice(0, session.events.length - MAX_NETWORK_EVENTS);
-  if (direction === 'tx' && buffer) session.txBytes += buffer.length;
-}
-
-function publicSerialSession(session, after = 0) {
-  const { port: _port, rxBuffer: _rxBuffer, rxTimer: _rxTimer, ...safe } = session;
-  return { ...safe, events: session.events.filter(event => event.id > after) };
-}
-
-function flushSerialReceive(session) {
-  if (!session.rxBuffer.length) return;
-  const frame = session.rxBuffer; session.rxBuffer = Buffer.alloc(0); pushSerialEvent(session, 'rx', frame);
-}
-
-export function receiveSerialData(session, data) {
-  session.rxBytes += data.length;
-  if (session.frameMode === 'raw') { pushSerialEvent(session, 'rx', data); return; }
-  session.rxBuffer = Buffer.concat([session.rxBuffer, data]);
-  if (session.frameMode === 'auto' || session.frameMode === 'line') {
-    for (;;) {
-      const cr = session.rxBuffer.indexOf(13), lf = session.rxBuffer.indexOf(10);
-      const at = cr < 0 ? lf : lf < 0 ? cr : Math.min(cr, lf);
-      if (at < 0) break;
-      const frame = session.rxBuffer.subarray(0, at); let next = at;
-      while (session.rxBuffer[next] === 10 || session.rxBuffer[next] === 13) next += 1;
-      session.rxBuffer = session.rxBuffer.subarray(next);
-      if (frame.length) pushSerialEvent(session, 'rx', frame);
-    }
-  }
-  if (session.rxTimer) { clearTimeout(session.rxTimer); session.rxTimer = null; }
-  if ((session.frameMode === 'auto' || session.frameMode === 'idle') && session.rxBuffer.length) session.rxTimer = setTimeout(() => { session.rxTimer = null; flushSerialReceive(session); }, session.frameGapMs);
-}
-
-async function listSerialPorts() {
-  return (await serialAdapter.list()).map(port => ({ path: port.path, manufacturer: port.manufacturer || '', serialNumber: port.serialNumber || '', vendorId: port.vendorId || '', productId: port.productId || '', pnpId: port.pnpId || '', friendlyName: port.friendlyName || port.path }));
-}
-
-async function createSerialSession(input) {
-  const options = validateSerialOptions(input);
-  const available = await listSerialPorts();
-  if (!available.some(port => port.path.toLowerCase() === options.path.toLowerCase())) throw new Error(`Serial port is not available: ${options.path}`);
-  const existing = [...serialSessions.values()].find(session => session.path.toLowerCase() === options.path.toLowerCase() && session.state === 'connected');
-  if (existing) {
-    if (existing.baudRate !== options.baudRate || existing.dataBits !== options.dataBits || existing.stopBits !== options.stopBits || existing.parity !== options.parity || existing.flowControl !== options.flowControl || existing.frameMode !== options.frameMode || existing.frameGapMs !== options.frameGapMs) throw new Error(`${options.path} is already open with different settings`);
-    return { session: existing, reused: true };
-  }
-  if (serialSessions.size >= MAX_SERIAL_SESSIONS) throw new Error(`At most ${MAX_SERIAL_SESSIONS} serial sessions may be open`);
-  const id = randomUUID(), port = serialAdapter.create({ path: options.path, baudRate: options.baudRate, dataBits: options.dataBits, stopBits: options.stopBits, parity: options.parity, rtscts: options.flowControl === 'hardware', autoOpen: false });
-  const session = { id, ...options, state: 'connecting', events: [], lastEventId: 0, rxBytes: 0, txBytes: 0, openedAt: new Date().toISOString(), port, rxBuffer: Buffer.alloc(0), rxTimer: null };
-  serialSessions.set(id, session); pushSerialEvent(session, 'system', `正在打开 ${options.path} · ${options.baudRate} ${options.dataBits}${options.parity === 'none' ? 'N' : options.parity[0].toUpperCase()}${options.stopBits}`);
-  port.on('data', data => receiveSerialData(session, data));
-  port.on('error', error => { session.state = 'error'; pushSerialEvent(session, 'system', `串口错误：${error.message}`); });
-  port.on('close', error => { if (session.state !== 'closed') { session.state = 'closed'; pushSerialEvent(session, 'system', error ? `串口异常关闭：${error.message}` : '串口已关闭'); } });
-  try {
-    await new Promise((resolve, reject) => port.open(error => error ? reject(error) : resolve()));
-    session.state = 'connected';
-    try { await new Promise((resolve, reject) => port.set({ dtr: options.dtr, rts: options.rts }, error => error ? reject(error) : resolve())); }
-    catch (error) { pushSerialEvent(session, 'system', `控制信号未应用，串口收发继续运行：${error.message}`); }
-    pushSerialEvent(session, 'system', `${options.path} 已连接`);
-    if (!restoringSerialSessions) await persistSerialSessions();
-    return { session, reused: false };
-  } catch (error) {
-    session.state = 'error'; pushSerialEvent(session, 'system', `打开失败：${error.message}`); serialSessions.delete(id); try { if (port.isOpen) port.close(); } catch { /* already closed */ } throw error;
-  }
-}
-
-async function closeSerialSession(session) {
-  if (!session || session.state === 'closed') return;
-  session.state = 'closed'; if (session.rxTimer) { clearTimeout(session.rxTimer); session.rxTimer = null; } flushSerialReceive(session);
-  if (session.port.isOpen) await new Promise(resolve => session.port.close(() => resolve()));
-  pushSerialEvent(session, 'system', '串口会话已关闭');
 }
 
 export function validateHostAndPort(host, port) {
@@ -1400,7 +1285,7 @@ export function startServer({ detectAi = true, restoreSerial = true, restoreNetw
     const listeningHost = typeof address === 'object' && address ? address.address : host;
     const listeningPort = typeof address === 'object' && address ? address.port : port;
     console.log(`\n✅ EmbedKit local proxy running on http://${listeningHost}:${listeningPort}`);
-    if (restoreSerial) await restoreSerialSessions();
+    if (restoreSerial) await serialSessionService.restore();
     if (restoreNetwork) await restoreNetworkSessions();
     if (!detectAi) return;
     const servers = await detectServers();
