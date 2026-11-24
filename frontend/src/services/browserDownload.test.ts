@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BrowserDownloadError, downloadBrowserText, safeDownloadFileName } from './browserDownload';
+import { BrowserDownloadError, downloadBrowserBytes, downloadBrowserText, safeDownloadFileName } from './browserDownload';
 
 describe('browser download service', () => {
   it.each([
@@ -30,6 +30,12 @@ describe('browser download service', () => {
   it('classifies object URL creation failures', () => {
     expect(() => downloadBrowserText('x', 'x.txt', undefined, { createObjectUrl: () => { throw new Error('blocked'); } }))
       .toThrow(expect.objectContaining({ code: 'create_failed' }));
+  });
+
+  it('downloads binary evidence without exposing the source buffer', async () => {
+    let exported: Blob | null = null;
+    downloadBrowserBytes(Uint8Array.from([0xde, 0xad]), 'capture.bin', undefined, { createObjectUrl: blob => { exported = blob; return 'blob:bytes'; }, createAnchor: () => ({ href: '', download: '', click: vi.fn() }), revokeObjectUrl: vi.fn() });
+    expect(Array.from(new Uint8Array(await (exported as unknown as Blob).arrayBuffer()))).toEqual([0xde, 0xad]);
   });
 
   it('releases the object URL when the browser rejects the click', () => {

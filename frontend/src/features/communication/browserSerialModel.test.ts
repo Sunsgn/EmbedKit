@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { browserSerialPortName, filterBrowserSerialEntries, isBrowserSerialChooserCancellation, isRecoverableBrowserSerialReadError, loadBrowserSerialSettings, openBrowserSerialPort, parseBrowserSerialHex, unescapeBrowserSerialText } from './browserSerialModel';
+import { BROWSER_SERIAL_SETTINGS_KEY, browserSerialPortName, filterBrowserSerialEntries, isBrowserSerialChooserCancellation, isRecoverableBrowserSerialReadError, loadBrowserSerialSettings, openBrowserSerialPort, parseBrowserSerialHex, saveBrowserSerialSettings, unescapeBrowserSerialText } from './browserSerialModel';
 
 describe('browser serial model', () => {
   it('loads versioned settings defensively and parses terminal input deterministically', () => {
@@ -7,6 +7,9 @@ describe('browser serial model', () => {
     expect(parseBrowserSerialHex('0xDE AD-BE:EF')).toEqual(Uint8Array.from([0xde, 0xad, 0xbe, 0xef]));
     expect(() => parseBrowserSerialHex('ABC')).toThrow(/完整字节/);
     expect(unescapeBrowserSerialText('AT\\r\\n\\x4F\\u004B')).toBe('AT\r\nOK');
+    const values = new Map<string, string>();
+    saveBrowserSerialSettings({ baud: '115200' }, { setItem: (key, value) => values.set(key, value) });
+    expect(JSON.parse(values.get(BROWSER_SERIAL_SETTINGS_KEY)!)).toEqual({ baud: '115200', version: 3 });
   });
 
   it('filters RX/TX evidence and formats stable USB identity labels', () => {

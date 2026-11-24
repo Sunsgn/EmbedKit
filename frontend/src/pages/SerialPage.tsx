@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Braces, Check, Clock3, Download, FileUp, Pause, Pencil, Play, Plus, Radio, Search, Send, Settings, Square, Trash2, Wifi, WifiOff, X } from 'lucide-react';
 import { COMMUNICATION_CAPTURE_MAX_BYTES, createCommunicationCapture, writePendingCommunicationCapture, type CaptureEventInput } from '../services/communicationCapture';
 import { mayMergeSerialReceive } from '../services/serialDisplay';
-import { BROWSER_SERIAL_SETTINGS_KEY as settingsKey, browserSerialPortName as portName, drainBrowserSerialBuffer as drainRuntimeBuffer, filterBrowserSerialEntries as visibleEntries, formatBrowserSerialTime as now, isBrowserSerialChooserCancellation as isPortChooserCancellation, isRecoverableBrowserSerialReadError as isRecoverableSerialReadError, loadBrowserSerialSettings as loadSettings, openBrowserSerialPort as openPort, parseBrowserSerialHex as parseHex, unescapeBrowserSerialText as unescapeText } from '../features/communication/browserSerialModel';
+import { browserSerialPortName as portName, drainBrowserSerialBuffer as drainRuntimeBuffer, filterBrowserSerialEntries as visibleEntries, formatBrowserSerialTime as now, isBrowserSerialChooserCancellation as isPortChooserCancellation, isRecoverableBrowserSerialReadError as isRecoverableSerialReadError, loadBrowserSerialSettings as loadSettings, openBrowserSerialPort as openPort, parseBrowserSerialHex as parseHex, saveBrowserSerialSettings as saveSettings, unescapeBrowserSerialText as unescapeText } from '../features/communication/browserSerialModel';
 import { loadCommunicationShortcutLimit as loadShortcutLimit, loadCommunicationShortcuts as loadShortcuts, saveCommunicationShortcutLimit, saveCommunicationShortcuts } from '../features/communication/communicationShortcuts';
 import { createBrowserSerialCsvLog, createBrowserSerialRawRx, createBrowserSerialTextLog } from '../features/communication/browserSerialExport';
-import { downloadBrowserBlob, downloadBrowserText } from '../services/browserDownload';
+import { downloadBrowserBytes, downloadBrowserText } from '../services/browserDownload';
 import { formatHex as hex } from '../utils/embeddedTools';
 
 type Parity = 'none' | 'even' | 'odd';
@@ -58,7 +58,7 @@ export default function SerialPage() {
   useEffect(() => { modeRef.current = frameMode; }, [frameMode]);
   useEffect(() => { gapRef.current = Math.max(5, Math.min(2000, Number(frameGap) || 30)); }, [frameGap]);
   useEffect(() => { lengthRef.current = Math.max(1, Math.min(4096, Number(frameLength) || 1)); }, [frameLength]);
-  useEffect(() => { localStorage.setItem(settingsKey, JSON.stringify({ version: 3, baud, lineEnding, frameMode, frameGap, frameLength, rxHex, leftRxHex, rightRxHex, txHex })); }, [baud, frameGap, frameLength, frameMode, leftRxHex, lineEnding, rightRxHex, rxHex, txHex]);
+  useEffect(() => { saveSettings({ baud, lineEnding, frameMode, frameGap, frameLength, rxHex, leftRxHex, rightRxHex, txHex }); }, [baud, frameGap, frameLength, frameMode, leftRxHex, lineEnding, rightRxHex, rxHex, txHex]);
   useEffect(() => { saveCommunicationShortcuts(shortcuts.map(shortcut => ({ ...shortcut, intervalMs: shortcut.intervalMs ?? 1000 }))); }, [shortcuts]);
   useEffect(() => { saveCommunicationShortcutLimit(shortcutLimit); }, [shortcutLimit]);
 
@@ -220,7 +220,7 @@ export default function SerialPage() {
   const shown = useMemo(() => visibleEntries(leftPane, filter, leftDisplayHex, showRx, showTx), [filter, leftDisplayHex, leftPane, showRx, showTx]);
   const secondaryShown = useMemo(() => visibleEntries(rightPane, filter, rightDisplayHex, showRx, showTx), [filter, rightDisplayHex, rightPane, showRx, showTx]);
   const save = (format: 'txt' | 'csv') => { if (!active?.entries.length) return; const content = format === 'csv' ? createBrowserSerialCsvLog(active) : createBrowserSerialTextLog(active, activeDisplayHex); downloadBrowserText(content, `serial-${active.id}.${format}`, format === 'csv' ? 'text/csv;charset=utf-8' : 'text/plain;charset=utf-8'); };
-  const saveRaw = () => { if (!active) return; const bytes = createBrowserSerialRawRx(rawCaptures.current.get(active.id)?.events ?? []); if (bytes.length) downloadBrowserBlob(new Blob([bytes.slice().buffer], { type: 'application/octet-stream' }), `serial-${active.id}-rx.bin`); };
+  const saveRaw = () => { if (!active) return; const bytes = createBrowserSerialRawRx(rawCaptures.current.get(active.id)?.events ?? []); if (bytes.length) downloadBrowserBytes(bytes, `serial-${active.id}-rx.bin`); };
   const analyzeRx = () => {
     if (!active) return;
     try {

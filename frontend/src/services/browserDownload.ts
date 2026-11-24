@@ -71,3 +71,9 @@ export function downloadBrowserBlob(blob: Blob, fileName: string, overrides: Par
 export function downloadBrowserText(content: string, fileName: string, type = 'text/plain;charset=utf-8', overrides: Partial<BrowserDownloadDependencies> = {}) {
   return downloadBrowserBlob(new Blob([content], { type }), fileName, overrides);
 }
+
+export function downloadBrowserBytes(bytes: Uint8Array, fileName: string, type = 'application/octet-stream', overrides: Partial<BrowserDownloadDependencies> = {}) {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return downloadBrowserBlob(new Blob([buffer], { type }), fileName, overrides);
+}

@@ -21,6 +21,10 @@ export function loadBrowserSerialSettings(storage: Pick<Storage, 'getItem'> = lo
   } catch { return {}; }
 }
 
+export function saveBrowserSerialSettings(value: Record<string, string | boolean | number>, storage: Pick<Storage, 'setItem'> = localStorage) {
+  storage.setItem(BROWSER_SERIAL_SETTINGS_KEY, JSON.stringify({ ...value, version: 3 }));
+}
+
 export function formatBrowserSerialTime(value = new Date()) {
   return `${value.toLocaleTimeString('zh-CN', { hour12: false })}.${String(value.getMilliseconds()).padStart(3, '0')}`;
 }
