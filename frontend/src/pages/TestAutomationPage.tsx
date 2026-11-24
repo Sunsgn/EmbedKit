@@ -72,6 +72,7 @@ import { loadSerialConfigs, loadTestSuites as loadSuites, saveSerialConfigs, sav
 import { assignRuntimeVariable, captureResponseVariable, evaluateIncomingResponse } from "../features/test-automation/responseEvaluation";
 import { createPortableTestRunJsonReport, createTestRunCsvReport, createTestRunHtmlReport, createTestRunJunitReport } from "../features/test-automation/testRunReports";
 import { runTestCaseEngine } from "../features/test-automation/runCaseEngine";
+import { createPortableTestSuiteJson, parseImportedTestSuite } from "../features/test-automation/suiteTransfer";
 
 interface FirmwareChoice {
   id: string;
@@ -1177,76 +1178,11 @@ export default function TestAutomationPage() {
       },
     ]);
   const exportSuite = () => {
-    const safeSuite = {
-        ...selectedSuite,
-        variables: selectedSuite.variables?.map((variable) =>
-          variable.secret ? { ...variable, value: "" } : variable,
-        ),
-      },
-      payload = {
-        schema: "embedkit.test-suite",
-        version: 1,
-        exportedAt: new Date().toISOString(),
-        suite: safeSuite,
-      };
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(
-      new Blob([JSON.stringify(payload, null, 2)], {
-        type: "application/json",
-      }),
-    );
-    link.download = `embedkit-suite-${Date.now()}.json`;
-    link.click();
-    URL.revokeObjectURL(link.href);
+    downloadBrowserText(createPortableTestSuiteJson(selectedSuite), `embedkit-suite-${Date.now()}.json`, "application/json;charset=utf-8");
   };
   const importSuite = async (file: File) => {
     try {
-      const value = JSON.parse(await file.text()) as {
-          schema?: string;
-          version?: number;
-          suite?: Partial<TestSuite>;
-          name?: string;
-          cases?: TestCase[];
-        },
-        parsed = value.schema ? value.suite : (value as Partial<TestSuite>);
-      if (
-        value.schema &&
-        (value.schema !== "embedkit.test-suite" || value.version !== 1)
-      )
-        throw new Error("不支持的测试套件版本");
-      if (!parsed?.name || !Array.isArray(parsed.cases))
-        throw new Error("文件不是有效的测试套件");
-      const importedCases = parsed.cases.map((item) => {
-          const channel = sharedFlowChannel(item);
-          return {
-            ...item,
-            id: crypto.randomUUID(),
-            sharedChannel: item.sharedChannel ?? true,
-            channel,
-            lineEnding: isLineEnding(item.lineEnding) ? item.lineEnding : "none",
-            steps: item.steps.map((step) => ({
-              ...createStep(step.type),
-              ...step,
-              lineEnding: isLineEnding(step.lineEnding)
-                ? step.lineEnding
-                : undefined,
-              stage: step.stage ?? "test",
-              channel: item.sharedChannel === false ? step.channel : channel,
-              id: crypto.randomUUID(),
-            })),
-          };
-        }),
-        imported: TestSuite = {
-          id: crypto.randomUUID(),
-          name: `${parsed.name}（导入）`,
-          variables: Array.isArray(parsed.variables)
-            ? parsed.variables.map((variable) => ({
-                ...variable,
-                id: crypto.randomUUID(),
-              }))
-            : [],
-          cases: importedCases,
-        };
+      const imported = parseImportedTestSuite(await file.text());
       setSuites((previous) => [...previous, imported]);
       setSelectedSuiteId(imported.id);
       setSelectedCaseId(imported.cases[0]?.id ?? "");
