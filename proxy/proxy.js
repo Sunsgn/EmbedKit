@@ -5,12 +5,11 @@ import dgram from 'dgram';
 import { SerialPort } from 'serialport';
 import { createHash, randomUUID } from 'crypto';
 import { spawn } from 'child_process';
-import { createReadStream, createWriteStream } from 'fs';
-import { appendFile, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'fs/promises';
+import { createWriteStream } from 'fs';
+import { appendFile, lstat, mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { dirname, isAbsolute, join, relative, resolve } from 'path';
 import { URL, pathToFileURL } from 'url';
-import { analyzeElf, lookupElfAddress, parseElfAddress } from './elf.js';
 import { AGENT_PROTOCOL_VERSION, listAgentCapabilities, validateAgentContract } from '../contracts/agent-api.js';
 import { createHttpBoundary } from './server/http.js';
 import { AgentRouter } from './server/router.js';
@@ -19,6 +18,7 @@ import { createForwardProxy } from './server/forward-proxy.js';
 import { createBuildService, createBuildCommand, parseBuildDiagnostic } from './server/build-service.js';
 import { scanProjectDirectory } from './server/project-scanner.js';
 import { createFileSelectionService } from './server/file-selection-service.js';
+import { createElfAnalysisService } from './server/elf-analysis-service.js';
 import { registerAiServiceRoutes } from './routes/ai-services.js';
 import { registerBuildArtifactRoutes } from './routes/build-artifacts.js';
 import { registerBuildRoutes } from './routes/build.js';
@@ -45,8 +45,6 @@ const MAX_FILE_SELECTIONS = 32;
 const MAX_SELECTED_FILE_BYTES = Number(process.env.EMBEDKIT_MAX_SELECTED_FILE_BYTES || 512 * 1024 * 1024);
 const MAX_FILE_CHUNK_BYTES = 256 * 1024;
 const FILE_SELECTION_TTL_MS = 15 * 60 * 1000;
-const ELF_ANALYSIS_TTL_MS = 15 * 60 * 1000;
-const MAX_ELF_ANALYSES = 8;
 const SOFTWARE_DETECTION_TIMEOUT_MS = 4000;
 const SOFTWARE_VERSION_OUTPUT_LIMIT = 16 * 1024;
 const MAX_INSTALL_JOBS = 20;
@@ -390,69 +388,6 @@ async function scanSelectedProject(selectionId, options) {
   return scanProjectDirectory(selection.path, options);
 }
 
-async function analyzeSelectedElf(id) {
-  const selection = fileSelectionService.getSelection(id, 'file'), info = await stat(selection.path);
-  if (!info.isFile() || info.size !== selection.size) throw new Error('Selected file changed after authorization');
-  const handle = await open(selection.path, 'r');
-  try {
-    const analysis = await analyzeElf({ size: info.size, read: async (offset, length) => {
-      if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 0 || offset + length > info.size) throw new Error('ELF parser requested data outside the selected file');
-      const buffer = Buffer.alloc(length), { bytesRead } = await handle.read(buffer, 0, length, offset);
-      if (bytesRead !== length) throw new Error('Selected ELF file was truncated while reading');
-      return new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead);
-    } });
-    const sha256 = await new Promise((resolveHash, rejectHash) => {
-      const hash = createHash('sha256'), stream = createReadStream(selection.path, { highWaterMark: 256 * 1024 });
-      stream.on('data', chunk => hash.update(chunk)); stream.on('end', () => resolveHash(hash.digest('hex'))); stream.on('error', rejectHash);
-    });
-    const now = Date.now(), analysisId = randomUUID();
-    for (const [cachedId, cached] of elfAnalyses) if (cached.expiresAt <= now) elfAnalyses.delete(cachedId);
-    while (elfAnalyses.size >= MAX_ELF_ANALYSES) elfAnalyses.delete(elfAnalyses.keys().next().value);
-    elfAnalyses.set(analysisId, { analysis, path: selection.path, expiresAt: now + ELF_ANALYSIS_TTL_MS });
-    const { symbols: _symbols, lineRows: _lineRows, ...publicAnalysis } = analysis;
-    return { ...publicAnalysis, sha256, analysisId, expiresAt: new Date(now + ELF_ANALYSIS_TTL_MS).toISOString() };
-  } finally { await handle.close(); }
-}
-
-function lookupAnalyzedElf(id, address) {
-  const cached = elfAnalyses.get(id);
-  if (!cached || cached.expiresAt <= Date.now()) { elfAnalyses.delete(id); throw new Error('ELF analysis is missing or expired; select the file again'); }
-  return lookupElfAddress(cached.analysis, address);
-}
-
-function runDisassembler(executable, args) {
-  return new Promise(resolveRun => {
-    const child = spawn(executable, args, { windowsHide: true, shell: false });
-    let stdout = '', stderr = '', settled = false, timer;
-    const finish = result => { if (settled) return; settled = true; clearTimeout(timer); resolveRun(result); };
-    const append = (current, chunk) => (current + chunk.toString()).slice(0, 256 * 1024);
-    child.stdout.on('data', chunk => { stdout = append(stdout, chunk); });
-    child.stderr.on('data', chunk => { stderr = append(stderr, chunk); });
-    child.on('error', error => finish({ ok: false, error: error.code === 'ENOENT' ? 'not-found' : error.message }));
-    child.on('close', code => finish({ ok: code === 0, stdout, error: code === 0 ? '' : stderr.trim().slice(0, 500) || `exit-${code}` }));
-    timer = setTimeout(() => { child.kill(); finish({ ok: false, error: 'timeout' }); }, 5000);
-  });
-}
-
-async function disassembleAnalyzedElf(id, addressValue, beforeValue, afterValue) {
-  const cached = elfAnalyses.get(id);
-  if (!cached || cached.expiresAt <= Date.now()) { elfAnalyses.delete(id); throw new Error('ELF analysis is missing or expired; select the file again'); }
-  const requested = parseElfAddress(addressValue), normalized = cached.analysis.machineId === 40 ? requested & ~1n : requested;
-  const before = Number(beforeValue ?? 16), after = Number(afterValue ?? 32);
-  if (!Number.isSafeInteger(before) || before < 0 || before > 128 || !Number.isSafeInteger(after) || after < 2 || after > 128) throw new Error('Disassembly byte window is outside the supported range');
-  const start = normalized > BigInt(before) ? normalized - BigInt(before) : 0n, stop = normalized + BigInt(after);
-  const candidates = cached.analysis.machineId === 40 ? ['arm-none-eabi-objdump', 'llvm-objdump', 'objdump'] : cached.analysis.machineId === 243 ? ['riscv-none-elf-objdump', 'riscv64-unknown-elf-objdump', 'llvm-objdump', 'objdump'] : ['llvm-objdump', 'objdump'];
-  const attempts = [];
-  for (const executable of candidates) {
-    const run = await runDisassembler(executable, ['-d', `--start-address=0x${start.toString(16)}`, `--stop-address=0x${stop.toString(16)}`, cached.path]);
-    if (!run.ok) { attempts.push(`${executable}: ${run.error}`); continue; }
-    const instructions = run.stdout.split(/\r?\n/).map(line => line.match(/^\s*([0-9a-f]+):\s+((?:[0-9a-f]{2,8}\s+)+)\s*([^\s]+)\s*(.*)$/i)).filter(Boolean).slice(0, 128).map(match => { const address = BigInt(`0x${match[1]}`); return { address: `0x${address.toString(16).toUpperCase()}`, bytes: match[2].trim().replace(/\s+/g, ' '), mnemonic: match[3], operands: match[4].trim(), isTarget: address === normalized }; });
-    if (!instructions.length) { attempts.push(`${executable}: no-instructions`); continue; }
-    return { available: true, requestedAddress: `0x${requested.toString(16).toUpperCase()}`, normalizedAddress: `0x${normalized.toString(16).toUpperCase()}`, tool: executable, instructions, warnings: instructions.some(item => item.isTarget) ? [] : ['反汇编输出没有精确覆盖目标地址；请核对指令边界和目标架构。'] };
-  }
-  return { available: false, requestedAddress: `0x${requested.toString(16).toUpperCase()}`, normalizedAddress: `0x${normalized.toString(16).toUpperCase()}`, tool: null, instructions: [], warnings: ['本机未找到能够解析该 ELF 架构的 objdump；源码和符号定位仍然可用。', ...attempts.slice(0, 4)] };
-}
-
 function installAgentLogging() {
   if (agentLoggingInstalled) return;
   agentLoggingInstalled = true;
@@ -532,7 +467,6 @@ const proxyRequest = createForwardProxy({
 
 const networkSessions = new Map();
 const serialSessions = new Map();
-const elfAnalyses = new Map();
 const installJobs = new Map();
 let restoringSerialSessions = false;
 const fileSelectionService = createFileSelectionService({
@@ -542,6 +476,7 @@ const fileSelectionService = createFileSelectionService({
   maxChunkBytes: MAX_FILE_CHUNK_BYTES,
   ttlMs: FILE_SELECTION_TTL_MS,
 });
+const elfAnalysisService = createElfAnalysisService({ getSelection: fileSelectionService.getSelection });
 const buildService = createBuildService({
   createSelection: fileSelectionService.createSelection,
   maxHashJobs: MAX_ARTIFACT_HASH_JOBS,
@@ -569,9 +504,9 @@ registerFileAnalysisRoutes(agentRouter, {
   revokeSelection: fileSelectionService.revoke,
   getSelection: fileSelectionService.getSelection,
   readChunk: fileSelectionService.readChunk,
-  analyzeElf: analyzeSelectedElf,
-  lookupElf: lookupAnalyzedElf,
-  disassembleElf: disassembleAnalyzedElf,
+  analyzeElf: elfAnalysisService.analyze,
+  lookupElf: elfAnalysisService.lookup,
+  disassembleElf: elfAnalysisService.disassemble,
 });
 registerEnvironmentRoutes(agentRouter, {
   jsonResponse: jsonRes,
