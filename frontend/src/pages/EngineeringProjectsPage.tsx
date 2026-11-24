@@ -3,32 +3,19 @@ import { Archive, BadgeCheck, BookOpen, Boxes, Cpu, Download, FileCode2, FileUp,
 import { useNavigate } from 'react-router-dom';
 import { getAgentStatus, hasAgentCapability } from '../services/agentClient';
 import { deleteEngineeringProject, listEngineeringProjects, saveEngineeringProject } from '../services/productStorage';
-import { createEngineeringProject, ENGINEERING_PROJECT_SCHEMA_VERSION, type EngineeringProject, type ProjectEnvironmentRequirement, type ProjectFeature } from '../types/product';
-import { createEnvironmentRequirement, createProjectFeature, normalizeEngineeringProject } from '../services/projectModel';
+import { createEngineeringProject, type EngineeringProject, type ProjectEnvironmentRequirement, type ProjectFeature } from '../types/product';
+import { createEnvironmentRequirement, createProjectFeature } from '../services/projectModel';
 import { selectLocalDirectory, revokeLocalPath } from '../services/localFiles';
-import { scanSelectedProject, type ProjectScanResult } from '../services/projectScan';
+import { scanSelectedProject } from '../services/projectScan';
 import { deleteProjectLocalBinding, getProjectLocalBinding, saveProjectLocalBinding } from '../services/projectLocalBindings';
+import { createEngineeringProjectArchive, ENGINEERING_PROJECT_ARCHIVE_MAX_BYTES, parseEngineeringProjectArchive } from '../features/project/engineeringProjectArchive';
+import { inferProjectEnvironmentRequirements } from '../features/project/projectEnvironmentInference';
+import { downloadBrowserText } from '../services/browserDownload';
 
 type AgentState = 'checking' | 'ready' | 'offline' | 'incompatible';
 type WorkspaceTab = 'overview' | 'structure' | 'details';
 const joined = (values?: string[]) => values?.length ? values.join(' · ') : '未识别';
 const formatSize = (value: number) => value < 1024 ? `${value} B` : value < 1024 * 1024 ? `${(value / 1024).toFixed(1)} KiB` : `${(value / 1024 / 1024).toFixed(1)} MiB`;
-
-function inferredRequirements(scan: ProjectScanResult): ProjectEnvironmentRequirement[] {
-  const rules: Record<string, { id: string; name: string }> = {
-    CMake: { id: 'build.cmake', name: 'CMake' }, Make: { id: 'build.make', name: 'Make' }, Meson: { id: 'build.meson', name: 'Meson' }, PlatformIO: { id: 'build.platformio', name: 'PlatformIO' },
-    'Keil µVision': { id: 'ide.keil.uvision', name: 'Keil µVision' }, 'IAR Embedded Workbench': { id: 'ide.iar.ew', name: 'IAR Embedded Workbench' },
-  };
-  return [...scan.recognition.buildSystems, ...scan.recognition.ides].flatMap(value => {
-    const rule = rules[value]; if (!rule) return [];
-    const evidence = scan.recognition.evidence.find(item => item.value === value);
-    return [{ ...createEnvironmentRequirement(rule.name), capabilityId: rule.id, source: 'deterministic-analysis' as const, evidence: evidence?.path ? `${evidence.path}：${evidence.detail}` : '工程目录扫描结果' }];
-  }).filter((item, index, all) => all.findIndex(other => other.capabilityId === item.capabilityId) === index);
-}
-
-function portableProject(project: EngineeringProject): EngineeringProject {
-  return { ...project, pathStatus: 'unverified' };
-}
 
 export default function EngineeringProjectsPage() {
   const navigate = useNavigate();
@@ -56,7 +43,7 @@ export default function EngineeringProjectsPage() {
       selectionId = selection.selectionId; setMessage('正在有界扫描工程目录…');
       const scan = await scanSelectedProject(selectionId), now = new Date().toISOString();
       const base = target ?? createEngineeringProject(scan.rootName), existingCapabilities = new Set((base.environmentRequirements ?? []).map(item => item.capabilityId));
-      const requirements = [...(base.environmentRequirements ?? []), ...inferredRequirements(scan).filter(item => !existingCapabilities.has(item.capabilityId))];
+      const requirements = [...(base.environmentRequirements ?? []), ...inferProjectEnvironmentRequirements(scan).filter(item => !existingCapabilities.has(item.capabilityId))];
       const next: EngineeringProject = { ...base, name: target?.name || scan.rootName, source: { kind: 'local-directory', displayName: scan.rootName }, pathStatus: 'available', lastOpenedAt: now, recognition: scan.recognition, inventory: scan.inventory, artifacts: scan.artifacts, environmentRequirements: requirements, chipModel: base.chipModel || scan.recognition.chipCandidates[0] || '', updatedAt: now };
       await commit(next, scan.inventory.truncated ? '扫描完成，但已达到资源上限；请查看警告' : '工程已识别并保存');
       saveProjectLocalBinding({ projectId: next.id, path: selection.path, verifiedAt: now }); setSelectedId(next.id); setTab('overview');
@@ -66,15 +53,11 @@ export default function EngineeringProjectsPage() {
 
   const addManualProject = () => { const created = createEngineeringProject(`工程项目 ${projects.length + 1}`); void commit(created, '已创建空白工程档案'); setSelectedId(created.id); setTab('details'); };
   const removeProject = async () => { if (!project || !window.confirm(`删除工程项目“${project.name}”？本地源码不会被删除。`)) return; await deleteEngineeringProject(project.id); deleteProjectLocalBinding(project.id); const rest = projects.filter(item => item.id !== project.id); setProjects(rest); setSelectedId(rest[0]?.id ?? ''); setMessage('工程记录已删除，本地目录未改变'); };
-  const downloadProject = () => { if (!project) return; const payload = { schema: 'embedkit.engineering-project', version: ENGINEERING_PROJECT_SCHEMA_VERSION, exportedAt: new Date().toISOString(), project: portableProject(project), privacy: { excluded: ['本机绝对路径', '目录授权令牌', '源码与构建产物内容'] } }; const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' })); link.download = `embedkit-project-${project.name || project.id}.json`; link.click(); URL.revokeObjectURL(link.href); };
+  const downloadProject = () => { if (project) downloadBrowserText(createEngineeringProjectArchive(project), `embedkit-project-${project.name || project.id}.json`, 'application/json;charset=utf-8'); };
   const importProject = async (file: File) => {
     try {
-      if (file.size > 4 * 1024 * 1024) throw new Error('工程档案超过 4 MiB 上限');
-      const payload = JSON.parse(await file.text()) as { schema?: string; version?: number; project?: unknown };
-      const legacy = payload.schema === 'embedkit.device-project' && [1, 2].includes(payload.version ?? 0), current = payload.schema === 'embedkit.engineering-project' && [3, 4].includes(payload.version ?? 0);
-      if (!legacy && !current) throw new Error('不是受支持的工程档案文件');
-      const normalized = normalizeEngineeringProject(payload.project); if (!normalized) throw new Error('工程档案内容无效或超过资源上限');
-      const now = new Date().toISOString(), imported: EngineeringProject = { ...normalized, id: crypto.randomUUID(), name: `${normalized.name}（导入）`, pathStatus: 'unverified', createdAt: now, updatedAt: now, lastOpenedAt: now, features: (normalized.features ?? []).map(item => ({ ...item, id: crypto.randomUUID(), updatedAt: now })), environmentRequirements: (normalized.environmentRequirements ?? []).map(item => ({ ...item, id: crypto.randomUUID() })) };
+      if (file.size > ENGINEERING_PROJECT_ARCHIVE_MAX_BYTES) throw new Error('工程档案超过 4 MiB 上限');
+      const { project: imported, legacy } = parseEngineeringProjectArchive(await file.text());
       await commit(imported, legacy ? '旧项目已导入；设备与通道配置未迁移，本地目录需重新授权' : '工程档案导入成功；本机目录需重新定位'); setSelectedId(imported.id);
     } catch (reason) { setMessage(`导入失败：${reason instanceof Error ? reason.message : String(reason)}`); }
   };
