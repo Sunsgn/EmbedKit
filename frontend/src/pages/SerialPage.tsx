@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Braces, Check, Clock3, Download, FileUp, Pause, Pencil, Play, Plus, Radio, Search, Send, Settings, Square, Trash2, Wifi, WifiOff, X } from 'lucide-react';
 import { COMMUNICATION_CAPTURE_MAX_BYTES, createCommunicationCapture, writePendingCommunicationCapture, type CaptureEventInput } from '../services/communicationCapture';
 import { mayMergeSerialReceive } from '../services/serialDisplay';
+import { BROWSER_SERIAL_SETTINGS_KEY as settingsKey, browserSerialPortName as portName, drainBrowserSerialBuffer as drainRuntimeBuffer, filterBrowserSerialEntries as visibleEntries, formatBrowserSerialTime as now, isBrowserSerialChooserCancellation as isPortChooserCancellation, isRecoverableBrowserSerialReadError as isRecoverableSerialReadError, loadBrowserSerialSettings as loadSettings, openBrowserSerialPort as openPort, parseBrowserSerialHex as parseHex, unescapeBrowserSerialText as unescapeText } from '../features/communication/browserSerialModel';
+import { formatHex as hex } from '../utils/embeddedTools';
 
 type Parity = 'none' | 'even' | 'odd';
 type FlowControl = 'none' | 'hardware';
@@ -20,32 +22,10 @@ interface RawCapture { events: CaptureEventInput[]; byteLength: number; truncate
 
 const MAX_ENTRIES = 5000;
 const MAX_MERGED_RX_BYTES = 64 * 1024;
-const settingsKey = 'embedkit.serial.settings';
 const shortcutsKey = 'embedkit.serial.shortcuts';
 const shortcutLimitKey = 'embedkit.serial.shortcut-limit';
-function loadSettings() { try { return JSON.parse(localStorage.getItem(settingsKey) || '{}') as Record<string, string | boolean>; } catch { return {}; } }
 function loadShortcuts(): Shortcut[] { try { return JSON.parse(localStorage.getItem(shortcutsKey) || 'null') as Shortcut[] || []; } catch { return []; } }
 function loadShortcutLimit() { const value = Number(localStorage.getItem(shortcutLimitKey) || 20); return Number.isFinite(value) ? Math.max(1, Math.min(100, Math.round(value))) : 20; }
-function now() { const d = new Date(); return `${d.toLocaleTimeString('zh-CN', { hour12: false })}.${String(d.getMilliseconds()).padStart(3, '0')}`; }
-function hex(bytes: number[]) { return bytes.map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(' '); }
-function visibleEntries(session: Session | null, filter: string, rxHex: boolean, showRx: boolean, showTx: boolean) { const q = filter.toLowerCase().trim(); return session?.entries.filter((e) => (e.direction === 'system' || e.direction === 'rx' && showRx || e.direction === 'tx' && showTx) && (!q || (rxHex && e.bytes ? hex(e.bytes) : e.text).toLowerCase().includes(q) || e.direction.includes(q))) ?? []; }
-function parseHex(value: string) { const s = value.replace(/0x/gi, '').replace(/[\s,;:_-]+/g, ''); if (!s || !/^[\da-f]+$/i.test(s) || s.length % 2) throw new Error('HEX 必须是完整字节，例如 DE AD BE EF'); return new Uint8Array(s.match(/../g)!.map((v) => parseInt(v, 16))); }
-function unescapeText(value: string) { return value.replace(/\\u([\da-f]{4})|\\x([\da-f]{2})|\\([rnt0\\])/gi, (_, unicode: string, byte: string, simple: string) => unicode ? String.fromCharCode(parseInt(unicode, 16)) : byte ? String.fromCharCode(parseInt(byte, 16)) : ({ r: '\r', n: '\n', t: '\t', '0': '\0', '\\': '\\' }[simple] ?? simple)); }
-function portName(port: Port, index: number) { const i = port.getInfo(); const detected = [port.name, port.path].map((value) => value?.match(/COM\d+/i)?.[0].toUpperCase()).find(Boolean); const vid = i.usbVendorId?.toString(16).padStart(4, '0').toUpperCase(); const pid = i.usbProductId?.toString(16).padStart(4, '0').toUpperCase(); const label = detected ?? `串口 ${index}`; return vid || pid ? `${label} · VID:${vid ?? '----'} PID:${pid ?? '----'}` : label; }
-function drainRuntimeBuffer(runtime: Runtime) { if (runtime.timer !== null) clearTimeout(runtime.timer); const buffered = runtime.buffer; runtime.timer = null; runtime.buffer = []; return buffered; }
-function isTransientOpenError(reason: unknown) { const name = reason instanceof DOMException ? reason.name : '', message = reason instanceof Error ? reason.message : String(reason); return name === 'NetworkError' || /failed to open serial port|serial port.*temporarily unavailable/i.test(message); }
-function isPortChooserCancellation(reason: unknown) { const name = reason instanceof DOMException ? reason.name : '', message = reason instanceof Error ? reason.message : String(reason); return name === 'NotFoundError' || name === 'AbortError' || /cancel|no port selected/i.test(message); }
-function isRecoverableSerialReadError(reason: unknown) { const message = reason instanceof Error ? reason.message : String(reason); return /break received|framing error|parity error|buffer overrun|overrun error/i.test(message); }
-async function openPort(port: Port, options: PortOpenOptions) {
-  try { await port.open(options); return false; }
-  catch (reason) {
-    if (!isTransientOpenError(reason)) throw reason;
-    try { await port.close(); } catch { /* 首次打开未完成，无需关闭 */ }
-    await new Promise(resolve => window.setTimeout(resolve, 150));
-    await port.open(options);
-    return true;
-  }
-}
 
 export default function SerialPage() {
   const [initial] = useState(loadSettings);
