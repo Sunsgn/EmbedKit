@@ -43,9 +43,9 @@ import {
 } from "../services/productStorage";
 import {
   createTestRunEvidence,
-  createTestRunJsonReport,
   TEST_RUN_OBSERVED_LIMIT,
 } from "../services/testRunEvidence";
+import { downloadBrowserText } from "../services/browserDownload";
 import { listBuildAnalysisRecords } from "../services/buildAnalysisRecords";
 import { createFirmwareCatalog } from "../services/firmwareIdentity";
 import { createCommunicationSessionRecords, type ArchivedCommunicationEvidence } from "../services/communicationArchive";
@@ -74,6 +74,7 @@ import { applyLineEnding, createAtNetworkCase, createTestStep as createStep, isL
 import { loadSerialConfigs, loadTestSuites as loadSuites, saveSerialConfigs, saveTestSuites } from "../features/test-automation/persistence";
 import { executeStepWithRetry } from "../features/test-automation/executionController";
 import { assignRuntimeVariable, captureResponseVariable, evaluateIncomingResponse } from "../features/test-automation/responseEvaluation";
+import { createPortableTestRunJsonReport, createTestRunCsvReport, createTestRunHtmlReport, createTestRunJunitReport } from "../features/test-automation/testRunReports";
 
 interface FirmwareChoice {
   id: string;
@@ -1424,104 +1425,21 @@ export default function TestAutomationPage() {
       );
     }
   };
-  const downloadText = (name: string, content: string, type: string) => {
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(new Blob([content], { type }));
-    link.download = name;
-    link.click();
-    URL.revokeObjectURL(link.href);
-  };
-  const escapeMarkup = (value: unknown) =>
-    String(value ?? "").replace(
-      /[&<>"']/g,
-      (character) =>
-        ({
-          "&": "&amp;",
-          "<": "&lt;",
-          ">": "&gt;",
-          '"': "&quot;",
-          "'": "&#39;",
-        })[character] ?? character,
-    );
   const exportReport = (run = runHistory[0]) => {
     if (!run) return;
-    const rows = run.steps
-        .map(
-          (step) =>
-            `<tr><td>${escapeMarkup(step.name)}</td><td>${escapeMarkup(typeLabels[step.type as StepType] ?? step.type)}</td><td>${escapeMarkup(channelLabels[step.channel as Channel] ?? step.channel)}</td><td>${escapeMarkup(step.status)}</td><td>${step.durationMs} ms</td><td>${escapeMarkup(step.evidence?.source ?? "无")}</td><td>${escapeMarkup(step.evidence?.observed ?? step.error)}</td></tr>`,
-        )
-        .join(""),
-      environment = Object.entries(run.environment)
-        .map(
-          ([name, value]) =>
-            `<li><b>${escapeMarkup(name)}</b>：${escapeMarkup(value)}</li>`,
-        )
-        .join(""),
-      logs = run.logs
-        .map(
-          (log) =>
-            `${escapeMarkup(log.time)} [${escapeMarkup(log.level)}] ${escapeMarkup(log.text)}`,
-        )
-        .join("\n"),
-      firmware = run.firmware
-        ? `${escapeMarkup(run.firmware.artifactName)} · SHA-256 ${escapeMarkup(run.firmware.sha256)}`
-        : "未关联已计算的固件指纹",
-      communications = (run.communications ?? [])
-        .map(
-          (item, index) =>
-            `<li>${escapeMarkup(item.channel)} · ${escapeMarkup(item.transport)} · ${escapeMarkup(item.endpoint)} · RX ${item.rxBytes} / TX ${item.txBytes} 字节 · 归档 ${escapeMarkup(run.communicationSessionIds?.[index] ?? '未归档')} · 源会话 ${escapeMarkup(item.sessionId)}</li>`,
-        )
-        .join(""),
-      html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>EmbedKit 测试报告</title><style>body{font:14px sans-serif;margin:32px;color:#222}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:8px;text-align:left}th{background:#f5f5f5}.passed{color:#16803c}.failed,.error{color:#c62828}pre{white-space:pre-wrap;background:#f5f5f5;padding:12px}</style></head><body><h1>EmbedKit 通信测试报告</h1><p>套件：${escapeMarkup(run.suiteName)} · 流程：${escapeMarkup(run.caseName)}</p><p>固件：${firmware}</p><p>Agent：${escapeMarkup(run.agentVersion)} · 开始：${escapeMarkup(new Date(run.startedAt).toLocaleString())} · 耗时：${run.durationMs} ms</p><p class="${run.status}">结果：${escapeMarkup(run.status)} · 通过 ${run.passed} · 失败 ${run.failed}</p><h2>证据说明</h2><p>通信响应来自实际会话；人工确认仅代表操作人员确认；固件与端点快照只用于追溯，不单独证明测试通过。</p><h2>通信会话</h2><ul>${communications || "<li>本次流程未建立通信会话</li>"}</ul><h2>运行环境</h2><ul>${environment || "<li>无公开变量</li>"}</ul><h2>步骤</h2><table><tr><th>步骤</th><th>类型</th><th>通道</th><th>结果</th><th>耗时</th><th>证据类型</th><th>观测/失败</th></tr>${rows}</table><h2>执行日志</h2><pre>${logs}</pre></body></html>`;
-    downloadText(
-      `embedkit-report-${run.id}.html`,
-      html,
-      "text/html;charset=utf-8",
-    );
+    downloadBrowserText(createTestRunHtmlReport(run), `embedkit-report-${run.id}.html`, "text/html;charset=utf-8");
   };
   const exportRunJson = (run = runHistory[0]) => {
     if (run)
-      downloadText(
-        `embedkit-run-${run.id}.json`,
-        JSON.stringify(createTestRunJsonReport(run), null, 2),
-        "application/json;charset=utf-8",
-      );
+      downloadBrowserText(createPortableTestRunJsonReport(run), `embedkit-run-${run.id}.json`, "application/json;charset=utf-8");
   };
   const exportRunJunit = (run = runHistory[0]) => {
     if (!run) return;
-    const cases = run.steps
-      .map(
-        (step) =>
-          `<testcase name="${escapeMarkup(step.name)}" classname="${escapeMarkup(run.suiteName)}" time="${(step.durationMs / 1000).toFixed(3)}">${step.status === "failed" ? `<failure message="${escapeMarkup(step.error || "failed")}"/>` : step.status === "skipped" ? "<skipped/>" : ""}</testcase>`,
-      )
-      .join("");
-    downloadText(
-      `embedkit-run-${run.id}.xml`,
-      `<?xml version="1.0" encoding="UTF-8"?><testsuite name="${escapeMarkup(run.caseName)}" tests="${run.steps.length}" failures="${run.failed}" skipped="${run.steps.filter((step) => step.status === "skipped").length}" time="${(run.durationMs / 1000).toFixed(3)}">${cases}</testsuite>`,
-      "application/xml;charset=utf-8",
-    );
+    downloadBrowserText(createTestRunJunitReport(run), `embedkit-run-${run.id}.xml`, "application/xml;charset=utf-8");
   };
   const exportRunCsv = (run = runHistory[0]) => {
     if (!run) return;
-    const quote = (value: unknown) =>
-        `"${String(value ?? "").replace(/"/g, '""')}"`,
-      rows = [
-        ["步骤", "类型", "通道", "状态", "耗时(ms)", "重试", "失败原因"],
-        ...run.steps.map((step) => [
-          step.name,
-          step.type,
-          step.channel,
-          step.status,
-          step.durationMs,
-          step.retries,
-          step.error ?? "",
-        ]),
-      ];
-    downloadText(
-      `embedkit-run-${run.id}.csv`,
-      `\uFEFF${rows.map((row) => row.map(quote).join(",")).join("\r\n")}`,
-      "text/csv;charset=utf-8",
-    );
+    downloadBrowserText(createTestRunCsvReport(run), `embedkit-run-${run.id}.csv`, "text/csv;charset=utf-8");
   };
   const removeRun = async (id: string) => {
     await deleteTestRun(id);
@@ -2525,7 +2443,7 @@ export default function TestAutomationPage() {
               </div>
               {showHistory && (
                 <div className="max-h-40 space-y-1 overflow-y-auto border-b border-[#30363d] p-2 scrollbar-thin">
-                  {runComparison && <div role="status" className={`mb-2 rounded border p-2 text-[10px] ${runComparison.comparable ? runComparison.outcome === 'regressed' || runComparison.outcome === 'unchanged-fail' ? 'border-red-500/30 bg-red-500/5 text-red-200' : 'border-green-500/30 bg-green-500/5 text-green-200' : 'border-yellow-500/30 bg-yellow-500/5 text-yellow-200'}`}><div className="flex items-center gap-2"><b>{comparisonLabels[runComparison.outcome]}</b><span>耗时 {runComparison.durationDeltaMs >= 0 ? '+' : ''}{runComparison.durationDeltaMs} ms</span><span>失败项 {runComparison.failedDelta >= 0 ? '+' : ''}{runComparison.failedDelta}</span><button onClick={() => downloadText(`embedkit-comparison-${runComparison.currentRunId}.json`, JSON.stringify(runComparison, null, 2), 'application/json;charset=utf-8')} className="ml-auto text-cyan-300">导出比较</button></div>{runComparison.reasons.length > 0 && <p className="mt-1">{runComparison.reasons.join('；')}</p>}<p className="mt-1 text-gray-500">基线 {runComparison.baselineRunId} → 当前 {runComparison.currentRunId} · 变化步骤 {runComparison.steps.length}</p></div>}
+                  {runComparison && <div role="status" className={`mb-2 rounded border p-2 text-[10px] ${runComparison.comparable ? runComparison.outcome === 'regressed' || runComparison.outcome === 'unchanged-fail' ? 'border-red-500/30 bg-red-500/5 text-red-200' : 'border-green-500/30 bg-green-500/5 text-green-200' : 'border-yellow-500/30 bg-yellow-500/5 text-yellow-200'}`}><div className="flex items-center gap-2"><b>{comparisonLabels[runComparison.outcome]}</b><span>耗时 {runComparison.durationDeltaMs >= 0 ? '+' : ''}{runComparison.durationDeltaMs} ms</span><span>失败项 {runComparison.failedDelta >= 0 ? '+' : ''}{runComparison.failedDelta}</span><button onClick={() => downloadBrowserText(JSON.stringify(runComparison, null, 2), `embedkit-comparison-${runComparison.currentRunId}.json`, 'application/json;charset=utf-8')} className="ml-auto text-cyan-300">导出比较</button></div>{runComparison.reasons.length > 0 && <p className="mt-1">{runComparison.reasons.join('；')}</p>}<p className="mt-1 text-gray-500">基线 {runComparison.baselineRunId} → 当前 {runComparison.currentRunId} · 变化步骤 {runComparison.steps.length}</p></div>}
                   {runHistory.length ? (
                     runHistory.map((run) => (
                       <div
