@@ -41,13 +41,10 @@ import {
   listTestRuns,
   saveTestRunWithCommunicationSessions,
 } from "../services/productStorage";
-import {
-  createTestRunEvidence,
-} from "../services/testRunEvidence";
 import { downloadBrowserText } from "../services/browserDownload";
 import { listBuildAnalysisRecords } from "../services/buildAnalysisRecords";
 import { createFirmwareCatalog } from "../services/firmwareIdentity";
-import { createCommunicationSessionRecords, type ArchivedCommunicationEvidence } from "../services/communicationArchive";
+import { type ArchivedCommunicationEvidence } from "../services/communicationArchive";
 import { compareTestRuns, type RunComparisonOutcome } from "../services/testRunComparison";
 import { createConfigurationFingerprint } from "../services/configurationFingerprint";
 import { clearSerialTestSessionHandoff, readSerialTestSessionHandoff, type SerialTestSessionHandoff } from "../services/testSessionHandoff";
@@ -73,6 +70,7 @@ import { assignRuntimeVariable, captureResponseVariable, evaluateIncomingRespons
 import { createPortableTestRunJsonReport, createTestRunCsvReport, createTestRunHtmlReport, createTestRunJunitReport } from "../features/test-automation/testRunReports";
 import { runTestCaseEngine } from "../features/test-automation/runCaseEngine";
 import { createPortableTestSuiteJson, parseImportedTestSuite } from "../features/test-automation/suiteTransfer";
+import { buildTestRunRecord } from "../features/test-automation/runRecordBuilder";
 
 interface FirmwareChoice {
   id: string;
@@ -762,7 +760,6 @@ export default function TestAutomationPage() {
     });
     let { passed, failed, aborted, stepRuns } = executionResult;
     const communicationEvidence = [...sessionEvidence.current.values()].map(item => ({ ...item })),
-      communications = communicationEvidence.map(({ startedAt: _startedAt, ...item }) => item),
       cleanupStarted = Date.now(),
       cleanupFailures = await releaseResources(false, true);
     if (cleanupFailures.length) {
@@ -805,59 +802,7 @@ export default function TestAutomationPage() {
       ),
       runId = crypto.randomUUID(),
       finishedAt = new Date(finished).toISOString(),
-      communicationSessions = createCommunicationSessionRecords(communicationEvidence, { runId, finishedAt, status, firmwareId: selectedFirmware?.firmwareId }),
-      secretValues = runtimeVariables.current
-        .filter((variable) => variable.secret)
-        .map((variable) => variable.value),
-      record = createTestRunEvidence(
-        {
-          schemaVersion: 3,
-          id: runId,
-          suiteId: selectedSuite.id,
-          suiteName: selectedSuite.name,
-          caseId: selectedCase.id,
-          caseName: selectedCase.name,
-          status,
-          startedAt,
-          finishedAt,
-          durationMs: duration,
-          passed,
-          failed,
-          agentVersion,
-          ...(selectedFirmware
-            ? {
-                ...(selectedFirmware.firmwareId ? { firmwareId: selectedFirmware.firmwareId } : {}),
-                firmware: {
-                  buildId: selectedFirmware.buildId,
-                  artifactName: selectedFirmware.fileName,
-                  artifactType: selectedFirmware.artifactType,
-                  size: selectedFirmware.size,
-                  modifiedAt: selectedFirmware.modifiedAt,
-                  sha256: selectedFirmware.sha256!,
-                  analyzedAt: selectedFirmware.analyzedAt,
-                },
-              }
-            : {}),
-          communications,
-          communicationSessionIds: communicationSessions.map(session => session.id),
-          ...(baselineRunId ? { baselineRunId } : {}),
-          testDefinitionSha256,
-          inputEnvironment,
-          secretInputCount,
-          environment: Object.fromEntries(
-            runtimeVariables.current
-              .filter((variable) => !variable.secret)
-              .map((variable) => [variable.name, variable.value]),
-          ),
-          steps: stepRuns,
-          logs: runLogsRef.current.map(({ time, level, text }) => ({
-            time,
-            level,
-            text,
-          })),
-        },
-        secretValues,
-      );
+      { record, communicationSessions } = buildTestRunRecord({ runId, suite: selectedSuite, testCase: selectedCase, status, startedAt, finishedAt, durationMs: duration, passed, failed, agentVersion, firmware: selectedFirmware, communicationEvidence, baselineRunId: baselineRunId || undefined, testDefinitionSha256, inputEnvironment, secretInputCount, runtimeVariables: runtimeVariables.current, steps: stepRuns, logs: runLogsRef.current });
     try {
       const storedRecord = await saveTestRunWithCommunicationSessions(record, communicationSessions);
       setRunHistory((previous) => [storedRecord, ...previous]);
